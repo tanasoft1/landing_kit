@@ -465,6 +465,8 @@ export type BlockProps<C> = {
   copy: C
   site: SiteConfig
   resolve: (target: string) => string
+  /** Assigned by the renderer; the block hands it to its own <Section>. */
+  surface: Surface
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -654,8 +656,8 @@ export const mn = {
   eyebrow: 'Шинэ',
   heading: 'Бизнесээ онлайнаар хөгжүүл',
   lead: 'Хурдан, хайлтын системд оновчлогдсон вэб хуудсыг хоногийн дотор нэвтрүүл.',
-  primaryCta: { label: 'Холбоо барих', target: 'contact' },
-  secondaryCta: { label: 'Дэлгэрэнгүй', target: 'features' },
+  primaryCta: { label: 'Холбоо барих', target: 'hero' },
+  secondaryCta: { label: 'Дэлгэрэнгүй', target: 'hero' },
   /** Used by the `split` variant only. */
   image: { src: '/hero.jpg', alt: 'Бүтээгдэхүүний зураг', width: 1200, height: 900 },
 }
@@ -675,8 +677,8 @@ export const en: HeroCopy = {
   eyebrow: 'New',
   heading: 'Grow your business online',
   lead: 'Ship a fast, search-optimised landing page in a day.',
-  primaryCta: { label: 'Get in touch', target: 'contact' },
-  secondaryCta: { label: 'Learn more', target: 'features' },
+  primaryCta: { label: 'Get in touch', target: 'hero' },
+  secondaryCta: { label: 'Learn more', target: 'hero' },
   image: { src: '/hero.jpg', alt: 'Product screenshot', width: 1200, height: 900 },
 }
 ```
@@ -701,9 +703,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroCentered({ copy, resolve }: BlockProps<HeroCopy>) {
+export function HeroCentered({ copy, resolve, surface }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero">
+    <Section id="hero" surface={surface}>
       <Container className="text-center">
         <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
         <h1 className="mt-3 text-[length:var(--text-display)] font-bold text-balance">
@@ -742,9 +744,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroSplit({ copy, resolve }: BlockProps<HeroCopy>) {
+export function HeroSplit({ copy, resolve, surface }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero">
+    <Section id="hero" surface={surface}>
       <Container>
         <div className="grid items-center gap-10 md:grid-cols-2">
           <div>
@@ -873,13 +875,11 @@ export function RenderBlocks({
   blocks,
   locale,
   site,
-  page,
   resolve,
 }: {
   blocks: BlockRef<BlockId>[]
   locale: Locale
   site: SiteConfig
-  page: PageConfig<BlockId>
   resolve: (target: string) => string
 }) {
   return (
@@ -896,9 +896,13 @@ export function RenderBlocks({
         const copy = manifest.copy[locale]
         const resolvedSurface = surface ?? ALTERNATION[index % ALTERNATION.length]
         return (
-          <div key={`${id}-${index}`} data-block={id} data-surface={resolvedSurface}>
-            <Component copy={copy} site={site} resolve={resolve} />
-          </div>
+          <Component
+            key={`${id}-${index}`}
+            copy={copy}
+            site={site}
+            resolve={resolve}
+            surface={resolvedSurface}
+          />
         )
       })}
     </>
@@ -906,9 +910,10 @@ export function RenderBlocks({
 }
 ```
 
-The `page` prop is unused here but is part of the signature Task 5's JSON-LD assembly relies on; keep it and add `void page` if `noUnusedParameters` complains, or destructure it only where used.
-
-**Note on surfaces:** blocks own their own `<Section surface>`, so alternation must be threaded into the block rather than wrapped around it. Change `<Section>` to read a surface from context, or pass `surface` through `BlockProps`. Choose the latter — it keeps blocks context-free per the global constraints. Add `surface: Surface` to `BlockProps` in `src/shell/types.ts`, pass `resolvedSurface` into the component, and have each hero variant use `<Section id="hero" surface={surface}>`. Update both variants and the `BlockProps` type before continuing.
+Surface travels as a prop rather than as a wrapper element because blocks own their own
+`<Section>` — wrapping would put the background outside the padded region. `PageConfig` is
+imported for the `BlockRef` type only; JSON-LD assembly reads the page in Task 5's
+`json-ld.ts`, not here.
 
 - [ ] **Step 11: Render hero on the home route temporarily**
 
@@ -944,13 +949,7 @@ const page: PageConfig<keyof typeof registry> = {
 
 function Home() {
   return (
-    <RenderBlocks
-      blocks={page.blocks}
-      locale="mn"
-      site={site}
-      page={page}
-      resolve={(t) => `#${t}`}
-    />
+    <RenderBlocks blocks={page.blocks} locale="mn" site={site} resolve={(t) => `#${t}`} />
   )
 }
 ```
@@ -1281,7 +1280,6 @@ export function PageView({ resolved }: { resolved: ResolvedPage<BlockId> }) {
           blocks={resolved.page.blocks}
           locale={resolved.locale}
           site={site}
-          page={resolved.page}
           resolve={resolve}
         />
       </main>
@@ -1367,7 +1365,7 @@ Check each:
 3. `/en` renders hero with English copy; header shows `MN`.
 4. Clicking the locale link on `/` lands on `/en` and vice versa — not on `/en/en`.
 5. `/nope` returns a 404, not a crash.
-6. The hero CTA pointing at `contact` currently **throws** — expected, since that block is not placed on any page yet. Temporarily change `primaryCta.target` to `'hero'` to confirm the anchor path works, then set it back to `'contact'` and leave it failing until Task 8. Note this in the commit message.
+6. Both hero CTAs resolve to `#hero` and scroll to the hero section. They target `'hero'` deliberately so every task up to Task 8 has a fully working build; Task 8 repoints the primary CTA at `contact` once that block exists.
 
 - [ ] **Step 12: Verify lint and types**
 
@@ -2247,10 +2245,7 @@ import type { ContactCopy } from './copy.mn'
 
 type Fields = { name: string; email: string; message: string; company: string }
 
-export function ContactForm({
-  copy,
-  surface,
-}: BlockProps<ContactCopy> & { surface: Surface }) {
+export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
   const { register, handleSubmit, reset } = useForm<Fields>()
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -2286,7 +2281,11 @@ export function ContactForm({
         <h2 className="text-[length:var(--text-h2)] font-semibold">{copy.heading}</h2>
         <p className="text-muted-foreground mt-3 text-[length:var(--text-lead)]">{copy.lead}</p>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="mt-8 grid gap-4 md:max-w-xl">
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="mt-8 grid gap-4"
+          style={{ maxWidth: '36rem' }}
+        >
           <label className="grid gap-2">
             <span className="text-sm font-medium">{copy.fields.name}</span>
             <input className={field} autoComplete="name" {...register('name')} />
@@ -2327,7 +2326,9 @@ export function ContactForm({
 }
 ```
 
-`md:max-w-xl` is on a form, not a layout container — if `check-conventions.mjs` flags it, that is the rule working as designed. Replace it with a width set via inline style, or narrow the rule to `max-w-` only when no `md:`/`lg:` prefix is present. Prefer narrowing the rule and note why in the commit.
+The form's own measure is set with an inline `maxWidth` rather than `max-w-xl` on purpose. A readable form width is a component concern, not page layout, but weakening the convention rule to allow `max-w-*` in blocks would also let real layout violations through. Inline style keeps the rule strict with no exception list.
+
+Also note `Surface` is no longer imported here — `surface` arrives through `BlockProps`.
 
 - [ ] **Step 6: Write the schema contribution and manifest**
 
@@ -2370,6 +2371,12 @@ export const contact = {
 - [ ] **Step 7: Register the block and enable the page**
 
 In `src/blocks/registry.ts`, import `contact` and add it to the map. In `src/config/pages.config.ts`, remove the `// TASK 8: uncomment` marker and enable the `/contact` page.
+
+- [ ] **Step 7b: Repoint the hero's primary CTA at the contact block**
+
+Until now both hero CTAs targeted `'hero'` so every task had a working build. Now that `contact` exists, change `primaryCta.target` from `'hero'` to `'contact'` in **both** `src/blocks/hero/copy.mn.ts` and `src/blocks/hero/copy.en.ts`. Leave `secondaryCta` on `'hero'`.
+
+This is the link resolver's whole purpose: the same copy change makes the CTA a page link (`/contact`) in the multi-page config and an anchor (`#contact`) in the one-page config, with no block edit.
 
 - [ ] **Step 8: Verify the hero CTA now resolves**
 

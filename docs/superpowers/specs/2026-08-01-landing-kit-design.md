@@ -137,6 +137,7 @@ export type BlockProps<C> = {
   copy: C                            // already resolved to the active locale
   site: SiteConfig
   resolve: (target: string) => string // link resolver, see §5
+  surface: Surface                    // assigned by the renderer, see §8
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -510,14 +511,20 @@ Blocks never write raw padding or max-width values. They compose:
 ```
 
 `<Section>` owns vertical rhythm and the anchor id that `resolve()` targets (§5);
-`<Container>` owns max-width and gutters. A Biome rule restricts arbitrary spacing and
-width utilities inside `src/blocks/`, so the rhythm cannot erode block by block — the same
-enforcement approach as the motion boundary (§7).
+`<Container>` owns max-width and gutters.
+
+Enforcement is split by what each tool can actually see. Biome's `noRestrictedImports`
+handles the module boundaries (§7). Class strings are invisible to Biome, so
+`scripts/check-conventions.mjs` (§11) scans `src/blocks/` for vertical section padding,
+`max-w-*`, `container`, `min-h-screen`, and raw `<section>` elements. Same effect as a lint
+rule, different mechanism — Biome cannot lint Tailwind class strings.
 
 **Automatic surface alternation:** because the renderer knows block order, it assigns
-alternating `surface` variants by default, so consecutive sections do not stack into
-identical boxes — the most common reason a sectioned landing page looks cheap. A block can
-override explicitly.
+alternating `surface` values by default, so consecutive sections do not stack into
+identical boxes — the most common reason a sectioned landing page looks cheap. The renderer
+passes the resolved surface to the block via `BlockProps.surface` (§4), which the block
+hands to its own `<Section>`; blocks own their `<Section>`, so the surface must travel as a
+prop rather than as a wrapper. A page's `BlockRef` can override it explicitly.
 
 ### Type scale
 
