@@ -20,7 +20,7 @@ Every task's requirements implicitly include this section.
 - **All variants of a block share one copy type.** Variant-specific fields are optional members of that one type.
 - **Blocks are pure prop-driven components.** They receive `{ copy, site, resolve }` and read no context, no hooks-for-data, no router.
 - **Blocks never import `motion` directly** — only `~/motion`. Enforced by Biome.
-- **Blocks never write vertical section padding, `max-w-*`, `container`, or a raw `<section>`.** They compose `<Section>` and `<Container>`. Enforced by `scripts/check-conventions.mjs`.
+- **Blocks never write `py-section`, `px-gutter`, `max-w-*`, `container`, `min-h-screen`, a raw `<section>`, an arbitrary-value escape, or an inline `style`.** They compose `<Section>` and `<Container>`. Ordinary component padding (`py-3` on a button) is fine. Enforced by `scripts/check-conventions.mjs`.
 - **Tailwind utilities, not inline styles.** Tokens are registered in `@theme` so Tailwind generates utilities from them (`py-section`, `px-gutter`, `max-w-page`, `text-display`, `rounded-base`, `font-display`). Do not use `style={{...}}` for anything the token layer covers, and do not use arbitrary-value escapes like `text-display` where a generated utility exists. Inline `style` is acceptable only for a genuinely dynamic value that cannot be a class.
 - **Mobile-first responsiveness, Tailwind default breakpoints** (`sm` 40rem, `md` 48rem, `lg` 64rem, `xl` 80rem). No horizontal overflow at 320px. Interactive chrome has tap targets ≥ 44px. Every UI-bearing task verifies at 375, 768, 1280 and 1536 plus a 320px overflow check.
 - **Every variant must render correctly under `motion.noop`** — no variant may depend on animation to be legible.
@@ -2100,16 +2100,24 @@ In `src/shell/chrome/header.tsx`, render `<ThemeToggle label={locale === 'mn' ? 
 
 Create `scripts/check-conventions.mjs`. This covers what Biome cannot: Tailwind class strings and raw elements.
 
+Note what the rules deliberately do **not** forbid: ordinary small padding like `py-3` on a button or input. Blocks are allowed to style their own components — what they may not do is set the *section's* rhythm (`py-section`), the *page's* gutter (`px-gutter`) or measure (`max-w-*`), assume viewport height, or reach past the token layer with arbitrary values and inline styles. An earlier draft of this rule banned `py-*` outright, which would have failed the contact form's perfectly legitimate `py-3` inputs.
+
+The `style={{` rule enforces Tailwind-first mechanically. If a block ever needs a genuinely dynamic value that cannot be a class, that is the moment to add a narrow exception with a comment explaining it — not to weaken the rule pre-emptively.
+
 ```js
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const RULES = [
-  { re: /className="[^"]*\b(?:py|pt|pb)-(?!\[)/, msg: 'vertical section padding — use <Section>' },
-  { re: /className="[^"]*\bmax-w-/, msg: 'max-width utility — use <Container>' },
+  { re: /\bpy-section\b/, msg: 'py-section belongs to <Section>, not to a block' },
+  { re: /\bpx-gutter\b/, msg: 'px-gutter belongs to <Container>, not to a block' },
+  { re: /className="[^"]*\bmax-w-/, msg: 'max-width utility — use <Container width="narrow">' },
   { re: /className="[^"]*\bcontainer\b/, msg: 'container utility — use <Container>' },
   { re: /<section[\s>]/, msg: 'raw <section> element — use <Section>' },
   { re: /\bmin-h-screen\b/, msg: 'min-h-screen — blocks must not assume viewport height' },
+  { re: /\btext-\[length:/, msg: 'arbitrary font-size — use text-display/h2/h3/lead' },
+  { re: /\brounded-\[/, msg: 'arbitrary radius — use rounded-base' },
+  { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
 ]
 
 const failures = []
@@ -2147,7 +2155,9 @@ console.log('✓ check-conventions: blocks follow layout primitives')
 node scripts/check-conventions.mjs
 ```
 
-Expected: pass. Now add `className="py-20"` to a div in `hero-centered.tsx` and re-run. Expected: FAIL naming that file and line. Remove it and re-run — expected: pass.
+Expected: pass. Now add `className="max-w-3xl"` to a div in `hero-centered.tsx` and re-run. Expected: FAIL naming that file and line. Remove it and re-run — expected: pass.
+
+Then confirm the rule is not over-broad: temporarily add `className="py-3"` to the same div and re-run. Expected: **pass** — component-level padding is legitimate. Remove it.
 
 - [ ] **Step 9: Verify the animated build and the theme toggle**
 
