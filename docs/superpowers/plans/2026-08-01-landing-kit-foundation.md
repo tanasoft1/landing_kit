@@ -1390,8 +1390,12 @@ export const Route = createFileRoute('/')({
     if (!resolved) throw notFound()
     return resolved
   },
-  component: () => <PageView resolved={Route.useLoaderData()} />,
+  component: HomeRoute,
 })
+
+function HomeRoute() {
+  return <PageView resolved={Route.useLoaderData()} />
+}
 ```
 
 Create `src/routes/$.tsx` for every other path:
@@ -1410,9 +1414,15 @@ export const Route = createFileRoute('/$')({
     if (!resolved) throw notFound()
     return resolved
   },
-  component: () => <PageView resolved={Route.useLoaderData()} />,
+  component: SplatRoute,
 })
+
+function SplatRoute() {
+  return <PageView resolved={Route.useLoaderData()} />
+}
 ```
+
+Named component functions rather than inline arrows, because an inline `component: () => <… {...Route.useLoaderData()} />` references `Route` inside its own initializer. It works at runtime (the closure runs later), but it reads as a circular reference and gives worse component names in React devtools.
 
 If the generated route id for the splat file differs from `'/$'`, use whatever `routeTree.gen.ts` produced — do not fight the generator.
 
@@ -1435,7 +1445,29 @@ export const Route = createFileRoute('/debug')({
 
 - [ ] **Step 10: Set `<html lang>` from the resolved locale**
 
-In `src/routes/__root.tsx`, replace the hardcoded `lang="mn"`. Read the matched route's loader data; if unavailable at that level, set it in `head()` in Task 5 via an `htmlAttrs`-equivalent, or render the document shell inside `PageView`. The requirement is only that prerendered HTML for `/en/*` emits `lang="en"` — Task 6 asserts it, so pick whichever mechanism the installed router supports and verify there.
+`__root.tsx` renders `<html>`, but the locale is resolved in a child route's loader, so the root has to read it back out of the matched routes. Replace the hardcoded `lang="mn"` with:
+
+```tsx
+import { useRouterState } from '@tanstack/react-router'
+import { site } from '~/config/site.config'
+
+function useActiveLocale(): string {
+  const matches = useRouterState({ select: (s) => s.matches })
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const data = matches[i]?.loaderData as { locale?: string } | undefined
+    if (data?.locale) return data.locale
+  }
+  return site.defaultLocale
+}
+```
+
+Then `const lang = useActiveLocale()` in `RootDocument` and `<html lang={lang}>`.
+
+The loop walks matches from the deepest inward so the page route's locale wins, and falls back to the configured default for routes with no loader (a 404, say). A plain reverse loop rather than `findLast`, because the tsconfig targets ES2022 and `Array.prototype.findLast` is ES2023.
+
+**Verify immediately, not later:** run `pnpm dev`, open `/en`, and confirm View Source shows `<html lang="en">` while `/` shows `<html lang="mn">`. Task 6 asserts this mechanically, but debugging it here — with one route and no prerender in the way — is far cheaper than debugging it inside a failing build assertion.
+
+If `useRouterState` is unavailable or shaped differently in the installed router version, the fallback is to render the document shell from `PageView` (which already has `resolved.locale` in hand) instead of from `__root.tsx`. Report which mechanism you used.
 
 - [ ] **Step 11: Verify routing and enumeration in the browser**
 
