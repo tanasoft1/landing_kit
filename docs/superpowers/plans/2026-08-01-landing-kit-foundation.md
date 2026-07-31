@@ -1708,8 +1708,9 @@ Create `src/shell/seo/emit-plugin.ts`:
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Plugin } from 'vite'
-import { enumerateUrls } from '~/shell/pages/enumerate'
-import type { PageConfig, SiteConfig } from '~/shell/types'
+// Relative, NOT `~/` — see the note below this code block.
+import { enumerateUrls } from '../pages/enumerate'
+import type { PageConfig, SiteConfig } from '../types'
 
 export function emitSeoFiles({
   pages,
@@ -1758,6 +1759,19 @@ export function emitSeoFiles({
 }
 ```
 
+**Why relative imports here, uniquely in this codebase:** this module is imported *by*
+`vite.config.ts`, and the `~/*` alias is defined *inside* that config — so it does not exist
+yet while the config is being loaded. Vite bundles the config with esbuild before any
+`resolve.alias` applies, and tsconfig `paths` are not honoured there either.
+
+`import type` lines are safe with `~/` even in this position, because esbuild erases them
+before resolution ever happens — which is why `pages.config.ts` and `site.config.ts` may keep
+their `~/` type imports. Only **runtime** imports reachable from `vite.config.ts` must be
+relative. That is exactly: `emit-plugin.ts`, and anything it imports at runtime
+(`pages/enumerate.ts` — which imports types only, so it needs no change).
+
+If `pnpm build` fails with a resolution error mentioning `~/shell/...`, this is the cause.
+
 - [ ] **Step 2: Wire prerendering and the plugin into Vite**
 
 Modify `vite.config.ts`. Determine the build output directory first:
@@ -1799,6 +1813,8 @@ export default defineConfig({
 ```
 
 `autoStaticPathsDiscovery: false` plus `crawlLinks: false` is deliberate: only the enumerated pages × locales prerender, which keeps `/debug` out of the output. `failOnError: true` means a throwing `resolve()` fails the build rather than emitting a broken page.
+
+Note that `closeBundle` may fire more than once, because TanStack Start runs separate client and server builds. The plugin writes the same three files from the same inputs each time, so repeat execution is harmless — but do not make it append, and do not assume it runs exactly once.
 
 If the plugin rejects `pages` as a sibling of `prerender`, move it inside the `prerender` object — the docs show `pages` at the config level, so verify against `pnpm build` output and use whichever the installed version accepts.
 
