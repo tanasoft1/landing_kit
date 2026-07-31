@@ -1,0 +1,31 @@
+:root {
+  --font-display: "Manrope Variable", system-ui, sans-serif;
+  --font-body: "Inter Variable", system-ui, sans-serif;
+
+  --radius: 0.75rem;
+  --section-y: clamp(3.5rem, 8vw, 7rem);
+  --container-max: 72rem;
+  --container-gutter: clamp(1rem, 4vw, 2rem);
+
+  --color-background: oklch(99% 0.004 250);
+  --color-foreground: oklch(21% 0.02 255);
+  --color-muted: oklch(96.5% 0.006 250);
+  --color-muted-foreground: oklch(48% 0.02 255);
+  --color-accent: oklch(97% 0.02 250);
+  --color-border: oklch(91% 0.008 255);
+  --color-primary: oklch(55% 0.19 264);
+  --color-primary-foreground: oklch(99% 0.004 250);
+  --color-ring: oklch(55% 0.19 264);
+}
+
+.dark {
+  --color-background: oklch(17% 0.015 260);
+  --color-foreground: oklch(96% 0.006 250);
+  --color-muted: oklch(23% 0.017 260);
+  --color-muted-foreground: oklch(72% 0.014 255);
+  --color-accent: oklch(27% 0.02 262);
+  --color-border: oklch(31% 0.018 260);
+  --color-primary: oklch(72% 0.15 264);
+  --color-primary-foreground: oklch(17% 0.015 260);
+  --color-ring: oklch(72% 0.15 264);
+}
