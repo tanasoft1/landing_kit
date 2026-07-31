@@ -138,6 +138,7 @@ export type BlockProps<C> = {
   site: SiteConfig
   resolve: (target: string) => string // link resolver, see §5
   surface: Surface                    // assigned by the renderer, see §8
+  anchorId: string                    // unique per instance, see below
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -176,17 +177,35 @@ Blocks read no context and no hooks for data. Everything arrives as props. Conse
   router, no theme provider.
 - The CLI can compose blocks freely, because there is no hidden wiring to reproduce.
 
+**Anchor ids belong to the renderer, not the block.** A page may carry the same block twice —
+two CTAs, or a hero above and below a feature list — and a block hardcoding
+`<Section id="cta">` would then emit duplicate ids: invalid HTML, plus anchor links that always
+jump to the first instance. The renderer therefore assigns `anchorId`, using the block id for
+the first occurrence and `<id>-2`, `<id>-3` for later ones. `resolve('cta')` targets the first
+instance, which is the useful default.
+
 ### Locale parity is a compile error
 
 ```ts
-// copy.mn.ts
-export const mn = { heading: 'Үнэ', navLabel: 'Үнэ', tiers: [/* … */] }
-export type PricingCopy = typeof mn
+// copy.mn.ts — declares the type, then the default-locale copy
+export type PricingCopy = {
+  heading: string
+  navLabel: string
+  tiers: { name: string; price: string }[]
+  /** `compact` variant only. */
+  footnote?: string
+}
+export const mn: PricingCopy = { heading: 'Үнэ', navLabel: 'Үнэ', tiers: [/* … */] }
 
 // copy.en.ts
 import type { PricingCopy } from './copy.mn'
 export const en: PricingCopy = { heading: 'Pricing', navLabel: 'Pricing', tiers: [/* … */] }
 ```
+
+The type is declared explicitly rather than inferred via `typeof mn`, because inference from a
+literal makes every field required — and variant-specific fields must be optional for two
+variants to share one copy type. Parity comes from annotating both locales with the same type,
+not from deriving one from the other.
 
 A missing or misspelled English key fails `tsc`, rather than rendering a blank section in
 production. This replaces the locale-parity test suite.
