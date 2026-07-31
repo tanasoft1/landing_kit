@@ -19,11 +19,7 @@ export function Section({
   children: ReactNode
 }) {
   return (
-    <section
-      id={id}
-      style={{ paddingBlock: 'var(--section-y)' }}
-      className={`${SURFACE_CLASS[surface]} ${className}`}
-    >
+    <section id={id} className={`py-section ${SURFACE_CLASS[surface]} ${className}`}>
       {children}
     </section>
   )
