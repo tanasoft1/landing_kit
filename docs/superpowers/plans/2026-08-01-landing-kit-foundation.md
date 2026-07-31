@@ -21,6 +21,8 @@ Every task's requirements implicitly include this section.
 - **Blocks are pure prop-driven components.** They receive `{ copy, site, resolve }` and read no context, no hooks-for-data, no router.
 - **Blocks never import `motion` directly** — only `~/motion`. Enforced by Biome.
 - **Blocks never write vertical section padding, `max-w-*`, `container`, or a raw `<section>`.** They compose `<Section>` and `<Container>`. Enforced by `scripts/check-conventions.mjs`.
+- **Tailwind utilities, not inline styles.** Tokens are registered in `@theme` so Tailwind generates utilities from them (`py-section`, `px-gutter`, `max-w-page`, `text-display`, `rounded-base`, `font-display`). Do not use `style={{...}}` for anything the token layer covers, and do not use arbitrary-value escapes like `text-display` where a generated utility exists. Inline `style` is acceptable only for a genuinely dynamic value that cannot be a class.
+- **Mobile-first responsiveness, Tailwind default breakpoints** (`sm` 40rem, `md` 48rem, `lg` 64rem, `xl` 80rem). No horizontal overflow at 320px. Interactive chrome has tap targets ≥ 44px. Every UI-bearing task verifies at 375, 768, 1280 and 1536 plus a 320px overflow check.
 - **Every variant must render correctly under `motion.noop`** — no variant may depend on animation to be legible.
 - **Every font family used must have Cyrillic coverage**, delivered as per-script `@font-face` rules with distinct `unicode-range` values so a page fetches only the scripts its text uses.
 - **Animations use `transform` and `opacity` only** — never layout properties, so they cannot cause CLS.
@@ -310,7 +312,7 @@ git commit -m "chore: scaffold TanStack Start app with pinned toolchain and Biom
 
 **Interfaces:**
 - Consumes: the `~/*` alias from Task 1.
-- Produces: `Surface` type; `<Section id? surface? className? children>`; `<Container className? children>`; CSS custom properties `--color-background`, `--color-foreground`, `--color-primary`, `--color-primary-foreground`, `--color-muted`, `--color-muted-foreground`, `--color-accent`, `--color-border`, `--color-ring`, `--radius`, `--font-display`, `--font-body`, `--section-y`, `--container-max`, `--container-gutter`.
+- Produces: `Surface` type; `<Section id? surface? className? children>`; `<Container width? className? children>`; preset custom properties `--c-background`, `--c-foreground`, `--c-primary`, `--c-primary-foreground`, `--c-muted`, `--c-muted-foreground`, `--c-accent`, `--c-border`, `--c-ring`, `--radius`, `--face-display`, `--face-body`, `--section-y`, `--gutter`, `--width-page`, `--width-narrow`; and the Tailwind utilities generated from them — `py-section`, `px-gutter`, `max-w-page`, `max-w-narrow`, `text-display`, `text-h2`, `text-h3`, `text-lead`, `rounded-base`, `font-display`, `font-body`, plus the palette colour utilities.
 
 - [ ] **Step 1: Verify both fonts ship Cyrillic subsets**
 
@@ -329,37 +331,44 @@ Create `src/styles/presets/aurora.css`. Both palettes are authored, not derived 
 
 ```css
 :root {
-  --font-display: 'Manrope Variable', system-ui, sans-serif;
-  --font-body: 'Inter Variable', system-ui, sans-serif;
+  /* Skin: font pairing. Both families must have Cyrillic coverage. */
+  --face-display: 'Manrope Variable', system-ui, sans-serif;
+  --face-body: 'Inter Variable', system-ui, sans-serif;
 
+  /* Skin: shape, rhythm, measure. */
   --radius: 0.75rem;
   --section-y: clamp(3.5rem, 8vw, 7rem);
-  --container-max: 72rem;
-  --container-gutter: clamp(1rem, 4vw, 2rem);
+  --gutter: clamp(1rem, 4vw, 2rem);
+  --width-page: 72rem;
+  --width-narrow: 36rem;
 
-  --color-background: oklch(99% 0.004 250);
-  --color-foreground: oklch(21% 0.02 255);
-  --color-muted: oklch(96.5% 0.006 250);
-  --color-muted-foreground: oklch(48% 0.02 255);
-  --color-accent: oklch(97% 0.02 250);
-  --color-border: oklch(91% 0.008 255);
-  --color-primary: oklch(55% 0.19 264);
-  --color-primary-foreground: oklch(99% 0.004 250);
-  --color-ring: oklch(55% 0.19 264);
+  /* Skin: light palette. */
+  --c-background: oklch(99% 0.004 250);
+  --c-foreground: oklch(21% 0.02 255);
+  --c-muted: oklch(96.5% 0.006 250);
+  --c-muted-foreground: oklch(48% 0.02 255);
+  --c-accent: oklch(97% 0.02 250);
+  --c-border: oklch(91% 0.008 255);
+  --c-primary: oklch(55% 0.19 264);
+  --c-primary-foreground: oklch(99% 0.004 250);
+  --c-ring: oklch(55% 0.19 264);
 }
 
 .dark {
-  --color-background: oklch(17% 0.015 260);
-  --color-foreground: oklch(96% 0.006 250);
-  --color-muted: oklch(23% 0.017 260);
-  --color-muted-foreground: oklch(72% 0.014 255);
-  --color-accent: oklch(27% 0.02 262);
-  --color-border: oklch(31% 0.018 260);
-  --color-primary: oklch(72% 0.15 264);
-  --color-primary-foreground: oklch(17% 0.015 260);
-  --color-ring: oklch(72% 0.15 264);
+  /* Authored, not derived: dark surfaces step up in lightness and drop saturation. */
+  --c-background: oklch(17% 0.015 260);
+  --c-foreground: oklch(96% 0.006 250);
+  --c-muted: oklch(23% 0.017 260);
+  --c-muted-foreground: oklch(72% 0.014 255);
+  --c-accent: oklch(27% 0.02 262);
+  --c-border: oklch(31% 0.018 260);
+  --c-primary: oklch(72% 0.15 264);
+  --c-primary-foreground: oklch(17% 0.015 260);
+  --c-ring: oklch(72% 0.15 264);
 }
 ```
+
+The `--c-*` / `--face-*` / `--width-*` prefixes exist so `@theme inline` in Step 3 can map them onto Tailwind's namespaces without a variable referring to itself. A preset is swappable precisely because it owns these raw values and nothing else.
 
 - [ ] **Step 3: Write `theme.css`**
 
@@ -375,43 +384,52 @@ Create `src/styles/theme.css`. Each family's `wght.css` carries per-script `@fon
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
-  --color-background: var(--color-background);
-  --color-foreground: var(--color-foreground);
-  --color-muted: var(--color-muted);
-  --color-muted-foreground: var(--color-muted-foreground);
-  --color-accent: var(--color-accent);
-  --color-border: var(--color-border);
-  --color-primary: var(--color-primary);
-  --color-primary-foreground: var(--color-primary-foreground);
-  --color-ring: var(--color-ring);
-
-  --font-display: var(--font-display);
-  --font-body: var(--font-body);
-
-  --radius-base: var(--radius);
-
+/* System, not skin: the scale is fixed, the font pairing is not. */
+@theme {
   --text-display: clamp(2.5rem, 6vw, 4.5rem);
   --text-h2: clamp(1.875rem, 3.5vw, 2.75rem);
   --text-h3: clamp(1.25rem, 2vw, 1.5rem);
   --text-lead: clamp(1.0625rem, 1.4vw, 1.25rem);
 }
 
+/* `inline` keeps these as live var() references, so the .dark class and a
+   preset swap both take effect without a rebuild. */
+@theme inline {
+  --color-background: var(--c-background);
+  --color-foreground: var(--c-foreground);
+  --color-muted: var(--c-muted);
+  --color-muted-foreground: var(--c-muted-foreground);
+  --color-accent: var(--c-accent);
+  --color-border: var(--c-border);
+  --color-primary: var(--c-primary);
+  --color-primary-foreground: var(--c-primary-foreground);
+  --color-ring: var(--c-ring);
+
+  --font-display: var(--face-display);
+  --font-body: var(--face-body);
+
+  --radius-base: var(--radius);
+  --spacing-section: var(--section-y);
+  --spacing-gutter: var(--gutter);
+  --container-page: var(--width-page);
+  --container-narrow: var(--width-narrow);
+}
+
 @layer base {
   html {
-    font-family: var(--font-body);
+    font-family: var(--face-body);
     scroll-behavior: smooth;
   }
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
+    background-color: var(--c-background);
+    color: var(--c-foreground);
   }
   h1, h2, h3 {
-    font-family: var(--font-display);
+    font-family: var(--face-display);
     letter-spacing: -0.02em;
   }
   :focus-visible {
-    outline: 2px solid var(--color-ring);
+    outline: 2px solid var(--c-ring);
     outline-offset: 2px;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -419,6 +437,20 @@ Create `src/styles/theme.css`. Each family's `wght.css` carries per-script `@fon
   }
 }
 ```
+
+Those registrations are what make the rest of the codebase Tailwind-idiomatic. Because of them the following utilities exist and must be used in place of inline styles or arbitrary values:
+
+| Utility | Resolves to |
+|---|---|
+| `py-section` | the preset's vertical section rhythm |
+| `px-gutter` | the preset's horizontal gutter |
+| `max-w-page` / `max-w-narrow` | the preset's page and narrow measures |
+| `text-display`, `text-h2`, `text-h3`, `text-lead` | the fluid type scale |
+| `rounded-base` | the preset's radius |
+| `font-display`, `font-body` | the preset's font pairing |
+| `bg-background`, `text-foreground`, `bg-muted`, `text-muted-foreground`, `bg-accent`, `border-border`, `bg-primary`, `text-primary-foreground`, `ring-ring` | palette tokens, dark-mode aware |
+
+After Step 3, verify a generated utility actually exists rather than assuming: run `pnpm build` and grep the emitted CSS for `.py-section` and `.text-display`. If Tailwind did not generate them, the `@theme` namespaces are wrong and everything downstream inherits the problem — fix it here.
 
 - [ ] **Step 4: Define the shared types**
 
@@ -503,17 +535,25 @@ Create `src/shell/layout/container.tsx`:
 ```tsx
 import type { ReactNode } from 'react'
 
-export function Container({ className = '', children }: { className?: string; children: ReactNode }) {
-  return (
-    <div
-      className={`mx-auto w-full ${className}`}
-      style={{ maxWidth: 'var(--container-max)', paddingInline: 'var(--container-gutter)' }}
-    >
-      {children}
-    </div>
-  )
+const WIDTH = {
+  page: 'max-w-page',
+  narrow: 'max-w-narrow',
+} as const
+
+export function Container({
+  width = 'page',
+  className = '',
+  children,
+}: {
+  width?: keyof typeof WIDTH
+  className?: string
+  children: ReactNode
+}) {
+  return <div className={`mx-auto w-full px-gutter ${WIDTH[width]} ${className}`}>{children}</div>
 }
 ```
+
+The `width` prop exists so no block ever needs a `max-w-*` class of its own — a form or prose column asks for `<Container width="narrow">` instead. That keeps the convention rule absolute rather than carrying an exception list.
 
 - [ ] **Step 6: Write `<Section>`**
 
@@ -541,11 +581,7 @@ export function Section({
   children: ReactNode
 }) {
   return (
-    <section
-      id={id}
-      style={{ paddingBlock: 'var(--section-y)' }}
-      className={`${SURFACE_CLASS[surface]} ${className}`}
-    >
+    <section id={id} className={`py-section ${SURFACE_CLASS[surface]} ${className}`}>
       {children}
     </section>
   )
@@ -599,15 +635,15 @@ function Home() {
     <>
       <Section>
         <Container>
-          <h1 className="text-[length:var(--text-display)] font-bold">Гарчиг / Heading</h1>
-          <p className="text-muted-foreground mt-4 text-[length:var(--text-lead)]">
+          <h1 className="text-display font-bold">Гарчиг / Heading</h1>
+          <p className="text-muted-foreground text-lead mt-4">
             Кирилл болон латин үсэг. Latin and Cyrillic.
           </p>
         </Container>
       </Section>
       <Section surface="muted">
-        <Container>
-          <h2 className="text-[length:var(--text-h2)] font-semibold">Second surface</h2>
+        <Container width="narrow">
+          <h2 className="text-h2 font-semibold">Second surface, narrow measure</h2>
         </Container>
       </Section>
     </>
@@ -621,11 +657,13 @@ function Home() {
 pnpm dev
 ```
 
-Check all four of these, since each catches a different failure:
+Check all of these, since each catches a different failure:
 1. The two sections have visibly different backgrounds (surface tokens work).
 2. Cyrillic and Latin text render in the same typeface — not a system fallback. Confirm in devtools: computed `font-family` resolves to Inter/Manrope for the Cyrillic line.
 3. In devtools, add `class="dark"` to `<html>`; the palette switches and text stays legible.
-4. Resize to 375px wide — no horizontal scrollbar, heading scales down.
+4. The second section is visibly narrower than the first (`width="narrow"` works).
+5. **Responsive sweep at 320, 375, 768, 1280 and 1536 px.** Use devtools device emulation rather than resizing the OS window — window managers impose a minimum width well above 320px, so a real 320px check is otherwise impossible. At every width: no horizontal scrollbar, no clipped text, heading scales continuously rather than jumping.
+6. Confirm the generated utilities are real, not silently-dropped class names: in devtools inspect the `<section>` and check the computed `padding-block` is non-zero and traces to `.py-section`, and that the `<h1>`'s `font-size` traces to `.text-display`. A missing `@theme` namespace produces a class that exists in the markup and does nothing.
 
 Stop the server.
 
@@ -718,22 +756,22 @@ export function HeroCentered({ copy, resolve, surface }: BlockProps<HeroCopy>) {
     <Section id="hero" surface={surface}>
       <Container className="text-center">
         <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
-        <h1 className="mt-3 text-[length:var(--text-display)] font-bold text-balance">
+        <h1 className="mt-3 text-display font-bold text-balance">
           {copy.heading}
         </h1>
-        <p className="text-muted-foreground mx-auto mt-5 text-[length:var(--text-lead)] text-pretty">
+        <p className="text-muted-foreground mx-auto mt-5 text-lead text-pretty">
           {copy.lead}
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <a
             href={resolve(copy.primaryCta.target)}
-            className="bg-primary text-primary-foreground rounded-[var(--radius)] px-6 py-3 font-medium"
+            className="bg-primary text-primary-foreground rounded-base inline-flex min-h-11 items-center px-6 py-3 font-medium"
           >
             {copy.primaryCta.label}
           </a>
           <a
             href={resolve(copy.secondaryCta.target)}
-            className="border-border rounded-[var(--radius)] border px-6 py-3 font-medium"
+            className="border-border rounded-base inline-flex min-h-11 items-center border px-6 py-3 font-medium"
           >
             {copy.secondaryCta.label}
           </a>
@@ -763,22 +801,22 @@ export function HeroSplit({ copy, resolve, surface }: BlockProps<HeroCopy>) {
             <p className="text-primary text-sm font-semibold tracking-wide uppercase">
               {copy.eyebrow}
             </p>
-            <h1 className="mt-3 text-[length:var(--text-display)] font-bold text-balance">
+            <h1 className="mt-3 text-display font-bold text-balance">
               {copy.heading}
             </h1>
-            <p className="text-muted-foreground mt-5 text-[length:var(--text-lead)] text-pretty">
+            <p className="text-muted-foreground mt-5 text-lead text-pretty">
               {copy.lead}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <a
                 href={resolve(copy.primaryCta.target)}
-                className="bg-primary text-primary-foreground rounded-[var(--radius)] px-6 py-3 font-medium"
+                className="bg-primary text-primary-foreground rounded-base px-6 py-3 font-medium"
               >
                 {copy.primaryCta.label}
               </a>
               <a
                 href={resolve(copy.secondaryCta.target)}
-                className="border-border rounded-[var(--radius)] border px-6 py-3 font-medium"
+                className="border-border rounded-base border px-6 py-3 font-medium"
               >
                 {copy.secondaryCta.label}
               </a>
@@ -791,7 +829,7 @@ export function HeroSplit({ copy, resolve, surface }: BlockProps<HeroCopy>) {
               width={copy.image.width}
               height={copy.image.height}
               fetchPriority="high"
-              className="rounded-[var(--radius)] w-full h-auto"
+              className="rounded-base w-full h-auto"
             />
           ) : null}
         </div>
@@ -971,6 +1009,8 @@ pnpm dev
 ```
 
 Expected: two hero sections stacked — the first centered, the second split (text left, image placeholder right) — on **different** background surfaces. The image will 404 until an asset exists; that is fine, but confirm the layout does not shift when it fails (explicit width/height doing its job).
+
+Then run the responsive sweep in devtools device emulation at 320, 375, 768, 1280 and 1536 px. At every width: no horizontal scrollbar, no clipped or overlapping text, and CTA buttons at least 44px tall. The `split` variant must stack to one column below `md` with the image below the text, not squeeze into two narrow columns.
 
 - [ ] **Step 13: Verify lint, types, and the import boundary**
 
@@ -1204,31 +1244,63 @@ export function Header({
   path: string
   resolve: (target: string) => string
 }) {
-  const other = site.locales.filter((l) => l !== locale)
+  const others = site.locales.filter((l) => l !== locale)
+  const navLabel = locale === 'mn' ? 'Үндсэн цэс' : 'Main navigation'
+
+  const pageLinks = site.nav.map((item) => (
+    <a
+      key={item.target}
+      href={resolve(item.target)}
+      className="hover:text-primary flex min-h-11 items-center"
+    >
+      {labelFor(item.target, locale)}
+    </a>
+  ))
+
+  const localeLinks = others.map((l) => (
+    <a
+      key={l}
+      href={switchLocale(path, locale, l, site)}
+      hrefLang={l}
+      className="text-muted-foreground hover:text-primary flex min-h-11 items-center uppercase"
+    >
+      {l}
+    </a>
+  ))
 
   return (
     <header className="border-border bg-background/80 sticky top-0 z-50 border-b backdrop-blur">
-      <Container className="flex items-center justify-between gap-6 py-4">
-        <a href={localePath('/', locale, site)} className="font-display font-bold">
+      <Container className="flex items-center justify-between gap-4 py-3">
+        <a
+          href={localePath('/', locale, site)}
+          className="font-display flex min-h-11 items-center font-bold"
+        >
           {site.name}
         </a>
-        <nav className="flex items-center gap-5 text-sm">
-          {site.nav.map((item) => (
-            <a key={item.target} href={resolve(item.target)} className="hover:text-primary">
-              {labelFor(item.target, locale)}
-            </a>
-          ))}
-          {other.map((l) => (
-            <a
-              key={l}
-              href={switchLocale(path, locale, l, site)}
-              className="text-muted-foreground uppercase"
-              hrefLang={l}
-            >
-              {l}
-            </a>
-          ))}
+
+        <nav aria-label={navLabel} className="hidden items-center gap-6 text-sm md:flex">
+          {pageLinks}
+          {localeLinks}
         </nav>
+
+        <details className="relative md:hidden">
+          <summary
+            aria-label={locale === 'mn' ? 'Цэс' : 'Menu'}
+            className="border-border rounded-base flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center border [&::-webkit-details-marker]:hidden"
+          >
+            <span aria-hidden="true" className="text-lg leading-none">
+              ☰
+            </span>
+          </summary>
+          <nav
+            aria-label={navLabel}
+            className="border-border bg-background rounded-base absolute right-0 z-50 mt-2 flex w-56 flex-col border p-3 text-sm shadow-lg"
+          >
+            {pageLinks}
+            <span className="border-border my-2 border-t" aria-hidden="true" />
+            {localeLinks}
+          </nav>
+        </details>
       </Container>
     </header>
   )
@@ -1240,6 +1312,8 @@ function switchLocale(path: string, from: Locale, to: Locale, site: SiteConfig):
   return localePath(bare, to, site)
 }
 ```
+
+The mobile menu is a `<details>`/`<summary>` disclosure rather than a JS-driven drawer, deliberately: it works in prerendered HTML before hydration, which matters when the whole point of this kit is fast static pages. It also needs no state, no effect, and no event handler — so it cannot break the prerender. `min-h-11`/`min-w-11` on every interactive target is the 44px accessibility floor.
 
 Create `src/shell/chrome/footer.tsx`:
 
@@ -1376,6 +1450,11 @@ Check each:
 4. Clicking the locale link on `/` lands on `/en` and vice versa — not on `/en/en`.
 5. `/nope` returns a 404, not a crash.
 6. Both hero CTAs resolve to `#hero` and scroll to the hero section. They target `'hero'` deliberately so every task up to Task 8 has a fully working build; Task 8 repoints the primary CTA at `contact` once that block exists.
+7. **Responsive header sweep** in devtools device emulation at 320, 375, 768, 1280 and 1536 px:
+   - At 320 and 375: the inline nav is hidden and the `☰` disclosure is shown. Opening it reveals the page links and the locale link in a panel that does not overflow the viewport. The header does not wrap or overlap the site name.
+   - At 768 and above: the inline nav is shown and the disclosure is hidden.
+   - The disclosure opens and closes **with JavaScript disabled** — that is the reason for using `<details>`, so verify it rather than assuming.
+   - No horizontal scrollbar at any width; footer contact links wrap rather than overflow at 320px.
 
 - [ ] **Step 12: Verify lint and types**
 
@@ -2283,19 +2362,15 @@ export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
     }
   }
 
-  const field = 'border-border bg-background w-full rounded-[var(--radius)] border px-4 py-3'
+  const field = 'border-border bg-background w-full rounded-base min-h-11 border px-4 py-3'
 
   return (
     <Section id="contact" surface={surface}>
-      <Container>
-        <h2 className="text-[length:var(--text-h2)] font-semibold">{copy.heading}</h2>
-        <p className="text-muted-foreground mt-3 text-[length:var(--text-lead)]">{copy.lead}</p>
+      <Container width="narrow">
+        <h2 className="text-h2 font-semibold">{copy.heading}</h2>
+        <p className="text-muted-foreground mt-3 text-lead">{copy.lead}</p>
 
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="mt-8 grid gap-4"
-          style={{ maxWidth: '36rem' }}
-        >
+        <form onSubmit={handleSubmit(onSubmit)} className="mt-8 grid gap-4">
           <label className="grid gap-2">
             <span className="text-sm font-medium">{copy.fields.name}</span>
             <input className={field} autoComplete="name" {...register('name')} />
@@ -2316,7 +2391,7 @@ export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
           <button
             type="submit"
             disabled={state === 'sending'}
-            className="bg-primary text-primary-foreground rounded-[var(--radius)] px-6 py-3 font-medium disabled:opacity-60"
+            className="bg-primary text-primary-foreground rounded-base min-h-11 px-6 py-3 font-medium disabled:opacity-60"
           >
             {state === 'sending' ? copy.submitting : copy.submit}
           </button>
@@ -2336,9 +2411,11 @@ export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
 }
 ```
 
-The form's own measure is set with an inline `maxWidth` rather than `max-w-xl` on purpose. A readable form width is a component concern, not page layout, but weakening the convention rule to allow `max-w-*` in blocks would also let real layout violations through. Inline style keeps the rule strict with no exception list.
+The form's readable measure comes from `<Container width="narrow">`, not a `max-w-*` class and not an inline style. That is why `Container` has a `width` prop: a block that needs a narrower column asks the primitive for one, so the "no `max-w-*` in blocks" rule stays absolute with no exception list, and the width still comes from the preset rather than a hardcoded number.
 
-Also note `Surface` is no longer imported here — `surface` arrives through `BlockProps`.
+Note also that `Surface` is not imported here — `surface` arrives through `BlockProps`.
+
+Verify responsively at 320, 375, 768 and 1280 px: labels and inputs stack in one column at every width, no input overflows the gutter, and every input, the textarea and the submit button are at least 44px tall.
 
 - [ ] **Step 6: Write the schema contribution and manifest**
 
@@ -2485,7 +2562,8 @@ Add to `package.json`:
   "scripts": {
     "smoke:full": "KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server vite build && node scripts/verify-build.mjs",
     "smoke:onepage": "KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint vite build && node scripts/verify-build.mjs",
-    "lighthouse": "lhci autorun"
+    "lighthouse": "lhci autorun",
+    "lighthouse:desktop": "lhci autorun --collect.settings.preset=desktop"
   }
 }
 ```
@@ -2553,10 +2631,12 @@ Create `lighthouserc.json`:
 - [ ] **Step 7: Run Lighthouse and fix what it finds**
 
 ```bash
-pnpm build && pnpm lighthouse
+pnpm build && pnpm lighthouse && pnpm lighthouse:desktop
 ```
 
-Expected: all four assertions pass. Common first failures and their fixes:
+Lighthouse CI's default preset is **mobile** with CPU and network throttling, so `pnpm lighthouse` is the harder, more representative run for these sites; `lighthouse:desktop` catches desktop-only layout and contrast regressions. Both must pass the same budget.
+
+Expected: all four assertions pass on both presets. Common first failures and their fixes:
 - **Contrast** on `text-muted-foreground` — raise the lightness delta in `aurora.css` for the failing palette.
 - **Missing OG image** producing a 404 — add a real `public/og-default.jpg` and `public/hero.jpg`.
 - **No `<meta name="theme-color">`** — add one to `__root.tsx` per palette.
@@ -2570,7 +2650,7 @@ Replace `README.md` with the operating manual a second developer needs: the `pnp
 - [ ] **Step 9: Full verification**
 
 ```bash
-pnpm verify && pnpm smoke:onepage && pnpm smoke:full && pnpm lighthouse
+pnpm verify && pnpm smoke:onepage && pnpm smoke:full && pnpm lighthouse && pnpm lighthouse:desktop
 ```
 
 Expected: every command exits 0.
