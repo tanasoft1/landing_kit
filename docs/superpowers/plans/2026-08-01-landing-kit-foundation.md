@@ -22,7 +22,7 @@ Every task's requirements implicitly include this section.
 - **Blocks never import `motion` directly** — only `~/motion`. Enforced by Biome.
 - **Blocks never write vertical section padding, `max-w-*`, `container`, or a raw `<section>`.** They compose `<Section>` and `<Container>`. Enforced by `scripts/check-conventions.mjs`.
 - **Every variant must render correctly under `motion.noop`** — no variant may depend on animation to be legible.
-- **Every font family used must have Cyrillic coverage**, with `latin` and `cyrillic` loaded as separate subsets.
+- **Every font family used must have Cyrillic coverage**, delivered as per-script `@font-face` rules with distinct `unicode-range` values so a page fetches only the scripts its text uses.
 - **Animations use `transform` and `opacity` only** — never layout properties, so they cannot cause CLS.
 - **Commit after every task.** Conventional commit prefixes (`feat:`, `chore:`, `fix:`).
 
@@ -195,6 +195,7 @@ Create `biome.json`:
     "rules": { "recommended": true }
   },
   "javascript": { "formatter": { "quoteStyle": "single", "semicolons": "asNeeded" } },
+  "css": { "parser": { "tailwindDirectives": true } },
   "overrides": [
     {
       "includes": ["src/blocks/**"],
@@ -314,11 +315,13 @@ git commit -m "chore: scaffold TanStack Start app with pinned toolchain and Biom
 - [ ] **Step 1: Verify both fonts ship Cyrillic subsets**
 
 ```bash
-ls node_modules/@fontsource-variable/inter/ | grep -E 'cyrillic|latin'
-ls node_modules/@fontsource-variable/manrope/ | grep -E 'cyrillic|latin'
+grep -c cyrillic node_modules/@fontsource-variable/inter/unicode.json
+grep -c cyrillic node_modules/@fontsource-variable/manrope/unicode.json
 ```
 
-Expected: each lists both `cyrillic*.css` and `latin*.css`. If Manrope has no Cyrillic file, replace it with `@fontsource-variable/golos-text` (or IBM Plex Sans) and re-check — a display font without Cyrillic is disqualified by the global constraints, not a matter of taste.
+Expected: a non-zero count for each, meaning the family ships Cyrillic glyphs. If a family reports zero, it is disqualified by the global constraints — not a matter of taste — so replace it with `@fontsource-variable/golos-text` or IBM Plex Sans and re-check.
+
+**Note on subsets:** Fontsource 5.x does **not** publish per-script entry points like `latin.css` or `cyrillic.css`. It publishes `wght.css`, which contains one `@font-face` per script, each with its own `unicode-range`. That is the mechanism that satisfies the Cyrillic constraint: the browser downloads only the subsets a page's text actually needs, so an English page never fetches Cyrillic woff2. Verify this by confirming the built CSS contains multiple `@font-face` blocks with distinct `unicode-range` values per family.
 
 - [ ] **Step 2: Write the preset**
 
@@ -360,15 +363,13 @@ Create `src/styles/presets/aurora.css`. Both palettes are authored, not derived 
 
 - [ ] **Step 3: Write `theme.css`**
 
-Create `src/styles/theme.css`. Both font subsets are imported explicitly so English pages do not pull Cyrillic glyphs.
+Create `src/styles/theme.css`. Each family's `wght.css` carries per-script `@font-face` rules with `unicode-range`, so English pages do not pull Cyrillic glyphs (see Step 1).
 
 ```css
 @import 'tailwindcss';
 
-@import '@fontsource-variable/inter/latin.css';
-@import '@fontsource-variable/inter/cyrillic.css';
-@import '@fontsource-variable/manrope/latin.css';
-@import '@fontsource-variable/manrope/cyrillic.css';
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/manrope/wght.css';
 
 @import './presets/aurora.css';
 
