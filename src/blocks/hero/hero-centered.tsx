@@ -1,0 +1,30 @@
+import { Container } from '~/shell/layout/container'
+import { Section } from '~/shell/layout/section'
+import type { BlockProps } from '~/shell/types'
+import type { HeroCopy } from './copy.mn'
+
+export function HeroCentered({ copy, resolve, surface }: BlockProps<HeroCopy>) {
+  return (
+    <Section id="hero" surface={surface}>
+      <Container className="text-center">
+        <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
+        <h1 className="mt-3 text-display font-bold text-balance">{copy.heading}</h1>
+        <p className="text-muted-foreground mx-auto mt-5 text-lead text-pretty">{copy.lead}</p>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <a
+            href={resolve(copy.primaryCta.target)}
+            className="bg-primary text-primary-foreground rounded-base inline-flex min-h-11 items-center px-6 py-3 font-medium"
+          >
+            {copy.primaryCta.label}
+          </a>
+          <a
+            href={resolve(copy.secondaryCta.target)}
+            className="border-border rounded-base inline-flex min-h-11 items-center border px-6 py-3 font-medium"
+          >
+            {copy.secondaryCta.label}
+          </a>
+        </div>
+      </Container>
+    </Section>
+  )
+}
