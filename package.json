@@ -23,11 +23,6 @@
     "@types/react-dom": "^19.2.0",
     "@types/node": "^24.0.0"
   },
-  "pnpm": {
-    "overrides": {
-      "typescript": "6.0.3"
-    }
-  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
