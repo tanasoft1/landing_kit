@@ -531,6 +531,38 @@ prop rather than as a wrapper. A page's `BlockRef` can override it explicitly.
 Fluid, `clamp()`-based, defined once in tokens. Blocks carry no per-breakpoint font-size
 overrides.
 
+### Tokens generate Tailwind utilities
+
+Tokens are registered in Tailwind v4's `@theme` so the framework generates real utilities
+from them — `py-section`, `px-gutter`, `max-w-page`, `text-display`, `rounded-base`,
+`font-display`, `bg-muted`. Components therefore style themselves with ordinary utility
+classes, not inline `style` attributes and not arbitrary-value escapes like
+`text-[length:var(--text-display)]`.
+
+Colour, radius, spacing and width tokens are registered with `@theme inline` pointing at the
+preset's own variables, so switching preset — or toggling `.dark` at runtime — changes the
+utilities' resolved values without a rebuild. The type scale is registered statically,
+because scale is part of the system rather than the skin.
+
+Practical consequence: a developer restyling a client site works in the vocabulary they
+already know from any Tailwind project, and a block's markup stays readable.
+
+### Responsiveness
+
+Mobile-first, using Tailwind's default breakpoints — `sm` 40rem, `md` 48rem, `lg` 64rem,
+`xl` 80rem. Concretely:
+
+- **No horizontal overflow at 320px.** The narrowest realistic phone is the floor, not 375px.
+- **Fluid before breakpoints.** Section padding, gutters and type are `clamp()`-based, so most
+  reflow happens continuously and breakpoints handle only structural changes (a one-column
+  stack becoming two).
+- **Navigation collapses.** Above `md` the header shows inline links; below it, a disclosure
+  menu built on `<details>`/`<summary>` so it works in prerendered HTML before hydration —
+  important when the whole point is fast static pages.
+- **Tap targets ≥ 44px** on all interactive chrome, which is also an accessibility-budget item.
+- **Every block variant is verified at four widths** — 375, 768, 1280, 1536 — plus a 320px
+  overflow check. A variant that only works on desktop is not done.
+
 ### Fonts: a hard Cyrillic constraint
 
 Most fashionable display faces have **no Cyrillic coverage**. Choosing one means Mongolian
@@ -641,7 +673,9 @@ test packages.
    that the Vite config also uses to pick the `motion` and `submit` aliases. One extra
    `package.json` script, no extra dependencies. This same switch is what the CLI later
    automates.
-5. **Lighthouse CI budget** — SEO 100, Performance ≥ 95, Accessibility ≥ 95, CLS ≈ 0.
+5. **Lighthouse CI budget** — SEO 100, Performance ≥ 95, Accessibility ≥ 95, CLS ≈ 0, enforced
+   on both the mobile preset (Lighthouse's throttled default, and the harder of the two) and
+   the desktop preset.
    The one added dev tool: an audit tool rather than a test framework, and what makes the
    SEO claim demonstrable to a client.
 
