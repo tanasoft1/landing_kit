@@ -509,6 +509,13 @@ export type BlockProps<C> = {
   resolve: (target: string) => string
   /** Assigned by the renderer; the block hands it to its own <Section>. */
   surface: Surface
+  /**
+   * Unique anchor id for THIS instance. The renderer de-duplicates repeats, so a
+   * block must never hardcode its own id — a page may legitimately carry the same
+   * block twice (two CTAs, say), and duplicate ids are invalid HTML that also break
+   * anchor links.
+   */
+  anchorId: string
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -694,24 +701,34 @@ git commit -m "feat: add design tokens, aurora preset, fonts, and layout primiti
 - Consumes: `BlockManifest`, `BlockProps`, `BlockSchema`, `Surface`, `SiteConfig`, `PageConfig` from `src/shell/types.ts` (Task 2); `<Section>`, `<Container>` (Task 2).
 - Produces: `registry`, `type BlockId`; `<RenderBlocks blocks locale site resolve page>`; the hero manifest as the reference every later block copies.
 
-- [ ] **Step 1: Write the Mongolian copy — the source of truth for the type**
+- [ ] **Step 1: Declare the copy type and write the Mongolian copy**
 
-Create `src/blocks/hero/copy.mn.ts`. Fields used by only one variant are optional; that is what lets both variants share one type.
+Create `src/blocks/hero/copy.mn.ts`. The type is declared explicitly rather than inferred with `typeof mn`, because **only an explicit type can mark a variant-specific field optional** — and that optionality is the mechanism that lets two variants share one copy type. Inference from a literal always produces required fields.
 
 ```ts
-export const mn = {
+export type HeroCopy = {
+  navLabel: string
+  eyebrow: string
+  heading: string
+  lead: string
+  primaryCta: { label: string; target: string }
+  secondaryCta: { label: string; target: string }
+  /** `split` variant only — optional, so `centered` is not forced to supply it. */
+  image?: { src: string; alt: string; width: number; height: number }
+}
+
+export const mn: HeroCopy = {
   navLabel: 'Эхлэл',
   eyebrow: 'Шинэ',
   heading: 'Бизнесээ онлайнаар хөгжүүл',
   lead: 'Хурдан, хайлтын системд оновчлогдсон вэб хуудсыг хоногийн дотор нэвтрүүл.',
   primaryCta: { label: 'Холбоо барих', target: 'hero' },
   secondaryCta: { label: 'Дэлгэрэнгүй', target: 'hero' },
-  /** Used by the `split` variant only. */
   image: { src: '/hero.jpg', alt: 'Бүтээгдэхүүний зураг', width: 1200, height: 900 },
 }
-
-export type HeroCopy = typeof mn
 ```
+
+The explicit type costs one declaration and buys two things: optional variant fields, and a readable summary of the block's copy shape for whoever extends it. Locale parity is unaffected — it comes from `en: HeroCopy` in the next step, not from the type's origin.
 
 - [ ] **Step 2: Write the English copy against that type**
 
@@ -751,9 +768,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroCentered({ copy, resolve, surface }: BlockProps<HeroCopy>) {
+export function HeroCentered({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero" surface={surface}>
+    <Section id={anchorId} surface={surface}>
       <Container className="text-center">
         <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
         <h1 className="mt-3 text-display font-bold text-balance">
@@ -792,9 +809,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroSplit({ copy, resolve, surface }: BlockProps<HeroCopy>) {
+export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero" surface={surface}>
+    <Section id={anchorId} surface={surface}>
       <Container>
         <div className="grid items-center gap-10 md:grid-cols-2">
           <div>
@@ -930,26 +947,44 @@ export function RenderBlocks({
   site: SiteConfig
   resolve: (target: string) => string
 }) {
+  const seen = new Map<string, number>()
+
   return (
     <>
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
+
         const manifest = registry[id]
-        const Component = manifest.variants[variant ?? manifest.defaultVariant]
-        if (!Component) {
+        if (!manifest) {
           throw new Error(
-            `Block '${id}' has no variant '${variant}'. Available: ${Object.keys(manifest.variants).join(', ')}`,
+            `Unknown block id '${id}'. Available: ${Object.keys(registry).join(', ')}`,
           )
         }
-        const copy = manifest.copy[locale]
-        const resolvedSurface = surface ?? ALTERNATION[index % ALTERNATION.length]
+
+        const variantName = variant ?? manifest.defaultVariant
+        // The cast is paired with the throw below — do not remove one without the other.
+        const Component = manifest.variants[variantName as keyof typeof manifest.variants]
+        if (!Component) {
+          throw new Error(
+            `Block '${id}' has no variant '${variantName}'. Available: ${Object.keys(manifest.variants).join(', ')}`,
+          )
+        }
+
+        // De-duplicate anchor ids: first 'cta' is #cta, a second becomes #cta-2.
+        const occurrence = (seen.get(id) ?? 0) + 1
+        seen.set(id, occurrence)
+        const anchorId = occurrence === 1 ? id : `${id}-${occurrence}`
+
         return (
           <Component
-            key={`${id}-${index}`}
-            copy={copy}
+            key={`${id}-${variantName}-${index}`}
+            copy={manifest.copy[locale]}
             site={site}
             resolve={resolve}
-            surface={resolvedSurface}
+            // The trailing 'default' satisfies noUncheckedIndexedAccess; a modulo
+            // index into ALTERNATION can never actually miss.
+            surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
+            anchorId={anchorId}
           />
         )
       })}
