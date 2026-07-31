@@ -1,25 +1,30 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
+import type { registry } from '~/blocks/registry'
+import { RenderBlocks } from '~/shell/blocks/render-blocks'
+import type { PageConfig, SiteConfig } from '~/shell/types'
 
 export const Route = createFileRoute('/')({ component: Home })
 
+const site = {
+  name: 'Landing Kit',
+  url: 'https://example.mn',
+  defaultLocale: 'mn',
+  locales: ['mn', 'en'],
+  organization: { kind: 'Organization', logo: '/logo.svg' },
+  nav: [],
+  theme: { mode: 'both', default: 'light' },
+} satisfies SiteConfig
+
+const page: PageConfig<keyof typeof registry> = {
+  id: 'home',
+  path: '/',
+  blocks: ['hero', { id: 'hero', variant: 'split' }],
+  seo: {
+    mn: { title: 'Эхлэл', description: 'Түр зуурын хуудас' },
+    en: { title: 'Home', description: 'Temporary page' },
+  },
+}
+
 function Home() {
-  return (
-    <>
-      <Section>
-        <Container>
-          <h1 className="text-display font-bold">Гарчиг / Heading</h1>
-          <p className="text-muted-foreground text-lead mt-4">
-            Кирилл болон латин үсэг. Latin and Cyrillic.
-          </p>
-        </Container>
-      </Section>
-      <Section surface="muted">
-        <Container width="narrow">
-          <h2 className="text-h2 font-semibold">Second surface, narrow measure</h2>
-        </Container>
-      </Section>
-    </>
-  )
+  return <RenderBlocks blocks={page.blocks} locale="mn" site={site} resolve={(t) => `#${t}`} />
 }
