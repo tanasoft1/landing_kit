@@ -25,9 +25,9 @@ project from parts rather than mutate a template.
 
 - Public/open-source distribution, or commercial sale.
 - A headless CMS. Copy lives in the repo; changes ship via git.
-- A blog / content engine. Deferred to its own project (see §11).
+- A blog / content engine. Deferred to its own project (see §13).
 - Runtime-generated OG images.
-- Unit and end-to-end test suites (deliberate; see §10).
+- Unit and end-to-end test suites (deliberate; see §11).
 
 ## 2. Decisions
 
@@ -44,6 +44,8 @@ project from parts rather than mutate a template.
 | D9 | Single package now; workspace split only when the CLI arrives | The block contract is the expensive thing to retrofit, not the folder layout |
 | D10 | Multi-page is the CLI default; one-page is opt-in | More indexable URLs targeting distinct search intent |
 | D11 | TypeScript pinned to 6.x | TS 7 is a full compiler rewrite; toolchain consumers lag major rewrites |
+| D12 | Visual design = token presets × per-block layout variants | The pattern every comparable kit converged on; the two axes are orthogonal, so they compose instead of multiplying |
+| D13 | All variants of a block share one copy type | Swapping layout stays a one-word change with copy preserved in both locales |
 
 ### Rejected alternatives
 
@@ -59,6 +61,12 @@ project from parts rather than mutate a template.
 - **Locale-neutral `data.ts` per block** (to avoid duplicating prices across locales).
   Rejected: prices genuinely are locale-specific here (₮ on the Mongolian page, likely $
   on the English one), so they belong in copy.
+- **Whole-site design skins ("design 1–4" as complete looks).** Rejected: skins multiply
+  combinatorially, cannot be mixed, and each needs visual QA across every block. No
+  comparable kit ships them; they all ship tokens × section variants instead (§8).
+- **Separate block folders per layout** (`hero-centered`, `hero-split`). Rejected: would
+  force re-authoring copy in two locales whenever a client changed their mind about a
+  layout. Variants live inside one block folder instead (§8).
 - **`nav.mode: 'anchor' | 'page'` config flag.** Rejected as redundant — the link
   resolver (§5) derives the correct href from whether the target is a page or a block,
   which also handles the mixed case (a multi-page site whose nav mixes page links with
@@ -86,12 +94,15 @@ landing_kit/
 │   │   ├── blocks/               # BlockRenderer, manifest types
 │   │   ├── seo/                  # head(), JSON-LD graph, sitemap + robots generation
 │   │   ├── i18n/                 # locale resolution, copy selection
+│   │   ├── layout/               # Section, Container — the layout primitives
 │   │   ├── chrome/               # Header, Footer, LocaleSwitcher, ThemeToggle
 │   │   ├── motion.ts             # animation boundary  (motion.noop.ts is the variant)
 │   │   └── submit.ts             # form submission boundary
 │   ├── components/ui/            # shadcn, vendored
 │   ├── routes/
-│   ├── styles/theme.css          # Tailwind v4 @theme tokens
+│   ├── styles/
+│   │   ├── theme.css             # Tailwind v4 @theme tokens; selects a preset
+│   │   └── presets/              # token presets: palette, fonts, radius, density
 │   ├── pages.config.ts
 │   └── site.config.ts
 ├── biome.json
@@ -134,15 +145,24 @@ export type BlockSchema<C> = (ctx: {
   page: PageConfig
 }) => JsonLdNode[]
 
-export type BlockManifest<C = any> = {
+export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  component: (props: BlockProps<C>) => ReactNode
-  copy: Record<Locale, C>
+  variants: Record<V, (props: BlockProps<C>) => ReactNode>
+  defaultVariant: V                      // constrained to a key of `variants`
+  copy: Record<Locale, C>                // ONE copy shape, shared by every variant
   nav?: { labelKey: keyof C & string }   // omit → block never appears in nav
   schema?: BlockSchema<C>                // omit → contributes no structured data
   requires?: { npm?: string[]; ui?: string[] }
 }
 ```
+
+Variants are the layout axis of the design system (§8). `V` is inferred through
+`satisfies`, so `defaultVariant` naming a nonexistent variant is a compile error.
+
+**Blocks with a single layout still declare `variants`**, by convention
+`{ variants: { default: Contact }, defaultVariant: 'default' }`. Slight ceremony in
+exchange for the renderer having exactly one code path and blocks gaining variants later
+without a shape change.
 
 `requires` lets the future CLI write a correct `package.json` and run the right
 `shadcn add` commands. It is accurate dependency documentation regardless.
@@ -221,20 +241,28 @@ export const pages = [
 
 // src/pages.config.ts — multi-page
 export const pages = [
-  { id: 'home',    path: '/',        blocks: ['hero', 'features', 'cta'],    seo: { /* … */ } },
+  { id: 'home',    path: '/',        blocks: [{ id: 'hero', variant: 'split' }, 'features', 'cta'],
+    seo: { /* … */ } },
   { id: 'pricing', path: '/pricing', blocks: ['pricing', 'faq', 'cta'],     seo: { /* … */ } },
   { id: 'contact', path: '/contact', blocks: ['contact'],                   seo: { /* … */ } },
 ]
 ```
 
 ```ts
+export type BlockRef =
+  | BlockId                                                    // → block's defaultVariant
+  | { id: BlockId; variant?: string; surface?: Surface }        // explicit overrides
+
 export type PageConfig = {
   id: string
   path: string
-  blocks: BlockId[]
+  blocks: BlockRef[]
   seo: Record<Locale, { title: string; description: string; ogImage?: string }>
 }
 ```
+
+The bare-string shorthand keeps the common case terse. `variant` selects a layout (§8) and
+`surface` opts out of automatic surface alternation (§8).
 
 **Blocks are identical in both modes and never know which they are in.** Everything
 mode-specific derives from this config: nav rendering, sitemap entries, per-page
@@ -341,13 +369,13 @@ export type SiteConfig = {
   everything below the fold lazy.
 - Animations are restricted to `transform` and `opacity`, so entrance animations cannot
   contribute to CLS.
-- Lighthouse CI budget, enforced in CI (§10).
+- Lighthouse CI budget, enforced in CI (§11).
 
 ### Honest limitation
 
 This produces a technically excellent site, which reliably wins brand-name queries and
 Core Web Vitals comparisons. It does not by itself outrank an established competitor on a
-competitive commercial keyword — that requires the deferred content engine (§11).
+competitive commercial keyword — that requires the deferred content engine (§13).
 
 ## 7. The three swappable boundaries
 
@@ -359,6 +387,8 @@ alias. This is what makes them CLI options rather than CLI rewrites.
 
 Tokens in `src/styles/theme.css` using Tailwind v4 `@theme`, with shadcn's semantic names
 (`background`, `foreground`, `primary`, `muted`, …) so shadcn components work untouched.
+Their *values* come from the selected token preset (§8); what follows covers only the
+light/dark/both mode mechanics.
 
 - `light` / `dark` only: tokens alone. No provider, no toggle, no persistence — strictly
   *less* code.
@@ -410,19 +440,147 @@ client can be bypassed.
 `react-hook-form` was chosen over TanStack Form on maturity grounds despite being less
 stack-coherent; it sits behind this boundary and can be swapped.
 
-## 8. v1 scope
+## 8. Visual design system
+
+This follows the pattern common to every comparable kit — [Untitled UI](https://www.untitledui.com/react/docs/theming),
+[Launch UI](https://www.launchuicomponents.com/), [Page UI](https://pageui.shipixen.com/),
+[Velora UI](https://github.com/ColorlibHQ/velora-ui): copy-paste ownership, the *look*
+controlled by CSS tokens, the *layout* controlled by per-section variants. Two orthogonal
+axes, which is why they do not multiply: tokens never change layout, variants never change
+palette.
+
+### System vs. skin
+
+The organising idea. Agency landing pages must look different per client — that is the
+product — but a boilerplate wants consistency. So:
+
+- **The system is shared and fixed:** spacing rhythm, type scale, container widths,
+  breakpoint behaviour, section vertical rhythm, focus states. This is what makes eight
+  independently-authored blocks read as one page.
+- **The skin is per-client and swappable:** palette, font pairing, radius scale,
+  border-vs-shadow character, density. One token file.
+
+Reskinning a client site means editing tokens and a font pairing. It never means touching
+a block.
+
+### Axis 1 — token presets
+
+3–4 named presets under `src/styles/presets/`, each setting palette (light *and* dark),
+font pairing, radius scale, density, and border-vs-shadow character. A developer picks one
+in `theme.css` and then tunes variables from there. This is the "design 1–4" affordance,
+and it is cheap because it is only token files — no component work, no per-preset visual QA
+across blocks.
+
+Token names follow shadcn's semantics (`background`, `foreground`, `primary`, `muted`, …)
+so shadcn components and the wider ecosystem work untouched, and so any developer arriving
+from a shadcn project already knows how to change the look.
+
+**Dark palettes are authored, not derived.** Inverting lightness values reads muddy; dark
+surfaces need their own elevation steps and lower saturation. Since `both` is a supported
+theme mode, each preset ships both palettes deliberately.
+
+### Axis 2 — block variants
+
+A block is one section *concept*; a variant is one way to lay it out.
+
+```ts
+export const manifest = {
+  id: 'hero',
+  variants: { centered: HeroCentered, split: HeroSplit, screenshot: HeroScreenshot },
+  defaultVariant: 'centered',
+  copy: { mn, en },        // ONE copy shape, shared by every variant
+  // …
+}
+```
+
+**The load-bearing constraint: all variants of a block share a single copy type**, with
+variant-specific fields optional. This is what makes "the client wants the split hero
+instead" a one-word change with all copy preserved. Separate `hero-split` / `hero-centered`
+block folders were rejected for exactly this reason — they would force re-authoring copy in
+two locales every time someone changed their mind about a layout.
+
+### Layout primitives
+
+Blocks never write raw padding or max-width values. They compose:
+
+```tsx
+<Section id="pricing" surface="muted">
+  <Container>…</Container>
+</Section>
+```
+
+`<Section>` owns vertical rhythm and the anchor id that `resolve()` targets (§5);
+`<Container>` owns max-width and gutters. A Biome rule restricts arbitrary spacing and
+width utilities inside `src/blocks/`, so the rhythm cannot erode block by block — the same
+enforcement approach as the motion boundary (§7).
+
+**Automatic surface alternation:** because the renderer knows block order, it assigns
+alternating `surface` variants by default, so consecutive sections do not stack into
+identical boxes — the most common reason a sectioned landing page looks cheap. A block can
+override explicitly.
+
+### Type scale
+
+Fluid, `clamp()`-based, defined once in tokens. Blocks carry no per-breakpoint font-size
+overrides.
+
+### Fonts: a hard Cyrillic constraint
+
+Most fashionable display faces have **no Cyrillic coverage**. Choosing one means Mongolian
+headings silently fall back to a system font — both an aesthetic failure and the LCP/CLS
+problem described in §6. Therefore:
+
+- The reference pairing is chosen from families with real Cyrillic support (Inter, Manrope,
+  IBM Plex Sans, Golos Text, Noto Sans and similar).
+- "Has Cyrillic coverage" is a documented requirement for any per-client font swap.
+- Subsetting stays as specified in §6: `latin` and `cyrillic` as separate subsets.
+
+### Accessibility
+
+Contrast ratios chosen to satisfy the Lighthouse accessibility budget (§11) in both
+palettes, focus ring as a token rather than per-component, and minimum tap-target sizing in
+the primitives.
+
+### Documentation for other developers
+
+One `docs/` page listing the token surface and the available variants per block. Combined
+with blocks being pure prop-driven components with no hidden context (§4), a developer can
+read a single folder and fully understand a section.
+
+## 9. v1 scope
 
 **Shell chrome** (cross-page, not blocks): Header with nav, locale switcher, and theme
 toggle; Footer driven by `site.config.ts`.
 
-**Blocks (8):** `hero`, `logos`, `features`, `testimonials`, `pricing`, `faq`, `cta`,
-`contact`.
+**Blocks (8), 14 variant components total:**
 
-**Deferred:** team, stats/metrics, gallery, comparison table, newsletter. Not because
-they are hard — because adding block #9 is a folder plus one line. Using eight on a real
-client project will teach more about the contract than speculating about fourteen.
+| Block | Variants |
+|---|---|
+| `hero` | `centered`, `split`, `screenshot` |
+| `features` | `grid`, `alternating` |
+| `pricing` | `cards`, `compact` |
+| `testimonials` | `grid`, `quote` |
+| `cta` | `banner`, `split` |
+| `logos` | `default` |
+| `faq` | `default` |
+| `contact` | `default` |
 
-## 9. Tooling and pinned versions
+**Token presets (3).** Three, not four — each preset is cheap to author but still needs a
+look at every block in both palettes before it can be trusted.
+
+**Every variant must render correctly under `motion.noop`.** No variant may depend on
+animation to be legible — so no marquee-style variants in v1, since their static fallback is
+a different layout rather than the same layout held still.
+
+**A `/variants` showcase page** in the demo renders every variant of every block, so a
+broken or ugly variant is caught by looking rather than by discovering it on a client
+project. It is marked `noindex`, excluded from the sitemap, and never copied by the CLI.
+
+**Deferred blocks:** team, stats/metrics, gallery, comparison table, newsletter. Not
+because they are hard — adding block #9 is a folder plus one registry line. Using eight on
+a real client project will teach more about the contract than speculating about fourteen.
+
+## 10. Tooling and pinned versions
 
 | Package | Version |
 |---|---|
@@ -444,7 +602,7 @@ rewrites are when compiler-API consumers and toolchain plugins lag, so the last
 JS-based line is the safer floor for a boilerplate handed to clients. Revisit in roughly
 two quarters; it is a one-line change.
 
-## 10. Verification
+## 11. Verification
 
 No unit or end-to-end test frameworks — a deliberate decision. Blocks are simple enough
 that unit tests would largely restate their JSX, and the real review of a landing page is
@@ -483,16 +641,17 @@ test packages.
 CI order: `biome ci` → `typecheck` → `build` → `verify-build` → config smokes →
 Lighthouse.
 
-## 11. Forward compatibility with the CLI
+## 12. Forward compatibility with the CLI
 
 The CLI is a separate project. This design makes it a file copier plus small codegen
 rather than a codemod engine. When built, it will:
 
-1. Ask: navigation (one-page / multi-page), animation, theme mode, and which blocks.
+1. Ask: navigation (one-page / multi-page), animation, theme mode, token preset, which
+   blocks, and which variant per selected block.
 2. Copy `src/shell/`, `src/components/ui/`, and only the selected block folders.
-3. Generate `pages.config.ts` from the answers.
+3. Generate `pages.config.ts` from the answers, including each block's chosen variant.
 4. Choose `motion.ts` vs `motion.noop.ts`, and `submit.server.ts` vs `submit.endpoint.ts`.
-5. Choose the theme token variant.
+5. Copy the selected token preset into `src/styles/`.
 6. Write `package.json` from the union of block-declared `requires.npm`, and run
    `shadcn add` for the union of `requires.ui`.
 
@@ -500,9 +659,9 @@ Nothing is deleted and no existing file is edited, so the CLI is coupled to the 
 *schema*, not to the current contents of any component. Redesigning the header later
 requires no CLI change.
 
-## 12. Future projects
+## 13. Future projects
 
-1. **Scaffolding CLI** (§11).
+1. **Scaffolding CLI** (§12).
 2. **Content engine** — MDX articles with their own sitemap, `Article` JSON-LD, RSS, and
    tag pages, per locale. The highest-leverage remaining SEO work and roughly doubles the
    surface area, which is why it is separate.
