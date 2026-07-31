@@ -7,45 +7,54 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
-  --color-background: var(--color-background);
-  --color-foreground: var(--color-foreground);
-  --color-muted: var(--color-muted);
-  --color-muted-foreground: var(--color-muted-foreground);
-  --color-accent: var(--color-accent);
-  --color-border: var(--color-border);
-  --color-primary: var(--color-primary);
-  --color-primary-foreground: var(--color-primary-foreground);
-  --color-ring: var(--color-ring);
-
-  --font-display: var(--font-display);
-  --font-body: var(--font-body);
-
-  --radius-base: var(--radius);
-
+/* System, not skin: the scale is fixed, the font pairing is not. */
+@theme {
   --text-display: clamp(2.5rem, 6vw, 4.5rem);
   --text-h2: clamp(1.875rem, 3.5vw, 2.75rem);
   --text-h3: clamp(1.25rem, 2vw, 1.5rem);
   --text-lead: clamp(1.0625rem, 1.4vw, 1.25rem);
 }
 
+/* `inline` keeps these as live var() references, so the .dark class and a
+   preset swap both take effect without a rebuild. */
+@theme inline {
+  --color-background: var(--c-background);
+  --color-foreground: var(--c-foreground);
+  --color-muted: var(--c-muted);
+  --color-muted-foreground: var(--c-muted-foreground);
+  --color-accent: var(--c-accent);
+  --color-border: var(--c-border);
+  --color-primary: var(--c-primary);
+  --color-primary-foreground: var(--c-primary-foreground);
+  --color-ring: var(--c-ring);
+
+  --font-display: var(--face-display);
+  --font-body: var(--face-body);
+
+  --radius-base: var(--radius);
+  --spacing-section: var(--section-y);
+  --spacing-gutter: var(--gutter);
+  --container-page: var(--width-page);
+  --container-narrow: var(--width-narrow);
+}
+
 @layer base {
   html {
-    font-family: var(--font-body);
+    font-family: var(--face-body);
     scroll-behavior: smooth;
   }
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
+    background-color: var(--c-background);
+    color: var(--c-foreground);
   }
   h1,
   h2,
   h3 {
-    font-family: var(--font-display);
+    font-family: var(--face-display);
     letter-spacing: -0.02em;
   }
   :focus-visible {
-    outline: 2px solid var(--color-ring);
+    outline: 2px solid var(--c-ring);
     outline-offset: 2px;
   }
   @media (prefers-reduced-motion: reduce) {

@@ -9,15 +9,15 @@ function Home() {
     <>
       <Section>
         <Container>
-          <h1 className="text-[length:var(--text-display)] font-bold">Гарчиг / Heading</h1>
-          <p className="text-muted-foreground mt-4 text-[length:var(--text-lead)]">
+          <h1 className="text-display font-bold">Гарчиг / Heading</h1>
+          <p className="text-muted-foreground text-lead mt-4">
             Кирилл болон латин үсэг. Latin and Cyrillic.
           </p>
         </Container>
       </Section>
       <Section surface="muted">
-        <Container>
-          <h2 className="text-[length:var(--text-h2)] font-semibold">Second surface</h2>
+        <Container width="narrow">
+          <h2 className="text-h2 font-semibold">Second surface, narrow measure</h2>
         </Container>
       </Section>
     </>
