@@ -119,11 +119,6 @@ Replace the `dependencies`/`devDependencies` in `package.json` with these exact 
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0"
   },
-  "pnpm": {
-    "overrides": {
-      "typescript": "6.0.3"
-    }
-  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -134,6 +129,15 @@ Replace the `dependencies`/`devDependencies` in `package.json` with these exact 
     "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs"
   }
 }
+```
+
+Then pin TypeScript for transitive dependents too. pnpm 11 no longer reads the `pnpm` field
+in `package.json` — it warns and ignores it — so the override belongs in
+`pnpm-workspace.yaml`:
+
+```yaml
+overrides:
+  typescript: 6.0.3
 ```
 
 - [ ] **Step 3: Install and confirm the TypeScript pin held**
@@ -162,7 +166,6 @@ Expected: `Version 6.0.3` exactly. If it prints 7.x, the override did not apply 
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"]
     }
@@ -170,6 +173,11 @@ Expected: `Version 6.0.3` exactly. If it prints 7.x, the override did not apply 
   "include": ["src", "scripts", "vite.config.ts"]
 }
 ```
+
+**No `baseUrl`.** TypeScript 6.0 raises a hard deprecation error on it, and TS 7 removes it
+entirely. `paths` entries resolve relative to the tsconfig's own location without it, so
+`baseUrl` buys nothing here — do not add it, and do not add `ignoreDeprecations` to silence
+it.
 
 `noUncheckedIndexedAccess` matters here — much of this codebase looks things up by id in records, and it forces those lookups to be checked.
 
@@ -180,6 +188,7 @@ Create `biome.json`:
 ```json
 {
   "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "files": { "includes": ["**", "!src/routeTree.gen.ts"] },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "linter": {
     "enabled": true,
