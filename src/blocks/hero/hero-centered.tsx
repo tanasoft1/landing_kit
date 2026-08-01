@@ -3,9 +3,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroCentered({ copy, resolve, surface }: BlockProps<HeroCopy>) {
+export function HeroCentered({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero" surface={surface}>
+    <Section id={anchorId} surface={surface}>
       <Container className="text-center">
         <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
         <h1 className="mt-3 text-display font-bold text-balance">{copy.heading}</h1>

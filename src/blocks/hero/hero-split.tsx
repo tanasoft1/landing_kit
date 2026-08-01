@@ -3,9 +3,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroSplit({ copy, resolve, surface }: BlockProps<HeroCopy>) {
+export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
   return (
-    <Section id="hero" surface={surface}>
+    <Section id={anchorId} surface={surface}>
       <Container>
         <div className="grid items-center gap-10 md:grid-cols-2">
           <div>
