@@ -50,6 +50,12 @@ export type BlockProps<C> = {
   resolve: (target: string) => string
   /** Assigned by the renderer; the block hands it to its own <Section>. */
   surface: Surface
+  /**
+   * Assigned by the renderer; the block hands it to its own <Section id={...}>.
+   * De-duplicated across repeated instances of the same block on one page
+   * (first is the bare block id, a second becomes `${id}-2`, etc).
+   */
+  anchorId: string
 }
 
 export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig }) => JsonLdNode[]

@@ -1,12 +1,20 @@
-export const mn = {
+export type HeroCopy = {
+  navLabel: string
+  eyebrow: string
+  heading: string
+  lead: string
+  primaryCta: { label: string; target: string }
+  secondaryCta: { label: string; target: string }
+  /** `split` variant only — optional, so `centered` is not forced to supply it. */
+  image?: { src: string; alt: string; width: number; height: number }
+}
+
+export const mn: HeroCopy = {
   navLabel: 'Эхлэл',
   eyebrow: 'Шинэ',
   heading: 'Бизнесээ онлайнаар хөгжүүл',
   lead: 'Хурдан, хайлтын системд оновчлогдсон вэб хуудсыг хоногийн дотор нэвтрүүл.',
   primaryCta: { label: 'Холбоо барих', target: 'hero' },
   secondaryCta: { label: 'Дэлгэрэнгүй', target: 'hero' },
-  /** Used by the `split` variant only. */
   image: { src: '/hero.jpg', alt: 'Бүтээгдэхүүний зураг', width: 1200, height: 900 },
 }
-
-export type HeroCopy = typeof mn

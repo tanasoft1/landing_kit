@@ -18,28 +18,45 @@ export function RenderBlocks({
   site: SiteConfig
   resolve: (target: string) => string
 }) {
+  const seen = new Map<string, number>()
+
   return (
     <>
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
+
         const manifest = registry[id]
-        const Component =
-          manifest.variants[(variant ?? manifest.defaultVariant) as keyof typeof manifest.variants]
-        if (!Component) {
+        if (!manifest) {
           throw new Error(
-            `Block '${id}' has no variant '${variant}'. Available: ${Object.keys(manifest.variants).join(', ')}`,
+            `Unknown block id '${id}'. Available: ${Object.keys(registry).join(', ')}`,
           )
         }
-        const copy = manifest.copy[locale]
-        const resolvedSurface = surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'
+
+        const variantName = variant ?? manifest.defaultVariant
+        // The cast is paired with the throw below — do not remove one without the other.
+        const Component = manifest.variants[variantName as keyof typeof manifest.variants]
+        if (!Component) {
+          throw new Error(
+            `Block '${id}' has no variant '${variantName}'. Available: ${Object.keys(manifest.variants).join(', ')}`,
+          )
+        }
+
+        // De-duplicate anchor ids: first 'cta' is #cta, a second becomes #cta-2.
+        const occurrence = (seen.get(id) ?? 0) + 1
+        seen.set(id, occurrence)
+        const anchorId = occurrence === 1 ? id : `${id}-${occurrence}`
+
         return (
           <Component
             // biome-ignore lint/suspicious/noArrayIndexKey: page.blocks is static config and the same block id can repeat, so index is required for uniqueness
-            key={`${id}-${index}`}
-            copy={copy}
+            key={`${id}-${variantName}-${index}`}
+            copy={manifest.copy[locale]}
             site={site}
             resolve={resolve}
-            surface={resolvedSurface}
+            // The trailing 'default' satisfies noUncheckedIndexedAccess; a modulo
+            // index into ALTERNATION can never actually miss.
+            surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
+            anchorId={anchorId}
           />
         )
       })}
