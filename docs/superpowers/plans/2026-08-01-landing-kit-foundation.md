@@ -1095,10 +1095,12 @@ export const site = {
     address: { country: 'MN', city: 'Ulaanbaatar', street: 'Peace Avenue 1', postalCode: '14200' },
     sameAs: ['https://www.facebook.com/example'],
   },
-  nav: [{ target: 'hero' }, { target: 'contact' }],
+  nav: [{ target: 'hero' }],
   theme: { mode: 'both', default: 'light' },
 } satisfies SiteConfig
 ```
+
+**Only `hero` in `nav` for now.** The header calls `resolve()` on every nav target, and the resolver throws on a target that matches no page and no placed block. `contact` is neither until Task 8, so listing it here would crash every page render. Task 8 adds `{ target: 'contact' }` at the same moment it registers the block — same reason the hero CTAs point at `'hero'` until then.
 
 - [ ] **Step 2: Write the pages config**
 
@@ -2427,7 +2429,7 @@ import type { ContactCopy } from './copy.mn'
 
 type Fields = { name: string; email: string; message: string; company: string }
 
-export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
+export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>) {
   const { register, handleSubmit, reset } = useForm<Fields>()
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -2458,7 +2460,7 @@ export function ContactForm({ copy, surface }: BlockProps<ContactCopy>) {
   const field = 'border-border bg-background w-full rounded-base min-h-11 border px-4 py-3'
 
   return (
-    <Section id="contact" surface={surface}>
+    <Section id={anchorId} surface={surface}>
       <Container width="narrow">
         <h2 className="text-h2 font-semibold">{copy.heading}</h2>
         <p className="text-muted-foreground mt-3 text-lead">{copy.lead}</p>
@@ -2550,7 +2552,11 @@ export const contact = {
 
 - [ ] **Step 7: Register the block and enable the page**
 
-In `src/blocks/registry.ts`, import `contact` and add it to the map. In `src/config/pages.config.ts`, remove the `// TASK 8: uncomment` marker and enable the `/contact` page.
+Three edits, and they must land together — the resolver throws on a target that matches no page and no placed block, so a half-done registration breaks every page render:
+
+1. `src/blocks/registry.ts` — import `contact` and add it to the map.
+2. `src/config/pages.config.ts` — remove the `// TASK 8: uncomment` marker and enable the `/contact` page.
+3. `src/config/site.config.ts` — add `{ target: 'contact' }` to `nav`, which Task 4 deliberately left out.
 
 - [ ] **Step 7b: Repoint the hero's primary CTA at the contact block**
 
