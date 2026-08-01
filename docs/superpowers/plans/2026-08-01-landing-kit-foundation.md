@@ -1186,8 +1186,18 @@ export type ResolvedPage<Id extends string = string> = {
   path: string
 }
 
-function stripTrailingSlash(p: string): string {
-  return p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p
+/**
+ * The single canonical path normalization for the whole app: drop the query,
+ * collapse repeated slashes, drop a trailing slash. Everything downstream —
+ * including the header's locale switcher — must consume the result of this,
+ * never a raw pathname. Two different normalizations that agree only on clean
+ * input is how `//en` turns into a protocol-relative `href="//en"`.
+ */
+export function normalizePath(pathname: string): string {
+  const withoutQuery = pathname.split('?')[0] ?? '/'
+  const collapsed = withoutQuery.replace(/\/{2,}/g, '/')
+  const trimmed = collapsed.length > 1 && collapsed.endsWith('/') ? collapsed.slice(0, -1) : collapsed
+  return trimmed || '/'
 }
 
 export function resolveRequest<Id extends string>(
@@ -1195,7 +1205,7 @@ export function resolveRequest<Id extends string>(
   pages: PageConfig<Id>[],
   site: SiteConfig,
 ): ResolvedPage<Id> | null {
-  const path = stripTrailingSlash(pathname.split('?')[0] ?? '/') || '/'
+  const path = normalizePath(pathname)
 
   const segments = path.split('/').filter(Boolean)
   const first = segments[0]
@@ -1203,7 +1213,7 @@ export function resolveRequest<Id extends string>(
 
   const locale: Locale = prefixed ?? site.defaultLocale
   const rest = prefixed ? `/${segments.slice(1).join('/')}` : path
-  const pagePath = stripTrailingSlash(rest) || '/'
+  const pagePath = normalizePath(rest)
 
   const page = pages.find((p) => p.path === pagePath)
   if (!page) return null
@@ -1347,9 +1357,13 @@ export function Header({
 }
 
 function switchLocale(path: string, from: Locale, to: Locale, site: SiteConfig): string {
-  const bare =
-    from === site.defaultLocale ? path : path.replace(new RegExp(`^/${from}`), '') || '/'
-  return localePath(bare, to, site)
+  if (from === site.defaultLocale) return localePath(normalizePath(path), to, site)
+
+  // Strip the locale by segment, matching how resolveRequest reads it — not with a
+  // prefix regex, which silently fails to match on any non-canonical path.
+  const segments = normalizePath(path).split('/').filter(Boolean)
+  const bare = `/${segments.slice(1).join('/')}`
+  return localePath(normalizePath(bare), to, site)
 }
 ```
 
