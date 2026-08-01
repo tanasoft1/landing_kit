@@ -4,15 +4,16 @@ import { site } from '~/config/site.config'
 import { PageView } from '~/shell/pages/page-view'
 import { resolveRequest } from '~/shell/pages/resolve-request'
 
-export const Route = createFileRoute('/')({
-  loader: () => {
-    const resolved = resolveRequest('/', pages, site)
+export const Route = createFileRoute('/$')({
+  loader: ({ params }) => {
+    const splat = (params as { _splat?: string })._splat ?? ''
+    const resolved = resolveRequest(`/${splat}`, pages, site)
     if (!resolved) throw notFound()
     return resolved
   },
-  component: HomeRoute,
+  component: SplatRoute,
 })
 
-function HomeRoute() {
+function SplatRoute() {
   return <PageView resolved={Route.useLoaderData()} />
 }
