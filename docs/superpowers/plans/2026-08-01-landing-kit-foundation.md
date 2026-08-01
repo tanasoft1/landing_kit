@@ -190,6 +190,7 @@ Create `biome.json`:
 ```json
 {
   "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": { "includes": ["**", "!src/routeTree.gen.ts"] },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "linter": {
@@ -221,6 +222,8 @@ Create `biome.json`:
   ]
 }
 ```
+
+`vcs.useIgnoreFile` matters more than it looks: without it Biome does not read `.gitignore`, so the moment a build leaves a `dist/` behind, `pnpm lint` scans the emitted bundles and drowns in thousands of false positives. Tasks 6 and 9 build repeatedly, so a lint that only works on a pristine tree is a lint nobody can trust.
 
 - [ ] **Step 6: Verify the rule group name is correct for Biome 2.5**
 
