@@ -21,18 +21,26 @@ export function emitSeoFiles({
     closeBundle() {
       const urls = enumerateUrls(pages, site)
 
+      const alternateLink = (hreflang: string, path: string) =>
+        `    <xhtml:link rel="alternate" hreflang="${hreflang}" href="${site.url}${path}"/>`
+
       const entries = urls
         .map((u) => {
-          const alternates = site.locales
+          const siblings = urls.filter((x) => x.pageId === u.pageId)
+          const lines = site.locales
             .map((l) => {
-              const alt = urls.find((x) => x.pageId === u.pageId && x.locale === l)
-              return alt
-                ? `    <xhtml:link rel="alternate" hreflang="${l}" href="${site.url}${alt.path}"/>`
-                : ''
+              const alt = siblings.find((x) => x.locale === l)
+              return alt ? alternateLink(l, alt.path) : ''
             })
             .filter(Boolean)
-            .join('\n')
-          return `  <url>\n    <loc>${site.url}${u.path}</loc>\n${alternates}\n  </url>`
+
+          // x-default must appear here too: the <head> declares it, and a sitemap that
+          // lists a different alternate set is a second, conflicting answer to the same
+          // question. Google reads both.
+          const fallback = siblings.find((x) => x.locale === site.defaultLocale)
+          if (fallback) lines.push(alternateLink('x-default', fallback.path))
+
+          return `  <url>\n    <loc>${site.url}${u.path}</loc>\n${lines.join('\n')}\n  </url>`
         })
         .join('\n')
 
