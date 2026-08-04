@@ -436,6 +436,25 @@ Blocks never import `motion` directly. They import presets:
 `src/shell/motion.noop.ts` exports the identical API rendering plain elements. Selecting
 "no animation" is a build alias swap plus dropping one dependency; no block is edited.
 
+**Prerendered HTML must never hide content.** This is a hard rule, learned the hard way: an
+entrance animation implemented as `initial={{ opacity: 0 }}` ships `style="opacity:0"` in the
+static HTML, which means a visitor whose JavaScript fails or is slow sees a **blank hero**, and
+Lighthouse cannot count the element as rendered — so LCP becomes dependent on the bundle
+downloading, parsing, hydrating, and *then* animating. On the throttled mobile preset that is
+the difference between passing and failing a Performance budget.
+
+So the two presets have different licences:
+
+- **`FadeIn`** runs on load, above the fold, and wraps the LCP element. It may animate
+  **`transform` only**. Content is fully opaque in the static HTML, merely offset a few pixels,
+  and settles to its final position after hydration. Nothing is ever invisible, LCP fires at
+  first paint, and `transform` cannot cause CLS.
+- **`Reveal`** is scroll-triggered and used below the fold, where content is off-screen at load
+  and is never the LCP element. It may animate opacity as well as transform.
+
+A genuine opacity fade on above-the-fold content is therefore a deliberate LCP trade-off, not a
+default. If a client project wants one, it opts in knowingly.
+
 A Biome `noRestrictedImports` rule forbids importing `motion` anywhere except
 `src/shell/motion.ts`, so the boundary cannot erode. Presets also mean
 `prefers-reduced-motion` is honored in one place rather than twelve — an accessibility
