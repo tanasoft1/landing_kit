@@ -7,6 +7,11 @@ import { hero } from './hero/manifest'
 // `unknown` instead would collapse `keyof C` and break the `nav.labelKey` constraint.
 export const registry = {
   hero,
+  // `variants` is a property (not a method), so TS checks its function type contravariantly:
+  // a manifest's `(props: BlockProps<HeroCopy>) => ReactNode` would not be assignable to the
+  // `(props: BlockProps<unknown>) => ReactNode` that `BlockManifest<unknown, unknown>` demands,
+  // so every concrete manifest would fail this `satisfies` check.
+  // biome-ignore lint/suspicious/noExplicitAny: unknown breaks assignability here (see above); any stays bivariant.
 } satisfies Record<string, BlockManifest<any, any>>
 
 export type BlockId = keyof typeof registry
