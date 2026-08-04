@@ -1,6 +1,6 @@
 import type { SiteConfig } from '~/shell/types'
 
-export const site = {
+export const site: SiteConfig = {
   name: 'Landing Kit',
   url: 'https://example.mn',
   defaultLocale: 'mn',
@@ -17,4 +17,4 @@ export const site = {
   },
   nav: [{ target: 'hero' }],
   theme: { mode: 'both', default: 'light' },
-} satisfies SiteConfig
+}
