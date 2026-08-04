@@ -20,6 +20,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '~/motion': animation === 'on' ? r('./src/motion.animated.tsx') : r('./src/motion.noop.tsx'),
+      '~/theme':
+        site.theme.mode === 'both' ? r('./src/theme.both.tsx') : r('./src/theme.single.tsx'),
       '~/submit': submit === 'server' ? r('./src/submit.server.ts') : r('./src/submit.endpoint.ts'),
       '~/config': config === 'onepage' ? r('./configs/smoke-onepage') : r('./src/config'),
       '~': r('./src'),

@@ -3,8 +3,8 @@ import { pages } from '~/config/pages.config'
 import { Container } from '~/shell/layout/container'
 import { localePath } from '~/shell/pages/enumerate'
 import { normalizePath } from '~/shell/pages/resolve-request'
-import { ThemeToggle } from '~/shell/theme/theme-toggle'
 import type { Locale, SiteConfig } from '~/shell/types'
+import { ThemeToggle } from '~/theme'
 
 function labelFor(target: string, locale: Locale): string {
   const page = pages.find((p) => p.id === target)
@@ -54,10 +54,7 @@ export function Header({
     </a>
   ))
 
-  const themeToggle =
-    site.theme.mode === 'both' ? (
-      <ThemeToggle label={locale === 'mn' ? 'Өнгө хувиргах' : 'Toggle theme'} />
-    ) : null
+  const themeToggle = <ThemeToggle label={locale === 'mn' ? 'Өнгө хувиргах' : 'Toggle theme'} />
 
   return (
     <header className="border-border bg-background/80 sticky top-0 z-50 border-b backdrop-blur">

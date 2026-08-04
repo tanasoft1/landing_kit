@@ -15,6 +15,7 @@
     "noEmit": true,
     "paths": {
       "~/motion": ["./src/motion.animated.tsx"],
+      "~/theme": ["./src/theme.both.tsx"],
       "~/*": ["./src/*"]
     }
   },
