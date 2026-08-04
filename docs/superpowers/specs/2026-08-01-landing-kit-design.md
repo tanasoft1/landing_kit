@@ -239,8 +239,9 @@ that every entry *is* a manifest. Using `unknown` here would make `keyof C` coll
 
 One hand-written line per block, in exchange for `BlockId` being a literal union — so
 page configs autocomplete and typos are compile errors. `scripts/verify-build.mjs`
-asserts every folder under `src/blocks/` has a registry entry, so a half-added block
-fails the build.
+asserts every folder under `src/blocks/` is registered inside the exported registry object —
+comments stripped first, so a `// TODO: register logos` cannot satisfy it — meaning a
+half-added block fails the build.
 
 **Adding a block** is: copy an existing folder, edit `id` / component name / copy inside
 it, add one registry line, add the id to a page. The SEO layer, nav, and sitemap require
@@ -675,10 +676,24 @@ test packages.
    - canonical present, absolute, and self-referencing;
    - complete `hreflang` set including `x-default`;
    - JSON-LD parses and contains the expected `@type`s;
-   - title and description non-empty and unique across pages;
-   - every folder in `src/blocks/` has a registry entry.
+   - title and description each non-empty and unique across pages;
+   - the `hreflang` set is **exactly** `mn`, `en`, `x-default` — nothing missing, nothing stray;
+   - exactly one JSON-LD block, which parses, carries the expected `@type`s, and whose every
+     `@id` reference resolves to a node actually present in the graph;
+   - the JSON-LD `WebPage` agrees with the head on name, description, url and `inLanguage`,
+     which is what catches one locale's copy bleeding into the other's graph;
+   - the sitemap has one entry per enumerated URL, each carrying the same three `hreflang`
+     alternates the head declares — two sources describing the same thing must not diverge;
+   - every folder in `src/blocks/` is registered inside the exported registry object, with
+     comments stripped first so a `// TODO: register logos` cannot satisfy the check;
+   - `src/routes/` contains no unexpected files: pages come only from `pages.config.ts`, so a
+     hand-added route would be served while never being prerendered, listed, or verified.
 
    Unresolvable link targets need no check here — they throw during prerendering (§5).
+
+   These assertions **are** the SEO requirements in executable form. When one fails, the code it
+   describes is what changes; weakening an assertion to get a green run removes the only
+   automated protection this project has.
 
    Broken structured data is invisible in a browser and expensive to discover weeks later
    via lost rankings. This script is the highest-value check in the repo.
