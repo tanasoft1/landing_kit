@@ -5,6 +5,7 @@ export const site = {
   url: 'https://example.mn',
   defaultLocale: 'mn',
   locales: ['mn', 'en'],
+  ogImageDefault: '/og-default.jpg',
   organization: {
     kind: 'LocalBusiness',
     legalName: 'Landing Kit LLC',

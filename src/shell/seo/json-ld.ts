@@ -32,9 +32,9 @@ export function buildJsonLd(
   resolved: ResolvedPage<BlockId>,
   site: SiteConfig,
   pages: PageConfig<BlockId>[],
+  url: string,
 ): JsonLdNode {
   const { locale, page } = resolved
-  const url = `${site.url}${localePath(page.path, locale, site)}`
   const seo = page.seo[locale]
 
   const graph: JsonLdNode[] = [

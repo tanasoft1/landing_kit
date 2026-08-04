@@ -12,8 +12,9 @@ export function buildHead(
   const { locale, page } = resolved
   const seo = page.seo[locale]
   const canonical = `${site.url}${localePath(page.path, locale, site)}`
-  const ogImage = `${site.url}${seo.ogImage ?? '/og-default.jpg'}`
-  const title = page.path === '/' ? `${seo.title} · ${site.name}` : `${seo.title} | ${site.name}`
+  const ogImage = `${site.url}${seo.ogImage ?? site.ogImageDefault}`
+  // One separator for every page, so titles stay visually consistent across the site.
+  const title = `${seo.title} · ${site.name}`
 
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
@@ -49,7 +50,7 @@ export function buildHead(
     scripts: [
       {
         type: 'application/ld+json',
-        children: JSON.stringify(buildJsonLd(resolved, site, pages)),
+        children: JSON.stringify(buildJsonLd(resolved, site, pages, canonical)),
       },
     ],
   }

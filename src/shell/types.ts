@@ -18,6 +18,8 @@ export type SiteConfig = {
   url: string
   defaultLocale: Locale
   locales: Locale[]
+  /** Root-relative path to the fallback OG image, used by pages with no own `ogImage`. */
+  ogImageDefault: string
   organization: {
     kind: 'Organization' | 'LocalBusiness'
     legalName?: string
