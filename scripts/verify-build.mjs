@@ -100,6 +100,19 @@ for (const u of urls) {
   const h1s = html.match(/<h1[\s>]/g) ?? []
   if (h1s.length !== 1) fail(u.path, `expected exactly 1 <h1>, found ${h1s.length}`)
 
+  // Nothing in the static HTML may be invisible. An entrance animation that ships
+  // `opacity:0` leaves a JS-less visitor staring at a blank hero, and defers LCP until the
+  // bundle hydrates and animates. See the FadeIn docstring.
+  for (const m of html.matchAll(/style="([^"]*)"/g)) {
+    const decl = m[1] ?? ''
+    if (/opacity:\s*0(?!\.\d*[1-9])/.test(decl)) {
+      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
+    }
+    if (/visibility:\s*hidden|display:\s*none/.test(decl)) {
+      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
+    }
+  }
+
   const lang = html.match(/<html[^>]*\blang="([^"]+)"/)?.[1]
   if (lang !== u.locale) fail(u.path, `<html lang> is '${lang}', expected '${u.locale}'`)
 
