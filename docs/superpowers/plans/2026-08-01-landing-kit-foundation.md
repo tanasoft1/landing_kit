@@ -480,6 +480,8 @@ export type SiteConfig = {
   url: string
   defaultLocale: Locale
   locales: Locale[]
+  /** Root-relative path to the fallback OG image, used by pages with no own `ogImage`. */
+  ogImageDefault: string
   organization: {
     kind: 'Organization' | 'LocalBusiness'
     legalName?: string
@@ -1089,6 +1091,7 @@ export const site = {
   url: 'https://example.mn',
   defaultLocale: 'mn',
   locales: ['mn', 'en'],
+  ogImageDefault: '/og-default.jpg',
   organization: {
     kind: 'LocalBusiness',
     legalName: 'Landing Kit LLC',
@@ -1567,6 +1570,29 @@ git commit -m "feat: add site/pages config, locale routing, link resolution, and
 - Consumes: `ResolvedPage`, `localePath`, `enumerateUrls` (Task 4); `registry` (Task 3).
 - Produces: `buildJsonLd(resolved, site, pages) → JsonLdNode`; `buildHead(resolved, site, pages) → { meta, links, scripts }` shaped for TanStack Router's `head`.
 
+- [ ] **Step 0: Create the referenced public assets**
+
+Three files are referenced by config and markup from this task onward. Nothing creates them, so without this step `og:image`, the JSON-LD `logo`, and the hero image all 404 — and a 404 OG image means no preview card on any social or messaging platform, which is invisible in local testing.
+
+Generate real files, not empty placeholders — an empty file 404s differently but is just as broken:
+
+```bash
+mkdir -p public
+# 1200x630 is the OG standard aspect; solid colour is fine as a default.
+magick -size 1200x630 xc:'#5b5bd6' public/og-default.jpg 2>/dev/null \
+  || python3 -c "print('install ImageMagick or supply public/og-default.jpg manually')"
+magick -size 1200x900 xc:'#e5e7eb' public/hero.jpg 2>/dev/null || true
+cat > public/logo.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#5b5bd6"/>
+  <path d="M20 40V24h6v11h10v5z" fill="#fff"/>
+</svg>
+SVG
+ls -l public/
+```
+
+If ImageMagick is unavailable, any real JPEG of roughly those dimensions works — these are placeholders a client project replaces. Confirm all three exist and are non-empty before continuing.
+
 - [ ] **Step 1: Write the JSON-LD assembler**
 
 Create `src/shell/seo/json-ld.ts`:
@@ -1679,8 +1705,9 @@ export function buildHead(
   const { locale, page } = resolved
   const seo = page.seo[locale]
   const canonical = `${site.url}${localePath(page.path, locale, site)}`
-  const ogImage = `${site.url}${seo.ogImage ?? '/og-default.jpg'}`
-  const title = page.path === '/' ? `${seo.title} · ${site.name}` : `${seo.title} | ${site.name}`
+  const ogImage = `${site.url}${seo.ogImage ?? site.ogImageDefault}`
+  // One separator for every page, so titles stay visually consistent across the site.
+  const title = `${seo.title} · ${site.name}`
 
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
