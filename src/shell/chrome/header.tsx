@@ -2,6 +2,7 @@ import { registry } from '~/blocks/registry'
 import { pages } from '~/config/pages.config'
 import { Container } from '~/shell/layout/container'
 import { localePath } from '~/shell/pages/enumerate'
+import { normalizePath } from '~/shell/pages/resolve-request'
 import type { Locale, SiteConfig } from '~/shell/types'
 
 function labelFor(target: string, locale: Locale): string {
@@ -91,6 +92,11 @@ export function Header({
 }
 
 function switchLocale(path: string, from: Locale, to: Locale, site: SiteConfig): string {
-  const bare = from === site.defaultLocale ? path : path.replace(new RegExp(`^/${from}`), '') || '/'
-  return localePath(bare, to, site)
+  if (from === site.defaultLocale) return localePath(normalizePath(path), to, site)
+
+  // Strip the locale by segment, matching how resolveRequest reads it — not with a
+  // prefix regex, which silently fails to match on any non-canonical path.
+  const segments = normalizePath(path).split('/').filter(Boolean)
+  const bare = `/${segments.slice(1).join('/')}`
+  return localePath(normalizePath(bare), to, site)
 }

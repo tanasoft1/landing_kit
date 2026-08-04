@@ -60,6 +60,10 @@ export type BlockProps<C> = {
 
 export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig }) => JsonLdNode[]
 
+// `unknown` as C's default would make `keyof C` resolve to `never` for a bare `BlockManifest`
+// reference, so `nav?: { labelKey: keyof C & string }` below could never be satisfied without
+// the caller re-parameterizing C explicitly every time.
+// biome-ignore lint/suspicious/noExplicitAny: any is the only default that keeps keyof C usable unparameterized.
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
   variants: Record<V, (props: BlockProps<C>) => ReactNode>
