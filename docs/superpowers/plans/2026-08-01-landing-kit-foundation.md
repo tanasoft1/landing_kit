@@ -2272,14 +2272,27 @@ import { motion, useReducedMotion } from 'motion/react'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 
+/**
+ * On-load entrance for above-the-fold content, including the LCP element.
+ *
+ * Animates TRANSFORM ONLY — never opacity. `initial={{ opacity: 0 }}` would ship
+ * `style="opacity:0"` in the prerendered HTML, so a visitor whose JS fails sees a blank hero,
+ * and Lighthouse would not count the element as rendered until the bundle downloaded, hydrated
+ * and animated — making LCP JS-dependent on exactly the throttled mobile preset the budget
+ * uses. Content here is always fully opaque in the static HTML, just offset a few pixels.
+ * `transform` cannot cause CLS, so the offset is free.
+ *
+ * If you want a real opacity fade above the fold, that is a deliberate LCP trade-off. Do it
+ * knowingly, and re-check the Lighthouse budget.
+ */
 export function FadeIn({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotion()
   if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ y: 12 }}
+      animate={{ y: 0 }}
       transition={{ duration: 0.4, delay, ease: 'easeOut' }}
     >
       {children}
@@ -2287,6 +2300,12 @@ export function FadeIn({ children, className, delay = 0 }: Props) {
   )
 }
 
+/**
+ * Scroll-triggered entrance for BELOW-the-fold content only. Opacity is allowed here because
+ * this content is off-screen at load and is never the LCP element — but do not use `Reveal` on
+ * anything visible in the initial viewport, or it reintroduces the hidden-content problem
+ * `FadeIn` exists to avoid.
+ */
 export function Reveal({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotion()
   if (reduce) return <div className={className}>{children}</div>
@@ -2465,6 +2484,27 @@ node scripts/check-conventions.mjs
 Expected: pass. Now add `className="max-w-3xl"` to a div in `hero-centered.tsx` and re-run. Expected: FAIL naming that file and line. Remove it and re-run — expected: pass.
 
 Then confirm the rule is not over-broad: temporarily add `className="py-3"` to the same div and re-run. Expected: **pass** — component-level padding is legitimate. Remove it.
+
+- [ ] **Step 8b: Assert the prerendered HTML hides nothing**
+
+Add to `scripts/verify-build.mjs`, inside the per-page loop:
+
+```js
+  // Nothing in the static HTML may be invisible. An entrance animation that ships
+  // `opacity:0` leaves a JS-less visitor staring at a blank hero, and defers LCP until the
+  // bundle hydrates and animates. See the FadeIn docstring.
+  for (const m of html.matchAll(/style="([^"]*)"/g)) {
+    const decl = m[1] ?? ''
+    if (/opacity:\s*0(?!\.\d*[1-9])/.test(decl)) {
+      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
+    }
+    if (/visibility:\s*hidden|display:\s*none/.test(decl)) {
+      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
+    }
+  }
+```
+
+Then prove it catches the real thing: temporarily restore `initial={{ opacity: 0, y: 12 }}` in `FadeIn`, build, and confirm the failure names the offending style. Restore, rebuild, confirm clean. This assertion is what stops the bug from coming back the next time someone reaches for a fade.
 
 - [ ] **Step 9: Verify the animated build and the theme toggle**
 
