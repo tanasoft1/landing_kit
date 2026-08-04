@@ -3,6 +3,7 @@ import { pages } from '~/config/pages.config'
 import { Container } from '~/shell/layout/container'
 import { localePath } from '~/shell/pages/enumerate'
 import { normalizePath } from '~/shell/pages/resolve-request'
+import { ThemeToggle } from '~/shell/theme/theme-toggle'
 import type { Locale, SiteConfig } from '~/shell/types'
 
 function labelFor(target: string, locale: Locale): string {
@@ -53,6 +54,11 @@ export function Header({
     </a>
   ))
 
+  const themeToggle =
+    site.theme.mode === 'both' ? (
+      <ThemeToggle label={locale === 'mn' ? 'Өнгө хувиргах' : 'Toggle theme'} />
+    ) : null
+
   return (
     <header className="border-border bg-background/80 sticky top-0 z-50 border-b backdrop-blur">
       <Container className="flex items-center justify-between gap-4 py-3">
@@ -66,6 +72,7 @@ export function Header({
         <nav aria-label={navLabel} className="hidden items-center gap-6 text-sm md:flex">
           {pageLinks}
           {localeLinks}
+          {themeToggle}
         </nav>
 
         <details className="relative md:hidden">
@@ -84,6 +91,7 @@ export function Header({
             {pageLinks}
             <span className="border-border my-2 border-t" aria-hidden="true" />
             {localeLinks}
+            {themeToggle}
           </nav>
         </details>
       </Container>

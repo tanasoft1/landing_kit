@@ -1,3 +1,4 @@
+import { FadeIn, Reveal } from '~/motion'
 import { Container } from '~/shell/layout/container'
 import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
@@ -8,7 +9,7 @@ export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroC
     <Section id={anchorId} surface={surface}>
       <Container>
         <div className="grid items-center gap-10 md:grid-cols-2">
-          <div>
+          <FadeIn>
             <p className="text-primary text-sm font-semibold tracking-wide uppercase">
               {copy.eyebrow}
             </p>
@@ -28,16 +29,18 @@ export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroC
                 {copy.secondaryCta.label}
               </a>
             </div>
-          </div>
+          </FadeIn>
           {copy.image ? (
-            <img
-              src={copy.image.src}
-              alt={copy.image.alt}
-              width={copy.image.width}
-              height={copy.image.height}
-              fetchPriority="high"
-              className="rounded-base w-full h-auto"
-            />
+            <Reveal>
+              <img
+                src={copy.image.src}
+                alt={copy.image.alt}
+                width={copy.image.width}
+                height={copy.image.height}
+                fetchPriority="high"
+                className="rounded-base w-full h-auto"
+              />
+            </Reveal>
           ) : null}
         </div>
       </Container>
