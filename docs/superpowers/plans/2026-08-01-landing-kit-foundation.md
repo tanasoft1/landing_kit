@@ -262,6 +262,9 @@ export default defineConfig({
     alias: {
       '~/motion': animation === 'on' ? r('./src/motion.animated.tsx') : r('./src/motion.noop.tsx'),
       '~/submit': submit === 'server' ? r('./src/submit.server.ts') : r('./src/submit.endpoint.ts'),
+      // Derived from config rather than an env var — the mode already lives in site.config.
+      '~/theme':
+        site.theme.mode === 'both' ? r('./src/theme.both.tsx') : r('./src/theme.single.tsx'),
       '~/config': config === 'onepage' ? r('./configs/smoke-onepage') : r('./src/config'),
       '~': r('./src'),
     },
@@ -2262,6 +2265,33 @@ git commit -m "feat: add prerendering, sitemap/robots emission, and build verifi
 - Consumes: `site.theme` (Task 4).
 - Produces: `~/motion` exporting `FadeIn`, `Stagger`, `Reveal` with identical signatures in both implementations; `themeScript(defaultMode)`; `<ThemeToggle>`.
 
+- [ ] **Step 0: Declare the shared motion contract**
+
+Create `src/motion.types.ts`. Both variants import this, so a signature added to one and not the other is a **compile error** rather than something only a human diff would notice. Without it, `tsc` only ever checks call sites against whichever file the tsconfig `paths` entry names, and `KIT_ANIMATION=off` becomes the one configuration nothing type-checks.
+
+```ts
+import type { ReactNode } from 'react'
+
+export type MotionProps = { children: ReactNode; className?: string; delay?: number }
+export type StaggerProps = { children: ReactNode; className?: string }
+
+/** Every `~/motion` variant must satisfy this exact surface. */
+export type MotionModule = {
+  FadeIn: (props: MotionProps) => ReactNode
+  Reveal: (props: MotionProps) => ReactNode
+  Stagger: (props: StaggerProps) => ReactNode
+}
+```
+
+Then at the bottom of **both** `motion.animated.tsx` and `motion.noop.tsx`, assert conformance:
+
+```ts
+import type { MotionModule } from '~/motion.types'
+// Drift between the two variants is a type error here, not a runtime surprise.
+const _contract: MotionModule = { FadeIn, Reveal, Stagger }
+void _contract
+```
+
 - [ ] **Step 1: Write the animated implementation**
 
 Create `src/motion.animated.tsx`. Only `transform` and `opacity` are animated, and `useReducedMotion` is honoured in one place.
@@ -2410,17 +2440,65 @@ export function ThemeToggle({ label }: { label: string }) {
 }
 ```
 
-- [ ] **Step 6: Mount both behind the mode check**
+- [ ] **Step 6: Mount both through the `~/theme` alias — NOT a runtime ternary**
 
-In `src/routes/__root.tsx`, inject the script in `<head>` only when `site.theme.mode === 'both'`:
+A JSX ternary on `site.theme.mode` renders nothing in single-mode builds but still **compiles the toggle, its `localStorage`/`matchMedia` calls, and the script builder into the client bundle** — Rollup cannot fold away an object-property comparison. A measured `mode: 'light'` build differed from `mode: 'both'` by 15 bytes, with `matchMedia` and `kit-theme` both still present. That is a boundary that leaks, and the spec is explicit that mode must never be a runtime branch a client site pays for.
+
+So theme follows the same alias-swap pattern already proven for `~/motion`. Create the two variants:
 
 ```tsx
-{site.theme.mode === 'both' ? (
-  <script dangerouslySetInnerHTML={{ __html: themeScript(site.theme.default ?? 'light') }} />
-) : null}
+// src/theme.both.tsx — the real implementations, re-exported so the files stay focused.
+export { ThemeToggle } from '~/shell/theme/theme-toggle'
+export { ThemeScript } from '~/shell/theme/theme-script'
 ```
 
-In `src/shell/chrome/header.tsx`, render `<ThemeToggle label={locale === 'mn' ? 'Өнгө хувиргах' : 'Toggle theme'} />` under the same condition. Single-mode builds must emit neither.
+```tsx
+// src/theme.single.tsx — identical surface, nothing rendered, nothing imported.
+// Because this variant imports no implementation, a single-mode build contains no
+// theme-switching code at all rather than merely rendering none of it.
+export function ThemeScript(_props: { defaultMode: 'light' | 'dark' }) {
+  return null
+}
+
+export function ThemeToggle(_props: { label: string }) {
+  return null
+}
+```
+
+Change `src/shell/theme/theme-script.ts` into a component so the no-op can be a component too — an empty string would otherwise leave a stray `<script></script>` in the markup:
+
+```tsx
+// src/shell/theme/theme-script.tsx
+export function ThemeScript({ defaultMode }: { defaultMode: 'light' | 'dark' }) {
+  const js = `(function(){try{var s=localStorage.getItem('kit-theme');var m=s||(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')||'${defaultMode}';if(m==='dark')document.documentElement.classList.add('dark')}catch(e){}})()`
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: must run before first paint, so it
+  // cannot be an effect; the content is a literal with only a constrained interpolation.
+  return <script dangerouslySetInnerHTML={{ __html: js }} />
+}
+```
+
+Then both call sites become unconditional — no ternary anywhere:
+
+```tsx
+// src/routes/__root.tsx, in <head>
+<ThemeScript defaultMode={site.theme.default ?? 'light'} />
+```
+
+```tsx
+// src/shell/chrome/header.tsx
+<ThemeToggle label={locale === 'mn' ? 'Өнгө хувиргах' : 'Toggle theme'} />
+```
+
+Both import from `~/theme`.
+
+**Verify the leak is actually closed**, since this is the whole point of the change:
+
+```bash
+# with site.theme.mode = 'light'
+pnpm build && grep -l 'kit-theme\|prefers-color-scheme' dist/client/assets/*.js
+```
+
+Expected: **no matches**. Also record the main chunk's byte size for `light` and for `both` — the difference must be substantially larger than the 15 bytes the runtime-ternary version produced. Then restore `mode: 'both'` and confirm the toggle still works in a browser.
 
 - [ ] **Step 7: Write the convention checker**
 
