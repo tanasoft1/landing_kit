@@ -1,4 +1,4 @@
-import { FadeIn, Reveal } from '~/motion'
+import { FadeIn } from '~/motion'
 import { Container } from '~/shell/layout/container'
 import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
@@ -31,7 +31,11 @@ export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroC
             </div>
           </FadeIn>
           {copy.image ? (
-            <Reveal>
+            // FadeIn, not Reveal: this image is above the fold and carries fetchPriority="high"
+            // (it's the LCP candidate for this variant). Reveal's opacity animation would ship
+            // `style="opacity:0"` in the prerendered HTML for exactly the element the LCP budget
+            // depends on — the hidden-content problem FadeIn's docstring exists to avoid.
+            <FadeIn>
               <img
                 src={copy.image.src}
                 alt={copy.image.alt}
@@ -40,7 +44,7 @@ export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroC
                 fetchPriority="high"
                 className="rounded-base w-full h-auto"
               />
-            </Reveal>
+            </FadeIn>
           ) : null}
         </div>
       </Container>
