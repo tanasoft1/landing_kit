@@ -3,6 +3,7 @@ import { pages } from '~/config/pages.config'
 import { site } from '~/config/site.config'
 import { PageView } from '~/shell/pages/page-view'
 import { resolveRequest } from '~/shell/pages/resolve-request'
+import { buildHead } from '~/shell/seo/build-head'
 
 export const Route = createFileRoute('/')({
   loader: () => {
@@ -10,6 +11,7 @@ export const Route = createFileRoute('/')({
     if (!resolved) throw notFound()
     return resolved
   },
+  head: ({ loaderData }) => (loaderData ? buildHead(loaderData, site, pages) : {}),
   component: HomeRoute,
 })
 
