@@ -21,6 +21,14 @@ export function buildHead(
   // HTML attribute name the way it does e.g. `htmlFor` or `crossOrigin` — it passes an
   // unrecognized-cased key through verbatim, so `hrefLang` would ship literally as
   // `hrefLang="..."` in the markup instead of `hreflang="..."`.
+  //
+  // Because of that same lack of remapping, React's dev-only DOM validator doesn't
+  // recognize this key either, and logs `Invalid DOM property 'hreflang'. Did you mean
+  // 'hrefLang'?` on every render in `pnpm dev`. That warning is expected and dev-only —
+  // do not "fix" it by renaming this key to `hrefLang`; doing so would silently reintroduce
+  // the wrong-case markup this comment exists to prevent. `scripts/verify-build.mjs`
+  // asserts the built HTML contains the lowercase `hreflang` attribute, so a regression
+  // here (in either direction) fails the build, not just the dev console.
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
     hreflang: l,

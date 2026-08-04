@@ -1,10 +1,25 @@
 import { motion, useReducedMotion } from 'motion/react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 
-export function FadeIn({ children, className, delay = 0 }: Props) {
+// `useReducedMotion` has no `matchMedia` to read during SSR, so the server always renders
+// the animated branch. If a client's very first (hydration-matching) render branched on the
+// real OS preference instead, a reduced-motion visitor's first render would disagree with
+// the server-rendered HTML — and React does not patch up that kind of attribute mismatch
+// during hydration, leaving the element frozen at its `initial` (invisible) style forever.
+// Deferring the branch to a state that starts `false` and only flips after mount keeps the
+// hydration pass matched, so the branch instead takes effect on a normal, fully-reconciled
+// update afterward.
+function useReducedMotionAfterMount() {
   const reduce = useReducedMotion()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  return mounted && reduce
+}
+
+export function FadeIn({ children, className, delay = 0 }: Props) {
+  const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
@@ -19,7 +34,7 @@ export function FadeIn({ children, className, delay = 0 }: Props) {
 }
 
 export function Reveal({ children, className, delay = 0 }: Props) {
-  const reduce = useReducedMotion()
+  const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
@@ -35,7 +50,7 @@ export function Reveal({ children, className, delay = 0 }: Props) {
 }
 
 export function Stagger({ children, className }: { children: ReactNode; className?: string }) {
-  const reduce = useReducedMotion()
+  const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div

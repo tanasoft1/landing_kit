@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
+import viteReact from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { pages } from './src/config/pages.config'
 import { site } from './src/config/site.config'
@@ -39,6 +40,7 @@ export default defineConfig({
         prerender: { enabled: true, outputPath: u.outputPath },
       })),
     }),
+    viteReact(),
     emitSeoFiles({ pages, site, outDir: OUT_DIR }),
   ],
 })
