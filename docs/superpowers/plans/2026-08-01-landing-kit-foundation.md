@@ -21,6 +21,7 @@ Every task's requirements implicitly include this section.
 - **Blocks are pure prop-driven components.** They receive `{ copy, site, resolve }` and read no context, no hooks-for-data, no router.
 - **Blocks never import `motion` directly** — only `~/motion`. Enforced by Biome.
 - **Blocks never write `py-section`, `px-gutter`, `max-w-*`, `container`, `min-h-screen`, a raw `<section>`, an arbitrary-value escape, or an inline `style`.** They compose `<Section>` and `<Container>`. Ordinary component padding (`py-3` on a button) is fine. Enforced by `scripts/check-conventions.mjs`.
+- **Every `~/x` alias variant pair needs a shared contract type.** `tsconfig.json`'s `paths` can only name one variant, so the other is never type-checked — the swapped configuration becomes the one nobody verifies, and drift surfaces as a broken build rather than a compile error. So for each boundary, declare `src/<name>.types.ts` exporting a module type, and end **both** variants with `const _contract: XModule = { … }; void _contract`. This applies to `~/motion`, `~/theme`, and `~/submit` alike. Getting this right for one boundary and not another is the mistake to avoid.
 - **Tailwind utilities, not inline styles.** Tokens are registered in `@theme` so Tailwind generates utilities from them (`py-section`, `px-gutter`, `max-w-page`, `text-display`, `rounded-base`, `font-display`). Do not use `style={{...}}` for anything the token layer covers, and do not use arbitrary-value escapes — `text-[length:var(--text-display)]`, `rounded-[var(--radius)]` — where a generated utility exists. Inline `style` is acceptable only for a genuinely dynamic value that cannot be a class.
 - **Mobile-first responsiveness, Tailwind default breakpoints** (`sm` 40rem, `md` 48rem, `lg` 64rem, `xl` 80rem). No horizontal overflow at 320px. Interactive chrome has tap targets ≥ 44px. Every UI-bearing task verifies at 375, 768, 1280 and 1536 plus a 320px overflow check.
 - **Every variant must render correctly under `motion.noop`** — no variant may depend on animation to be legible.
@@ -2446,24 +2447,55 @@ A JSX ternary on `site.theme.mode` renders nothing in single-mode builds but sti
 
 So theme follows the same alias-swap pattern already proven for `~/motion`. Create the two variants:
 
+First the shared contract, for the same reason `~/motion` has one — `tsconfig` `paths` names only `theme.both.tsx`, so without this the single-mode variant is never type-checked:
+
+```ts
+// src/theme.types.ts
+import type { ReactNode } from 'react'
+
+export type ThemeScriptProps = { defaultMode: 'light' | 'dark' }
+export type ThemeToggleProps = { label: string }
+
+/** Every `~/theme` variant must satisfy this exact surface. */
+export type ThemeModule = {
+  ThemeScript: (props: ThemeScriptProps) => ReactNode
+  ThemeToggle: (props: ThemeToggleProps) => ReactNode
+}
+```
+
 ```tsx
-// src/theme.both.tsx — the real implementations, re-exported so the files stay focused.
-export { ThemeToggle } from '~/shell/theme/theme-toggle'
-export { ThemeScript } from '~/shell/theme/theme-script'
+// src/theme.both.tsx — the real implementations.
+// Imported and re-exported rather than `export … from`, so the contract assertion below can
+// actually see them. A bare re-export would match any signature and check nothing.
+import { ThemeScript } from '~/shell/theme/theme-script'
+import { ThemeToggle } from '~/shell/theme/theme-toggle'
+import type { ThemeModule } from '~/theme.types'
+
+export { ThemeScript, ThemeToggle }
+
+const _contract: ThemeModule = { ThemeScript, ThemeToggle }
+void _contract
 ```
 
 ```tsx
 // src/theme.single.tsx — identical surface, nothing rendered, nothing imported.
 // Because this variant imports no implementation, a single-mode build contains no
 // theme-switching code at all rather than merely rendering none of it.
-export function ThemeScript(_props: { defaultMode: 'light' | 'dark' }) {
+import type { ThemeModule, ThemeScriptProps, ThemeToggleProps } from '~/theme.types'
+
+export function ThemeScript(_props: ThemeScriptProps) {
   return null
 }
 
-export function ThemeToggle(_props: { label: string }) {
+export function ThemeToggle(_props: ThemeToggleProps) {
   return null
 }
+
+const _contract: ThemeModule = { ThemeScript, ThemeToggle }
+void _contract
 ```
+
+The two assertions together are what make drift impossible: if the real `ThemeToggle` gains a required prop, `theme.both.tsx`'s assertion fails until `ThemeModule` is updated, and updating `ThemeModule` then fails `theme.single.tsx` until it matches too.
 
 Change `src/shell/theme/theme-script.ts` into a component so the no-op can be a component too — an empty string would otherwise leave a stray `<script></script>` in the markup:
 
@@ -2653,6 +2685,23 @@ export const contactSchema = z.object({
 
 export type ContactInput = z.infer<typeof contactSchema>
 export type SubmitResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Every `~/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one
+ * variant, so without this the other is never type-checked and the swapped configuration
+ * becomes the one nobody verifies. Same rule as `~/motion` and `~/theme`.
+ */
+export type SubmitModule = {
+  submitContact: (input: ContactInput) => Promise<SubmitResult>
+}
+```
+
+End **both** `submit.server.ts` and `submit.endpoint.ts` with:
+
+```ts
+import type { SubmitModule } from '~/submit-schema'
+const _contract: SubmitModule = { submitContact }
+void _contract
 ```
 
 The honeypot and the 2-second minimum are the spam handling — no CAPTCHA, per the spec.
