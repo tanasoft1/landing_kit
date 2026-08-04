@@ -1,3 +1,4 @@
+import { FadeIn } from '~/motion'
 import { Container } from '~/shell/layout/container'
 import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
@@ -7,10 +8,14 @@ export function HeroCentered({ copy, resolve, surface, anchorId }: BlockProps<He
   return (
     <Section id={anchorId} surface={surface}>
       <Container className="text-center">
-        <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
-        <h1 className="mt-3 text-display font-bold text-balance">{copy.heading}</h1>
-        <p className="text-muted-foreground mx-auto mt-5 text-lead text-pretty">{copy.lead}</p>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <FadeIn>
+          <p className="text-primary text-sm font-semibold tracking-wide uppercase">
+            {copy.eyebrow}
+          </p>
+          <h1 className="mt-3 text-display font-bold text-balance">{copy.heading}</h1>
+          <p className="text-muted-foreground mx-auto mt-5 text-lead text-pretty">{copy.lead}</p>
+        </FadeIn>
+        <FadeIn delay={0.1} className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <a
             href={resolve(copy.primaryCta.target)}
             className="bg-primary text-primary-foreground rounded-base inline-flex min-h-11 items-center px-6 py-3 font-medium"
@@ -23,7 +28,7 @@ export function HeroCentered({ copy, resolve, surface, anchorId }: BlockProps<He
           >
             {copy.secondaryCta.label}
           </a>
-        </div>
+        </FadeIn>
       </Container>
     </Section>
   )
