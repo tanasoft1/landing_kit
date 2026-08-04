@@ -16,9 +16,14 @@ export function buildHead(
   // One separator for every page, so titles stay visually consistent across the site.
   const title = `${seo.title} · ${site.name}`
 
+  // `hreflang`, not the JSX-conventional `hrefLang`: TanStack's <link> asset spreads these
+  // attrs straight onto a React element, and React does not remap `hrefLang` to the real
+  // HTML attribute name the way it does e.g. `htmlFor` or `crossOrigin` — it passes an
+  // unrecognized-cased key through verbatim, so `hrefLang` would ship literally as
+  // `hrefLang="..."` in the markup instead of `hreflang="..."`.
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
-    hrefLang: l,
+    hreflang: l,
     href: `${site.url}${localePath(page.path, l, site)}`,
   }))
 
@@ -43,7 +48,7 @@ export function buildHead(
       ...alternates,
       {
         rel: 'alternate',
-        hrefLang: 'x-default',
+        hreflang: 'x-default',
         href: `${site.url}${localePath(page.path, site.defaultLocale, site)}`,
       },
     ],
