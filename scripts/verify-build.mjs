@@ -14,12 +14,12 @@ const registrySrc = readFileSync(join(blocksDir, 'registry.ts'), 'utf8')
 // A bare `\bhero\b` over the whole file is satisfied by `// TODO: register hero`, which
 // is exactly the half-done state this check exists to catch.
 const registryCode = registrySrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-const registryObject = registryCode.match(/export const registry\s*=\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+const registryObject = extractObjectLiteral(registryCode, 'export const registry')
 if (!registryObject) fail('registry', 'could not locate the exported registry object literal')
 
 for (const entry of readdirSync(blocksDir)) {
   if (!statSync(join(blocksDir, entry)).isDirectory()) continue
-  if (!new RegExp(`\\b${entry}\\b`).test(registryObject)) {
+  if (!new RegExp(`\\b${entry}\\b`).test(registryObject ?? '')) {
     fail('registry', `block folder '${entry}' is not registered in the registry object`)
   }
 }
@@ -28,13 +28,9 @@ for (const entry of readdirSync(blocksDir)) {
 // Pages are defined ONLY in pages.config.ts, and prerendering is driven from that list
 // (autoStaticPathsDiscovery is off). So a stray route file is a page that is served but
 // never prerendered, never in the sitemap, and never checked by anything below.
-const ALLOWED_ROUTE_FILES = new Set([
-  '__root.tsx',
-  'index.tsx',
-  '$.tsx',
-  'debug.tsx',
-  'routeTree.gen.ts',
-])
+// No `routeTree.gen.ts` here: the generated file lives at `src/routeTree.gen.ts`, a sibling of
+// this directory, so listing it would be dead weight that reads as though it were expected here.
+const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'debug.tsx'])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {
     fail(
@@ -50,14 +46,47 @@ const descriptions = new Map()
 
 const EXPECTED_HREFLANG = new Set(['mn', 'en', 'x-default'])
 
+/**
+ * Decode HTML entities generically, including NUMERIC references.
+ *
+ * This must be general rather than a list of the escapes we happen to have seen. React's
+ * SSR serializer escapes an apostrophe as `&#x27;` (hex), while JSON-LD goes out through
+ * `dangerouslySetInnerHTML` unescaped — so a title or description containing an apostrophe
+ * ("Mongolia's", "we're") would compare unequal and fail a CORRECT build. A false failure in
+ * the project's only machine gate is worse than a missing check: it teaches people to
+ * distrust the gate.
+ *
+ * `&amp;` is decoded LAST so that `&amp;lt;` yields `&lt;` rather than `<`.
+ */
 const decodeEntities = (s) =>
   s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+
+/**
+ * Balanced-brace extraction. A non-greedy `\{([\s\S]*?)\}` stops at the first inner `}`, so
+ * one inline object literal in the registry would truncate the captured text and silently
+ * stop checking every entry declared after it — reintroducing exactly the hole this check
+ * was added to close.
+ */
+function extractObjectLiteral(src, marker) {
+  const start = src.indexOf(marker)
+  if (start === -1) return null
+  const open = src.indexOf('{', start)
+  if (open === -1) return null
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}' && --depth === 0) return src.slice(open + 1, i)
+  }
+  return null
+}
 
 for (const u of urls) {
   const file = join(outDir, u.outputPath)
@@ -94,7 +123,9 @@ for (const u of urls) {
     if (!EXPECTED_HREFLANG.has(got)) fail(u.path, `unexpected hreflang '${got}'`)
   }
 
-  const title = html.match(/<title>([^<]*)<\/title>/)?.[1]?.trim()
+  // Decoded, because it is compared against JSON-LD values that were never escaped.
+  // Comparing an escaped string to an unescaped one fails on the first apostrophe.
+  const title = decodeEntities(html.match(/<title>([^<]*)<\/title>/)?.[1] ?? '').trim()
   if (!title) fail(u.path, 'empty or missing <title>')
   else {
     if (titles.has(title)) fail(u.path, `duplicate <title> shared with ${titles.get(title)}`)
