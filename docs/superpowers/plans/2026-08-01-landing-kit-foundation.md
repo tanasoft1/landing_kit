@@ -115,6 +115,7 @@ Replace the `dependencies`/`devDependencies` in `package.json` with these exact 
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
     "@tailwindcss/vite": "^4.3.0",
+    "@vitejs/plugin-react": "^5.0.0",
     "tailwindcss": "^4.3.0",
     "typescript": "6.0.3",
     "vite": "^7.0.0",
@@ -246,6 +247,7 @@ Create `vite.config.ts`. The env vars are what Task 7 and Task 10 use to build a
 ```ts
 import { defineConfig } from 'vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
+import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 
@@ -264,11 +266,13 @@ export default defineConfig({
       '~': r('./src'),
     },
   },
-  plugins: [tailwindcss(), tanstackStart()],
+  plugins: [tailwindcss(), tanstackStart(), viteReact()],
 })
 ```
 
 Alias order matters: `~/motion`, `~/submit`, and `~/config` must precede the catch-all `~`.
+
+**`viteReact()` is not optional, and it must come after `tanstackStart()`.** Without it, TanStack Start's dev server cannot resolve `/@react-refresh`, the client entry module 500s, and **the page renders but never hydrates** — no toggle, no form, no interactivity at all. Production builds are unaffected because they need no HMR runtime, so `pnpm build` and every `curl`-based check pass while `pnpm dev` is quietly useless. That asymmetry is exactly why Step 9 below verifies hydration in a browser rather than trusting a build.
 
 - [ ] **Step 8: Add `.gitignore` entries**
 
@@ -282,13 +286,30 @@ dist
 .lighthouseci
 ```
 
-- [ ] **Step 9: Verify the dev server runs**
+- [ ] **Step 9: Verify the dev server runs AND hydrates**
 
 ```bash
 pnpm dev
 ```
 
-Open the printed URL. Expected: the scaffolded page renders with no console errors. Stop the server.
+Open the printed URL. Expected: the page renders with no console errors.
+
+**Then prove hydration actually happened** — rendering is not hydrating, and SSR output looks identical either way:
+
+```js
+// In the browser console:
+!!Object.keys(document.querySelector('main')).find((k) => k.startsWith('__react'))
+```
+
+Expected: `true`. If it is `false`, or if the network panel shows a 500 on
+`/@id/virtual:tanstack-start-dev-client-entry`, the React Refresh runtime is missing —
+check that `viteReact()` is in the plugin list. Every `curl`- and build-based check passes in
+this state, so nothing else in this plan will catch it.
+
+Also check the dev server's own terminal output for errors, not just the browser console: Vite
+reports module-load failures there while the page still renders fine.
+
+Stop the server.
 
 - [ ] **Step 10: Verify lint and types are clean**
 
@@ -1103,7 +1124,7 @@ export const site = {
   },
   nav: [{ target: 'hero' }],
   theme: { mode: 'both', default: 'light' },
-} satisfies SiteConfig
+}
 ```
 
 **Only `hero` in `nav` for now.** The header calls `resolve()` on every nav target, and the resolver throws on a target that matches no page and no placed block. `contact` is neither until Task 8, so listing it here would crash every page render. Task 8 adds `{ target: 'contact' }` at the same moment it registers the block — same reason the hero CTAs point at `'hero'` until then.
@@ -2840,15 +2861,19 @@ Create `configs/smoke-onepage/site.config.ts` — same as `src/config/site.confi
 ```ts
 import type { SiteConfig } from '~/shell/types'
 
-export const site = {
+// Annotated, not `satisfies` — see the note in src/config/site.config.ts. This file is the
+// reason: with `satisfies`, `mode: 'light'` narrows to a literal and every
+// `site.theme.mode === 'both'` check in the shell becomes a TS2367 type error.
+export const site: SiteConfig = {
   name: 'Landing Kit',
   url: 'https://example.mn',
   defaultLocale: 'mn',
   locales: ['mn', 'en'],
+  ogImageDefault: '/og-default.jpg',
   organization: { kind: 'Organization', legalName: 'Landing Kit LLC', logo: '/logo.svg' },
   nav: [{ target: 'hero' }, { target: 'contact' }],
   theme: { mode: 'light' },
-} satisfies SiteConfig
+}
 ```
 
 The `~/config` alias points at a *directory*, so both files must be importable as `~/config/pages.config` and `~/config/site.config`. Confirm the alias resolves to the directory and not a single file; adjust Task 1's alias to `~/config` → directory path if imports fail.
