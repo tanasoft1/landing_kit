@@ -1840,18 +1840,26 @@ export function emitSeoFiles({
     closeBundle() {
       const urls = enumerateUrls(pages, site)
 
+      const alternateLink = (hreflang: string, path: string) =>
+        `    <xhtml:link rel="alternate" hreflang="${hreflang}" href="${site.url}${path}"/>`
+
       const entries = urls
         .map((u) => {
-          const alternates = site.locales
+          const siblings = urls.filter((x) => x.pageId === u.pageId)
+          const lines = site.locales
             .map((l) => {
-              const alt = urls.find((x) => x.pageId === u.pageId && x.locale === l)
-              return alt
-                ? `    <xhtml:link rel="alternate" hreflang="${l}" href="${site.url}${alt.path}"/>`
-                : ''
+              const alt = siblings.find((x) => x.locale === l)
+              return alt ? alternateLink(l, alt.path) : ''
             })
             .filter(Boolean)
-            .join('\n')
-          return `  <url>\n    <loc>${site.url}${u.path}</loc>\n${alternates}\n  </url>`
+
+          // x-default must appear here too: the <head> declares it, and a sitemap that
+          // lists a different alternate set is a second, conflicting answer to the same
+          // question. Google reads both.
+          const fallback = siblings.find((x) => x.locale === site.defaultLocale)
+          if (fallback) lines.push(alternateLink('x-default', fallback.path))
+
+          return `  <url>\n    <loc>${site.url}${u.path}</loc>\n${lines.join('\n')}\n  </url>`
         })
         .join('\n')
 
@@ -2025,6 +2033,19 @@ else {
   for (const u of urls) {
     if (!xml.includes(`<loc>${site}${u.path}</loc>`)) fail('sitemap.xml', `missing ${u.path}`)
   }
+
+  // The sitemap's alternate set must match what the <head> declares, x-default included.
+  // Two different answers to "what are this page's alternates" is worse than one.
+  const perUrl = xml.split('<url>').slice(1)
+  if (perUrl.length !== urls.length) {
+    fail('sitemap.xml', `expected ${urls.length} <url> entries, found ${perUrl.length}`)
+  }
+  perUrl.forEach((entry, i) => {
+    const langs = new Set([...entry.matchAll(/hreflang="([^"]+)"/g)].map((m) => m[1]))
+    for (const need of ['mn', 'en', 'x-default']) {
+      if (!langs.has(need)) fail('sitemap.xml', `entry ${i + 1} missing hreflang '${need}'`)
+    }
+  })
 }
 if (!existsSync(join(outDir, 'robots.txt'))) fail('robots.txt', 'not emitted')
 
