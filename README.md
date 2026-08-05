@@ -1,183 +1,219 @@
-Welcome to your new TanStack Start app!
+# Landing Kit
 
-# Getting Started
+A bilingual (Mongolian / English) landing-page boilerplate built on TanStack Start. The premise:
+a scaffolding CLI (or a person copying this repo) should be able to produce a different site by
+**swapping config files and env flags — never by editing components**. Everything in this README
+exists to keep that true.
 
-To run this application:
+## Contents
+
+- [Quick start](#quick-start)
+- [Scripts](#scripts)
+- [Architecture in one page](#architecture-in-one-page)
+- [Adding a block](#adding-a-block)
+- [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
+- [Reskinning: the token surface](#reskinning-the-token-surface)
+- [The Cyrillic font requirement](#the-cyrillic-font-requirement)
+- [The three env flags](#the-three-env-flags)
+- [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
+- [The contact form](#the-contact-form)
+- [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
+- [Lighthouse budget](#lighthouse-budget)
+
+## Quick start
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-# Building For Production
+## Scripts
 
-To build this application for production:
+| Script | What it does | What it verifies |
+|---|---|---|
+| `pnpm dev` | Starts the dev server (`vite dev`). | — |
+| `pnpm build` | Production build with prerendering (`vite build`). | — |
+| `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
+| `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
+| `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
+| `pnpm conventions` | `node scripts/check-conventions.mjs` | Blocks use layout primitives (`<Section>`, `<Container>`) instead of raw spacing/width utilities, and never render a literal `<h1>`/`<h2>` (heading level is renderer-assigned — see below). |
+| `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
+| `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
+| `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
+| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`. | Mobile (throttled CPU + network), the harder and more representative preset. |
+| `pnpm lighthouse:desktop` | Same, with `--collect.settings.preset=desktop`. | Desktop-only layout/contrast regressions. |
+
+`node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
+`.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
+whichever config just built, not a hardcoded page list. It asserts: exactly one `<h1>` per page,
+no hidden content (`opacity:0`, `visibility:hidden`, `display:none`) in the prerendered HTML, a
+complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that the `<head>` and
+`sitemap.xml` agree on every page's alternates.
+
+## Architecture in one page
+
+- **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
+  A block exports a `manifest` (`variants`, `defaultVariant`, `copy` per locale, optional `nav`
+  and `schema`) and one or more variant components with the signature
+  `(props: BlockProps<Copy>) => ReactNode`.
+- **Pages** are declared *only* in `pages.config.ts` (`configs/<name>/pages.config.ts` or
+  `src/config/pages.config.ts`) as an ordered list of block references. There is no manual
+  routing — `src/routes/$.tsx` is a catch-all that resolves any path against the page list.
+- **`BlockProps`** is `{ copy, site, resolve, surface, anchorId, headingLevel }`. Only `copy` is
+  block-specific; everything else is assigned by the renderer:
+  - `resolve(target)` turns a page id or block id into the right `href` — a page id becomes a
+    real path, a block id present on the *current* page becomes an in-page anchor (`#id`), and a
+    block id on *another* page becomes `path#id`. The same component, same copy, produces a page
+    link or an anchor link purely based on where the target block actually lives in the current
+    config — this is the mechanism the one-page smoke config exercises.
+  - `headingLevel` is `1` for the page's first block and `2` for every other block. A block never
+    decides this itself (it doesn't know if it opens the page); it renders
+    `const H = headingLevel === 1 ? 'h1' : 'h2'` and uses `<H>`. `check-conventions.mjs` forbids
+    a literal `<h1>`/`<h2>` anywhere in `src/blocks`, no exceptions.
+  - `surface` alternates `default`/`muted` automatically across blocks on a page (or is set
+    per-block-reference in `pages.config.ts`), and the block hands it straight to its own
+    `<Section surface={surface}>`.
+- **Three swappable boundaries**, each an import alias resolved in `vite.config.ts` based on an
+  env flag, never on an `if` inside a component: `~/motion`, `~/theme`, `~/submit`. See
+  [The three env flags](#the-three-env-flags).
+
+## Adding a block
+
+1. Copy an existing block folder, e.g. `src/blocks/hero/` → `src/blocks/testimonials/`.
+2. Edit `manifest.ts`: change `id`, point `variants`/`defaultVariant` at your component(s), and
+   provide `copy: { mn, en }` — both locales, always (there is no fallback locale for block copy;
+   a parity check across `copy.mn.ts`/`copy.en.ts` is enforced by TypeScript, not a script).
+3. Add one line to `src/blocks/registry.ts`'s `manifests`/`registry` objects. `BlockId` is
+   derived from these keys, so nothing else needs updating for TypeScript to know your new block
+   exists.
+4. Add the block's id (or `{ id, variant, surface }`) to a page's `blocks` array in
+   `pages.config.ts`.
+
+`scripts/verify-build.mjs` cross-checks that every folder under `src/blocks/` appears in the
+registry, so a half-finished block (folder exists, not registered) fails `pnpm verify` loudly
+instead of silently shipping unused.
+
+## Adding a variant to an existing block
+
+Add a component with the `BlockProps<Copy>` signature, then add it to that block's
+`manifest.ts` under `variants: { ..., myVariant: MyComponent }`. Reference it from
+`pages.config.ts` as `{ id: 'hero', variant: 'myVariant' }`. No registry change needed — variants
+are scoped to their own block's manifest.
+
+## Reskinning: the token surface
+
+All visual identity lives in CSS custom properties, in two layers:
+
+- `src/styles/theme.css` — the **system**: the fixed type scale (`--text-display`, `--text-h2`,
+  ...), spacing rhythm, and the `@theme inline` block that maps token names to Tailwind utilities
+  (`--color-primary`, `--font-display`, `--radius-base`, ...). Don't edit this to reskin.
+- `src/styles/presets/aurora.css` — the **skin**: font pairing (`--face-display`,
+  `--face-body`), shape (`--radius`, `--section-y`, `--gutter`, `--width-page`), and the actual
+  light/dark palette values (`--c-background`, `--c-primary`, ...) as OKLCH colors. This is what
+  a new preset replaces wholesale — swap the `@import` in `theme.css` to point at a different
+  file in `presets/` to reskin without touching any component or block.
+
+Only `aurora` exists today; presets 2 and 3 are deferred to a later plan.
+
+## The Cyrillic font requirement
+
+Both font families (`@fontsource-variable/inter`, `@fontsource-variable/manrope`) **must** have
+Cyrillic coverage, because Mongolian Cyrillic uses letters (`ө`, `ү`) outside the basic Cyrillic
+Unicode block, in the "Cyrillic Extended" range. If you swap a preset's `--face-display`/
+`--face-body`, verify the replacement font ships a `cyrillic` *and* `cyrillic-ext` subset — a
+font that only covers `cyrillic` renders Mongolian text with `ө`/`ү` falling back to a
+mismatched system font, which is easy to miss if you only proofread the English copy.
+
+This also means a Mongolian page genuinely ships more font-subset weight than the English one
+(extra network requests for `cyrillic`/`cyrillic-ext` files on top of `latin`) — real, unavoidable
+bytes, not a bug. `src/shell/seo/build-head.ts` preloads the current locale's critical
+(above-the-fold) font subset for this reason; see [Lighthouse budget](#lighthouse-budget) for why.
+
+## The three env flags
+
+Set as environment variables at build/dev time; each swaps a `~/motion`, `~/theme`, or `~/submit`
+import alias in `vite.config.ts` — never branched on inside a component.
+
+| Flag | Values | Effect |
+|---|---|---|
+| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `~/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
+| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `~/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
+| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `~/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
+
+`site.theme.mode` (`'light' \| 'dark' \| 'both'`, set in `site.config.ts`, not an env flag) works
+the same way: `'both'` aliases `~/theme` to `src/theme.both.tsx` (toggle + no-flash script
+included), anything else aliases it to `src/theme.single.tsx` — a single-mode build ships **no**
+theme-switching code at all, not merely a hidden toggle.
+
+## Swapping the whole config: `configs/`
+
+`configs/smoke-onepage/` is a complete second config — `pages.config.ts` (one page holding both
+existing blocks) and `site.config.ts` (light-only) — used only to prove the config-swapping
+premise end to end. It contains **no components and no overrides**, only config, and requires
+zero edits under `src/blocks/` or `src/shell/` to work.
 
 ```bash
-pnpm build
+pnpm smoke:onepage   # KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint
 ```
 
-## Styling
+produces a working single-page, light-only, unanimated site: `hero` (`split` variant) followed by
+`contact` on one page, where the hero's primary CTA resolves to `#contact` (an in-page anchor)
+instead of `/contact` (a page link) — same component, same copy, different config.
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+If you add a real second scaffolded config, remember: **`vite.config.ts` itself must branch on
+`KIT_CONFIG` too**, not just the `~/config` alias. The alias only affects app code that Vite
+bundles; `vite.config.ts`'s own `pages`/`site` (used to build the TanStack Start `prerender.pages`
+list and to drive `emitSeoFiles`) are read directly by the config file at build-config-eval time,
+before any aliasing applies.
 
-### Removing Tailwind CSS
+## The contact form
 
-If you prefer not to use Tailwind CSS:
+`src/blocks/contact/contact-form.tsx` uses `react-hook-form` + `zod` (`submissionSchema` in
+`src/submit-schema.ts`), shared by both `~/submit` variants.
 
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Remove `@tailwindcss/vite` and `tailwindcss` from `package.json`
+## Gotchas that cost real debugging time
 
+- **`VITE_CONTACT_ENDPOINT` must send CORS headers.** In `endpoint` mode the browser POSTs
+  cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight. The form
+  surfaces this as the same generic error a code bug would produce — it is not one. If a client's
+  contact form "silently fails," check this first.
+- **The contact form's 2-second timing guard rejects fast submissions** — including your own
+  while testing it manually. That's the spam check working as intended, not a bug.
+- **`<input type="email">` triggers native browser validation** that blocks submission before any
+  handler runs, so a malformed email never reaches the Zod schema — don't go looking for a schema
+  bug that isn't there.
+- **`submit.rpc.ts` is deliberately not named `submit.server.ts`.** TanStack Start's client-import
+  protection refuses to bundle any `**/*.server.*` file into the client by filename, regardless of
+  content. This file is the sanctioned client-safe `createServerFn` stub the client is meant to
+  import, so renaming keeps the protection intact for every *other* file instead of carving out an
+  exception that the next person copying this pattern could get wrong.
+- **React logs `Invalid DOM property 'hreflang'. Did you mean 'hrefLang'?` in `pnpm dev`.**
+  Expected and deliberate — the lowercase form is what SEO tooling reads from the built HTML, and
+  `scripts/verify-build.mjs` asserts on the lowercase attribute. Don't "fix" it by renaming to
+  `hrefLang`; that would just ship the wrong casing.
+- **A light-only or dark-only build ships no theme-switching code at all** — not a hidden toggle,
+  none of the JS. Same for `KIT_ANIMATION=off` and the `motion` library.
+- **Prerendered files are `<path>/index.html`, and some static hosts serve them by literal
+  filename** rather than rewriting `/` to `index.html` while keeping the browser's address bar at
+  `/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without
+  care, that leaves `window.location.pathname` as `/index.html` on hydration, which the router
+  won't match to any page — `src/shell/pages/resolve-request.ts`'s `normalizePath` collapses a
+  trailing `/index.html` to `/` for exactly this reason. If you see a page flash to a "Not Found"
+  state right after hydrating, check this first.
 
+## Lighthouse budget
 
-## Routing
+`lighthouserc.json` asserts, on both `http://localhost/index.html` (default locale) and
+`http://localhost/en/index.html`, against the **default** config's build (`pnpm build`, i.e.
+`KIT_ANIMATION=on`, `KIT_SUBMIT=endpoint`, `KIT_CONFIG=default`):
 
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
+- `categories:seo` ≥ 1
+- `categories:accessibility` ≥ 0.95
+- `categories:performance` ≥ 0.95
+- `cumulative-layout-shift` ≤ 0.01
 
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+`pnpm lighthouse` runs Lighthouse CI's default **mobile** preset (throttled CPU + network) — the
+harder, more representative run for these sites. `pnpm lighthouse:desktop` runs the same budget
+against the desktop preset, catching desktop-only layout/contrast regressions. Both are expected
+to pass the same budget; see the Task 9 report for the current status and a known open gap on the
+Mongolian homepage's mobile performance score, and its diagnosed (not yet fixed) cause.

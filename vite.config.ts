@@ -3,14 +3,23 @@ import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { pages } from './src/config/pages.config'
-import { site } from './src/config/site.config'
+import { pages as onepagePages } from './configs/smoke-onepage/pages.config'
+import { site as onepageSite } from './configs/smoke-onepage/site.config'
+import { pages as defaultPages } from './src/config/pages.config'
+import { site as defaultSite } from './src/config/site.config'
 import { enumerateUrls } from './src/shell/pages/enumerate'
 import { emitSeoFiles } from './src/shell/seo/emit-plugin'
 
 const animation = process.env.KIT_ANIMATION ?? 'on'
 const submit = process.env.KIT_SUBMIT ?? 'endpoint'
 const config = process.env.KIT_CONFIG ?? 'default'
+
+// The `~/config` alias below only affects app code bundled by Vite. This file itself drives
+// prerendering (`tanstackStart({ pages: ... })`) and SEO emission from `pages`/`site` directly,
+// so it must also branch on KIT_CONFIG here — otherwise a one-page config still prerenders the
+// default config's routes and the alias swap is a dead letter for the build driver.
+const pages = config === 'onepage' ? onepagePages : defaultPages
+const site = config === 'onepage' ? onepageSite : defaultSite
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 

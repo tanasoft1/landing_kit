@@ -1,8 +1,27 @@
+import interCyrillic from '@fontsource-variable/inter/files/inter-cyrillic-wght-normal.woff2'
+import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2'
+import manropeCyrillic from '@fontsource-variable/manrope/files/manrope-cyrillic-wght-normal.woff2'
+import manropeLatin from '@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2'
 import type { BlockId } from '~/blocks/registry'
 import { localePath } from '~/shell/pages/enumerate'
 import type { ResolvedPage } from '~/shell/pages/resolve-request'
-import type { PageConfig, SiteConfig } from '~/shell/types'
+import type { Locale, PageConfig, SiteConfig } from '~/shell/types'
 import { buildJsonLd } from './json-ld'
+
+// `h1`/`h2`/`h3` render in the display face and everything else in the body face (see
+// `theme.css`), so the above-the-fold hero — heading AND lead paragraph, both candidates for
+// FCP/LCP — can't paint until its two font subsets arrive. Discovery through the `@font-face`
+// rule alone happens only after the render-blocking stylesheet is fetched *and* parsed, a
+// sequential round trip that Lighthouse's throttled-mobile preset counts as most of the
+// hero's "Render Delay" (confirmed against `pnpm lighthouse` while chasing the performance
+// budget in Task 9). Preloading the locale-appropriate subsets lets the browser fetch them in
+// parallel with the stylesheet instead of waiting for it. Mongolian needs the cyrillic
+// subset (it uses Cyrillic-range letters like `ө`/`ү` outside Latin), English the latin one;
+// this only covers the two locales this boilerplate ships with.
+const CRITICAL_FONTS_BY_LOCALE: Partial<Record<Locale, string[]>> = {
+  mn: [manropeCyrillic, interCyrillic],
+  en: [manropeLatin, interLatin],
+}
 
 export function buildHead(
   resolved: ResolvedPage<BlockId>,
@@ -35,6 +54,14 @@ export function buildHead(
     href: `${site.url}${localePath(page.path, l, site)}`,
   }))
 
+  const criticalFontPreloads = (CRITICAL_FONTS_BY_LOCALE[locale] ?? []).map((href) => ({
+    rel: 'preload',
+    as: 'font',
+    type: 'font/woff2',
+    href,
+    crossOrigin: '',
+  }))
+
   return {
     meta: [
       { title },
@@ -52,6 +79,7 @@ export function buildHead(
       { name: 'twitter:image', content: ogImage },
     ],
     links: [
+      ...criticalFontPreloads,
       { rel: 'canonical', href: canonical },
       ...alternates,
       {
