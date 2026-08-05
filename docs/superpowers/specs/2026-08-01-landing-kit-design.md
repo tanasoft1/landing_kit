@@ -139,6 +139,7 @@ export type BlockProps<C> = {
   resolve: (target: string) => string // link resolver, see §5
   surface: Surface                    // assigned by the renderer, see §8
   anchorId: string                    // unique per instance, see below
+  headingLevel: 1 | 2                 // 1 for the page's first block, see below
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -183,6 +184,19 @@ two CTAs, or a hero above and below a feature list — and a block hardcoding
 jump to the first instance. The renderer therefore assigns `anchorId`, using the block id for
 the first occurrence and `<id>-2`, `<id>-3` for later ones. `resolve('cta')` targets the first
 instance, which is the useful default.
+
+**Heading level is also the renderer's decision.** The first block on a page renders its section
+heading as `<h1>`; every later block uses `<h2>`. A block cannot know whether it opens the page, so
+it receives `headingLevel` and obeys.
+
+The alternative — every block hardcoding `<h2>`, with the shell injecting a hidden `<h1>` for pages
+that lack a hero — was rejected. It yields a page whose real, visible heading is an `<h2>` shadowed
+by invisible duplicate text, precisely the wrong shape for a kit built for search visibility. The
+visible heading should *be* the `<h1>`.
+
+Consequence worth knowing: a page whose first block renders no heading at all (a bare logo strip,
+say) ends up with no `<h1>`. That is not silent — `verify-build.mjs` asserts exactly one `<h1>` per
+page, so the build fails and names the page.
 
 ### Locale parity is a compile error
 
