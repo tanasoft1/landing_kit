@@ -1,4 +1,3 @@
-import { Suspense } from 'react'
 import { type BlockId, registry } from '~/blocks/registry'
 import type { BlockRef, Locale, SiteConfig, Surface } from '~/shell/types'
 
@@ -51,22 +50,21 @@ export function RenderBlocks({
         const anchorId = occurrence === 1 ? id : `${id}-${occurrence}`
 
         return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: page.blocks is static config and the same block id can repeat, so index is required for uniqueness
-          <Suspense key={`${id}-${variantName}-${index}`} fallback={null}>
-            <Component
-              copy={manifest.copy[locale]}
-              site={site}
-              resolve={resolve}
-              // The trailing 'default' satisfies noUncheckedIndexedAccess; a modulo
-              // index into ALTERNATION can never actually miss.
-              surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
-              anchorId={anchorId}
-              // The first block on the page owns the page's single <h1>; every later block is a
-              // <h2>. A block cannot know its own position, so this is assigned here, not by the
-              // block — same reasoning as `surface` and `anchorId` above.
-              headingLevel={index === 0 ? 1 : 2}
-            />
-          </Suspense>
+          <Component
+            // biome-ignore lint/suspicious/noArrayIndexKey: page.blocks is static config and the same block id can repeat, so index is required for uniqueness
+            key={`${id}-${variantName}-${index}`}
+            copy={manifest.copy[locale]}
+            site={site}
+            resolve={resolve}
+            // The trailing 'default' satisfies noUncheckedIndexedAccess; a modulo
+            // index into ALTERNATION can never actually miss.
+            surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
+            anchorId={anchorId}
+            // The first block on the page owns the page's single <h1>; every later block is a
+            // <h2>. A block cannot know its own position, so this is assigned here, not by the
+            // block — same reasoning as `surface` and `anchorId` above.
+            headingLevel={index === 0 ? 1 : 2}
+          />
         )
       })}
     </>
