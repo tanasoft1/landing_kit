@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import type { ReactNode } from 'react'
 
 export type Locale = 'mn' | 'en'
 export type Surface = 'default' | 'muted' | 'accent'
@@ -76,16 +76,7 @@ export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig
 // biome-ignore lint/suspicious/noExplicitAny: any is the only default that keeps keyof C usable unparameterized.
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  /**
-   * Lazily loaded, via `lazy(() => import('./hero-split').then((m) => ({ default: m.HeroSplit })))`.
-   *
-   * The rest of the manifest — copy, nav label, schema — stays eager, because the SEO layer
-   * needs it synchronously to build the head, the JSON-LD graph and the nav. Only the
-   * *component* is deferred, and that is where the weight is: a page renders one or two
-   * blocks but the registry names all of them, so eager component imports put every block's
-   * dependencies in every page's bundle.
-   */
-  variants: Record<V, ComponentType<BlockProps<C>>>
+  variants: Record<V, (props: BlockProps<C>) => ReactNode>
   defaultVariant: V
   copy: Record<Locale, C>
   nav?: { labelKey: keyof C & string }
