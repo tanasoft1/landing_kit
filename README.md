@@ -19,6 +19,9 @@ exists to keep that true.
 - [The contact form](#the-contact-form)
 - [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
 - [Lighthouse budget](#lighthouse-budget)
+- [Known limitations](docs/superpowers/known-limitations.md) — open issues, latent gaps in the
+  verification scripts, and what's deliberately deferred. Read this before changing the block
+  registry, either script, or anything performance-related.
 
 ## Quick start
 
