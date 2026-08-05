@@ -35,7 +35,7 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs",
     "smoke:full": "KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server vite build && node scripts/verify-build.mjs",
     "smoke:onepage": "KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint vite build && node scripts/verify-build.mjs",
-    "lighthouse": "lhci autorun",
-    "lighthouse:desktop": "lhci autorun --config=lighthouserc.desktop.json"
+    "lighthouse": "rm -rf .lighthouseci && lhci autorun",
+    "lighthouse:desktop": "rm -rf .lighthouseci && lhci autorun --config=lighthouserc.desktop.json"
   }
 }

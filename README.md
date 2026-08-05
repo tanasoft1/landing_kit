@@ -40,8 +40,8 @@ pnpm dev
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
-| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`. | Mobile (throttled CPU + network), the harder and more representative preset. |
-| `pnpm lighthouse:desktop` | Same, with `--collect.settings.preset=desktop`. | Desktop-only layout/contrast regressions. |
+| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a `warn`. |
+| `pnpm lighthouse:desktop` | Same, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
 
 `node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
 `.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
@@ -215,6 +215,9 @@ before any aliasing applies.
 `pnpm lighthouse` runs Lighthouse CI's default **mobile** preset (throttled CPU + network) — the
 harder, more representative run for these sites. `pnpm lighthouse:desktop` uses
 `lighthouserc.desktop.json`. Each runs 5 times per URL so the reported score is a stable median.
+Each script clears `.lighthouseci/` before running, so `pnpm lighthouse && pnpm lighthouse:desktop`
+is safe to chain — without that, the second run's assert step would pick up the first preset's
+leftover reports alongside its own and could fail on a URL that was never part of its own run.
 
 ### Current status, and one known gap
 
