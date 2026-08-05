@@ -34,7 +34,11 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
     if (elapsed < MIN_ELAPSED_MS) {
       await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
     }
-    const result = await submitContact(parsed.data)
+
+    // Recomputed AFTER the wait, so it reflects real time on screen and satisfies the
+    // server-side minimum that `submissionSchema` enforces.
+    const payload = { ...parsed.data, elapsedMs: Date.now() - mountedAt.current }
+    const result = await submitContact(payload)
     if (result.ok) {
       setState('sent')
       setMessage(copy.success)

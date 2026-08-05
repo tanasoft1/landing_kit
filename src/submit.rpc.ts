@@ -1,9 +1,9 @@
 import { createServerFn } from '@tanstack/react-start'
 import {
-  type ContactInput,
-  contactSchema,
+  type SubmissionInput,
   type SubmitModule,
   type SubmitResult,
+  submissionSchema,
 } from '~/submit-schema'
 
 // Deliberately named `.rpc.ts`, not `.server.ts` — see the `~/submit` alias comment in
@@ -13,14 +13,15 @@ import {
 // `*.server.ts` file that this module imports instead.
 
 const handler = createServerFn({ method: 'POST' })
-  .validator((data: unknown) => contactSchema.parse(data))
+  // Revalidates server-side, including the timing minimum — the client can be bypassed.
+  .validator((data: unknown) => submissionSchema.parse(data))
   .handler(async ({ data }): Promise<SubmitResult> => {
     console.log('[contact]', data.name, data.email)
     // Wire an email provider here per project.
     return { ok: true }
   })
 
-export async function submitContact(input: ContactInput): Promise<SubmitResult> {
+export async function submitContact(input: SubmissionInput): Promise<SubmitResult> {
   try {
     return await handler({ data: input })
   } catch {
