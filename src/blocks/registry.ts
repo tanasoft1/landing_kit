@@ -1,4 +1,5 @@
 import type { BlockManifest } from '~/shell/types'
+import { contact } from './contact/manifest'
 import { hero } from './hero/manifest'
 
 // `BlockManifest<any, any>` here is not "no type checking" — each manifest is precisely
@@ -7,6 +8,7 @@ import { hero } from './hero/manifest'
 // `unknown` instead would collapse `keyof C` and break the `nav.labelKey` constraint.
 export const registry = {
   hero,
+  contact,
   // `variants` is a property (not a method), so TS checks its function type contravariantly:
   // a manifest's `(props: BlockProps<HeroCopy>) => ReactNode` would not be assignable to the
   // `(props: BlockProps<unknown>) => ReactNode` that `BlockManifest<unknown, unknown>` demands,

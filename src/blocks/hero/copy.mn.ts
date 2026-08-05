@@ -14,7 +14,7 @@ export const mn: HeroCopy = {
   eyebrow: 'Шинэ',
   heading: 'Бизнесээ онлайнаар хөгжүүл',
   lead: 'Хурдан, хайлтын системд оновчлогдсон вэб хуудсыг хоногийн дотор нэвтрүүл.',
-  primaryCta: { label: 'Холбоо барих', target: 'hero' },
+  primaryCta: { label: 'Холбоо барих', target: 'contact' },
   secondaryCta: { label: 'Дэлгэрэнгүй', target: 'hero' },
   image: { src: '/hero.jpg', alt: 'Бүтээгдэхүүний зураг', width: 1200, height: 900 },
 }
