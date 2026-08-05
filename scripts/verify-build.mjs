@@ -46,6 +46,23 @@ const descriptions = new Map()
 
 const EXPECTED_HREFLANG = new Set(['mn', 'en', 'x-default'])
 
+// The site's default locale, inferred from `.kit/urls.json` itself rather than hardcoded:
+// `localePath` (src/shell/pages/enumerate.ts) never prefixes the default locale's own path
+// with its own locale code, while every other locale's path IS prefixed with its code. So the
+// first url whose own path doesn't start with `/${its locale}` belongs to the default locale.
+const defaultLocale = urls.find((u) => !u.path.startsWith(`/${u.locale}`))?.locale
+if (!defaultLocale) fail('urls.json', 'could not infer the default locale from any url path')
+
+// The absolute URL a given hreflang code on a page sharing `pageId` MUST point at — the same
+// page, in that code's own locale (or, for 'x-default', the default locale's own path).
+// Derived from the manifest so it can't drift from what emit-plugin.ts / build-head.ts
+// actually compute; `undefined` means the page simply has no sibling in that locale.
+function expectedAlternateHref(pageId, hreflang) {
+  const locale = hreflang === 'x-default' ? defaultLocale : hreflang
+  const sibling = urls.find((x) => x.pageId === pageId && x.locale === locale)
+  return sibling ? `${site}${sibling.path}` : undefined
+}
+
 /**
  * Decode HTML entities generically, including NUMERIC references.
  *
@@ -57,11 +74,21 @@ const EXPECTED_HREFLANG = new Set(['mn', 'en', 'x-default'])
  * distrust the gate.
  *
  * `&amp;` is decoded LAST so that `&amp;lt;` yields `&lt;` rather than `<`.
+ *
+ * A numeric reference outside the valid range (`> 0x10FFFF`, or a lone surrogate in
+ * `0xD800`–`0xDFFF`) is not a codepoint `String.fromCodePoint` can produce — it throws
+ * `RangeError`, and an uncaught throw here takes down the entire verify-build run with a raw
+ * stack trace instead of a `✗ verify-build: N failure(s)` line. A real HTML parser leaves an
+ * invalid numeric reference as literal text, so `decodeCodePoint` does the same: an out-of-range
+ * reference is left untouched rather than converted.
  */
+const isValidCodePoint = (cp) => cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)
+const decodeCodePoint = (cp, original) =>
+  isValidCodePoint(cp) ? String.fromCodePoint(cp) : original
 const decodeEntities = (s) =>
   s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, hex) => decodeCodePoint(Number.parseInt(hex, 16), m))
+    .replace(/&#(\d+);/g, (m, dec) => decodeCodePoint(Number(dec), m))
     .replace(/&nbsp;/g, ' ')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
@@ -124,9 +151,14 @@ for (const u of urls) {
     if (href !== expected) fail(u.path, `canonical is '${href}', expected '${expected}'`)
   }
 
-  const hreflangs = new Set(
-    [...html.matchAll(/<link[^>]*rel="alternate"[^>]*hreflang="([^"]+)"/g)].map((m) => m[1]),
-  )
+  // Full tags, not just the hreflang value: presence of the right codes says nothing about
+  // where they point, and a regression aiming every alternate at the same URL (or at the
+  // wrong locale's path) would still satisfy a check that only counts codes.
+  const altTags = [...html.matchAll(/<link[^>]*rel="alternate"[^>]*>/g)].map((m) => ({
+    hreflang: m[0].match(/hreflang="([^"]+)"/)?.[1],
+    href: m[0].match(/href="([^"]+)"/)?.[1],
+  }))
+  const hreflangs = new Set(altTags.map((t) => t.hreflang))
   for (const need of EXPECTED_HREFLANG) {
     if (!hreflangs.has(need)) fail(u.path, `missing hreflang '${need}'`)
   }
@@ -134,6 +166,13 @@ for (const u of urls) {
   // about a page that does not exist.
   for (const got of hreflangs) {
     if (!EXPECTED_HREFLANG.has(got)) fail(u.path, `unexpected hreflang '${got}'`)
+  }
+  for (const tag of altTags) {
+    if (!tag.hreflang || !EXPECTED_HREFLANG.has(tag.hreflang)) continue
+    const wantHref = expectedAlternateHref(u.pageId, tag.hreflang)
+    if (wantHref && tag.href !== wantHref) {
+      fail(u.path, `hreflang '${tag.hreflang}' href is '${tag.href}', expected '${wantHref}'`)
+    }
   }
 
   // Decoded, because it is compared against JSON-LD values that were never escaped.
@@ -244,13 +283,46 @@ else {
     fail('sitemap.xml', `expected ${urls.length} <url> entries, found ${perUrl.length}`)
   }
   perUrl.forEach((entry, i) => {
-    const langs = new Set([...entry.matchAll(/hreflang="([^"]+)"/g)].map((m) => m[1]))
+    const u = urls[i]
+    // Full <xhtml:link> tags, not just hreflang codes — see the matching comment on the
+    // <head> check above for why presence-only is not enough.
+    const links = [...entry.matchAll(/<xhtml:link[^>]*>/g)].map((m) => ({
+      hreflang: m[0].match(/hreflang="([^"]+)"/)?.[1],
+      href: m[0].match(/href="([^"]+)"/)?.[1],
+    }))
+    const langs = new Set(links.map((l) => l.hreflang))
     for (const need of ['mn', 'en', 'x-default']) {
       if (!langs.has(need)) fail('sitemap.xml', `entry ${i + 1} missing hreflang '${need}'`)
     }
+    if (!u) return
+    for (const link of links) {
+      if (!link.hreflang || !EXPECTED_HREFLANG.has(link.hreflang)) continue
+      const wantHref = expectedAlternateHref(u.pageId, link.hreflang)
+      if (wantHref && link.href !== wantHref) {
+        fail(
+          'sitemap.xml',
+          `entry ${i + 1} hreflang '${link.hreflang}' href is '${link.href}', expected '${wantHref}'`,
+        )
+      }
+    }
   })
 }
-if (!existsSync(join(outDir, 'robots.txt'))) fail('robots.txt', 'not emitted')
+const robotsPath = join(outDir, 'robots.txt')
+if (!existsSync(robotsPath)) {
+  fail('robots.txt', 'not emitted')
+} else {
+  const robots = readFileSync(robotsPath, 'utf8')
+  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /debug` — deindexes the
+  // entire site. Existence-only checking would pass that silently.
+  if (!/^Allow: \/[ \t]*$/m.test(robots)) fail('robots.txt', "missing 'Allow: /'")
+  if (/^Disallow: \/[ \t]*$/m.test(robots)) {
+    fail('robots.txt', "bare 'Disallow: /' would deindex the entire site")
+  }
+  const wantSitemapLine = `Sitemap: ${site}/sitemap.xml`
+  if (!robots.includes(wantSitemapLine)) {
+    fail('robots.txt', `missing '${wantSitemapLine}'`)
+  }
+}
 
 // --- debug route must not ship ------------------------------------------------
 if (existsSync(join(outDir, 'debug/index.html'))) {

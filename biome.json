@@ -21,7 +21,12 @@
                 "paths": {
                   "motion": "Blocks must import animation presets from '~/motion', never 'motion' directly.",
                   "motion/react": "Blocks must import animation presets from '~/motion', never 'motion/react' directly.",
-                  "~/motion.animated": "Import '~/motion' — the alias selects the implementation."
+                  "~/motion.animated": "Import '~/motion' — the alias selects the implementation.",
+                  "~/motion.noop": "Import '~/motion' — the alias selects the implementation.",
+                  "~/theme.both": "Import '~/theme' — the alias selects the implementation.",
+                  "~/theme.single": "Import '~/theme' — the alias selects the implementation.",
+                  "~/submit.rpc": "Import '~/submit' — the alias selects the implementation.",
+                  "~/submit.endpoint": "Import '~/submit' — the alias selects the implementation."
                 }
               }
             }
