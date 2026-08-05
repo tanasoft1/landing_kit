@@ -911,14 +911,16 @@ Create `src/blocks/hero/schema.ts`:
 import type { BlockSchema } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export const schema: BlockSchema<HeroCopy> = ({ copy, site }) => [
-  {
-    '@type': 'WebPageElement',
-    name: copy.heading,
-    description: copy.lead,
-    isPartOf: { '@id': `${site.url}/#website` },
-  },
-]
+// The hero contributes NO structured data.
+//
+// An earlier version emitted a `WebPageElement` node here with the heading and lead. That was a
+// mistake: the shell already emits exactly one `WebPage` for the page, with its own SEO title and
+// description, so a second node describing the same page produced two uncoordinated descriptions
+// of one thing — and since its `isPartOf` pointed at a node that does exist, the `@id` integrity
+// check never flagged it. `WebPageElement` also earns nothing from Google.
+//
+// `BlockSchema` exists for markup a block's own content genuinely earns: FAQPage, Product, Offer,
+// Review. A block with nothing of that kind to say omits `schema` entirely.
 ```
 
 - [ ] **Step 7: Write the manifest**
@@ -3027,14 +3029,13 @@ Create `src/blocks/contact/schema.ts`:
 import type { BlockSchema } from '~/shell/types'
 import type { ContactCopy } from './copy.mn'
 
-export const schema: BlockSchema<ContactCopy> = ({ copy, site }) => [
-  {
-    '@type': 'ContactPage',
-    name: copy.heading,
-    description: copy.lead,
-    isPartOf: { '@id': `${site.url}/#website` },
-  },
-]
+// The contact block contributes NO structured data either — same reason as hero's schema.ts.
+// `ContactPage` is a page-identity type, and the shell already emits the page's `WebPage` node.
+// Emitting both gave `/contact` two nodes describing itself with different names.
+//
+// The organisation's real contact details (email, phone, address) are already published on the
+// `LocalBusiness` node the shell emits from `site.config.ts`, which is where Google actually
+// looks for them — so nothing is lost by omitting this.
 ```
 
 Create `src/blocks/contact/manifest.ts`:
