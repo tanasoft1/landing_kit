@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
+    "@lhci/cli": "^0.15.1",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
@@ -31,6 +32,10 @@
     "lint": "biome ci .",
     "fix": "biome check --write .",
     "conventions": "node scripts/check-conventions.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs"
+    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs",
+    "smoke:full": "KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server vite build && node scripts/verify-build.mjs",
+    "smoke:onepage": "KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint vite build && node scripts/verify-build.mjs",
+    "lighthouse": "lhci autorun",
+    "lighthouse:desktop": "lhci autorun --collect.settings.preset=desktop"
   }
 }

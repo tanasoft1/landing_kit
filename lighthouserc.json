@@ -1,0 +1,18 @@
+{
+  "ci": {
+    "collect": {
+      "staticDistDir": "dist/client",
+      "url": ["http://localhost/index.html", "http://localhost/en/index.html"],
+      "numberOfRuns": 2
+    },
+    "assert": {
+      "assertions": {
+        "categories:seo": ["error", { "minScore": 1 }],
+        "categories:performance": ["error", { "minScore": 0.95 }],
+        "categories:accessibility": ["error", { "minScore": 0.95 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.01 }]
+      }
+    },
+    "upload": { "target": "temporary-public-storage" }
+  }
+}

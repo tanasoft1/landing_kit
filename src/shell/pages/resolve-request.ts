@@ -12,10 +12,22 @@ export type ResolvedPage<Id extends string = string> = {
  * including the header's locale switcher — must consume the result of this,
  * never a raw pathname. Two different normalizations that agree only on clean
  * input is how `//en` turns into a protocol-relative `href="//en"`.
+ *
+ * A trailing `/index.html` is also collapsed to `/` here. Prerendering writes each
+ * page to `<outputPath>/index.html`, and any host that serves those files by literal
+ * filename rather than rewriting `/` to `index.html` transparently — Lighthouse CI's
+ * static-dist server is exactly this, per `lighthouserc.json`'s `url` entries — leaves
+ * `window.location.pathname` as `/index.html` on hydration. Without this, the client
+ * router finds no route for `/index.html`, falls through to the `$` splat, and
+ * `resolveRequest` returns null: the correctly prerendered page silently replaces
+ * itself with the "Not Found" UI right after hydrating, which is invisible in a
+ * plain click-through but tanks LCP because Lighthouse measures the post-hydration
+ * repaint, not the SSR paint.
  */
 export function normalizePath(pathname: string): string {
   const withoutQuery = pathname.split('?')[0] ?? '/'
-  const collapsed = withoutQuery.replace(/\/{2,}/g, '/')
+  const withoutIndexHtml = withoutQuery.replace(/\/index\.html$/, '/')
+  const collapsed = withoutIndexHtml.replace(/\/{2,}/g, '/')
   const trimmed =
     collapsed.length > 1 && collapsed.endsWith('/') ? collapsed.slice(0, -1) : collapsed
   return trimmed || '/'
