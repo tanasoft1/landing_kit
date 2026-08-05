@@ -18,10 +18,14 @@ const RULES = [
     msg: 'arbitrary Tailwind value (bracket syntax) — use a scale/preset utility',
   },
   { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
+  // No exception list, unlike the rule this replaced. Heading level is never a block's own
+  // decision — it depends on whether the block happens to be first on the page, which only the
+  // renderer knows (`headingLevel` on `BlockProps`, assigned by `RenderBlocks`). A block with a
+  // heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and render `<H>`; a literal
+  // `<h1>` or `<h2>` anywhere in `src/blocks` — hero included — is always wrong.
   {
-    re: /<h1[\s>]/,
-    msg: "<h1> outside the hero block — the hero owns the page's single <h1>; use <h2> here",
-    exceptPath: (file) => file.startsWith(`${join('src', 'blocks', 'hero')}/`),
+    re: /<h[12][\s>]/,
+    msg: "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>",
   },
 ]
 
@@ -39,7 +43,6 @@ function check(file) {
   const lines = readFileSync(file, 'utf8').split('\n')
   lines.forEach((line, i) => {
     for (const rule of RULES) {
-      if (rule.exceptPath?.(file)) continue
       if (rule.re.test(line)) failures.push(`${file}:${i + 1}  ${rule.msg}`)
     }
   })
