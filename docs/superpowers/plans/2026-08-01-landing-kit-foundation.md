@@ -56,7 +56,7 @@ This is a real consequence of the no-test-framework decision, not an oversight. 
 | `src/shell/chrome/footer.tsx` | Footer from site config |
 | `src/shell/theme/` | Theme provider, toggle, no-flash inline script |
 | `src/motion.animated.tsx` / `src/motion.noop.tsx` | Animation boundary — aliased as `~/motion` |
-| `src/submit.server.ts` / `src/submit.endpoint.ts` | Submission boundary — aliased as `~/submit` |
+| `src/submit.rpc.ts` / `src/submit.endpoint.ts` | Submission boundary — aliased as `~/submit` |
 | `src/submit-schema.ts` | zod schema shared by both submit implementations and the form |
 | `src/styles/theme.css` | `@theme` token declarations; imports the active preset |
 | `src/styles/presets/aurora.css` | Preset 1: palette (light + dark), fonts, radius, density |
@@ -262,7 +262,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '~/motion': animation === 'on' ? r('./src/motion.animated.tsx') : r('./src/motion.noop.tsx'),
-      '~/submit': submit === 'server' ? r('./src/submit.server.ts') : r('./src/submit.endpoint.ts'),
+      // `submit.rpc.ts`, deliberately NOT `submit.server.ts`: TanStack Start's import protection
+      // denies client bundling of any `**/*.server.*` file by FILENAME, regardless of content.
+      // This file is the sanctioned client-safe `createServerFn` stub the client is meant to
+      // import, so the rule is a false positive here — but excluding a file from a safety guard
+      // in a boilerplate others will copy ages badly: the next person to put real server-only
+      // code in it loses the protection silently. Renaming keeps the guard intact everywhere.
+      '~/submit': submit === 'server' ? r('./src/submit.rpc.ts') : r('./src/submit.endpoint.ts'),
       // Derived from config rather than an env var — the mode already lives in site.config.
       '~/theme':
         site.theme.mode === 'both' ? r('./src/theme.both.tsx') : r('./src/theme.single.tsx'),
@@ -2659,7 +2665,7 @@ git commit -m "feat: add motion boundary, theme modes with no-flash script, conv
 ### Task 8: Contact block and the submission boundary
 
 **Files:**
-- Create: `src/submit-schema.ts`, `src/submit.endpoint.ts`, `src/submit.server.ts`, `src/blocks/contact/manifest.ts`, `src/blocks/contact/contact-form.tsx`, `src/blocks/contact/copy.mn.ts`, `src/blocks/contact/copy.en.ts`, `src/blocks/contact/schema.ts`
+- Create: `src/submit-schema.ts`, `src/submit.endpoint.ts`, `src/submit.rpc.ts`, `src/blocks/contact/manifest.ts`, `src/blocks/contact/contact-form.tsx`, `src/blocks/contact/copy.mn.ts`, `src/blocks/contact/copy.en.ts`, `src/blocks/contact/schema.ts`
 - Modify: `src/blocks/registry.ts`, `src/config/pages.config.ts`
 
 **Interfaces:**
@@ -2696,7 +2702,7 @@ export type SubmitModule = {
 }
 ```
 
-End **both** `submit.server.ts` and `submit.endpoint.ts` with:
+End **both** `submit.rpc.ts` and `submit.endpoint.ts` with:
 
 ```ts
 import type { SubmitModule } from '~/submit-schema'
@@ -2739,7 +2745,7 @@ export async function submitContact(input: ContactInput): Promise<SubmitResult> 
 
 - [ ] **Step 3: Write the SSR implementation**
 
-Create `src/submit.server.ts`. It revalidates server-side because the client can be bypassed.
+Create `src/submit.rpc.ts`. It revalidates server-side because the client can be bypassed.
 
 ```ts
 import { createServerFn } from '@tanstack/react-start'

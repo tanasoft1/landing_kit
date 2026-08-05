@@ -22,7 +22,13 @@ export default defineConfig({
       '~/motion': animation === 'on' ? r('./src/motion.animated.tsx') : r('./src/motion.noop.tsx'),
       '~/theme':
         site.theme.mode === 'both' ? r('./src/theme.both.tsx') : r('./src/theme.single.tsx'),
-      '~/submit': submit === 'server' ? r('./src/submit.server.ts') : r('./src/submit.endpoint.ts'),
+      // `submit.rpc.ts`, deliberately NOT `submit.server.ts`: TanStack Start's import protection
+      // denies client bundling of any `**/*.server.*` file by FILENAME, regardless of content.
+      // This file is the sanctioned client-safe `createServerFn` stub the client is meant to
+      // import, so the rule is a false positive here — but excluding a file from a safety guard
+      // in a boilerplate others will copy ages badly: the next person to put real server-only
+      // code in it loses the protection silently. Renaming keeps the guard intact everywhere.
+      '~/submit': submit === 'server' ? r('./src/submit.rpc.ts') : r('./src/submit.endpoint.ts'),
       '~/config': config === 'onepage' ? r('./configs/smoke-onepage') : r('./src/config'),
       '~': r('./src'),
     },

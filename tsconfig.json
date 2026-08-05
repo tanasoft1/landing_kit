@@ -16,6 +16,7 @@
     "paths": {
       "~/motion": ["./src/motion.animated.tsx"],
       "~/theme": ["./src/theme.both.tsx"],
+      "~/submit": ["./src/submit.endpoint.ts"],
       "~/*": ["./src/*"]
     }
   },

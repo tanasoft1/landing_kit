@@ -15,6 +15,6 @@ export const site: SiteConfig = {
     address: { country: 'MN', city: 'Ulaanbaatar', street: 'Peace Avenue 1', postalCode: '14200' },
     sameAs: ['https://www.facebook.com/example'],
   },
-  nav: [{ target: 'hero' }],
+  nav: [{ target: 'hero' }, { target: 'contact' }],
   theme: { mode: 'both', default: 'light' },
 }

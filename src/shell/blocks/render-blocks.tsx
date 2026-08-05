@@ -1,5 +1,5 @@
 import { type BlockId, registry } from '~/blocks/registry'
-import type { BlockRef, Locale, SiteConfig, Surface } from '~/shell/types'
+import type { BlockManifest, BlockRef, Locale, SiteConfig, Surface } from '~/shell/types'
 
 const ALTERNATION: Surface[] = ['default', 'muted']
 
@@ -25,7 +25,14 @@ export function RenderBlocks({
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
 
-        const manifest = registry[id]
+        // Widened to `BlockManifest<any, any>` explicitly: `registry[id]` for a `BlockId` union
+        // otherwise resolves to a union of each block's *own* manifest type (e.g.
+        // `HeroManifest | ContactManifest`), and TS checks a union of function-typed
+        // properties (`variants[...]`) contravariantly — the same bivariant-`any` problem
+        // `registry.ts` documents for the `satisfies` check, just resurfacing at the call site
+        // now that the registry has more than one entry.
+        // biome-ignore lint/suspicious/noExplicitAny: any stays bivariant here; unknown breaks assignability (see registry.ts).
+        const manifest: BlockManifest<any, any> = registry[id]
         if (!manifest) {
           throw new Error(
             `Unknown block id '${id}'. Available: ${Object.keys(registry).join(', ')}`,
