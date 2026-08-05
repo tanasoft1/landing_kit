@@ -1,7 +1,7 @@
 import { type BlockId, registry } from '~/blocks/registry'
 import { localePath } from '~/shell/pages/enumerate'
 import type { ResolvedPage } from '~/shell/pages/resolve-request'
-import type { BlockManifest, JsonLdNode, PageConfig, SiteConfig } from '~/shell/types'
+import type { JsonLdNode, PageConfig, SiteConfig } from '~/shell/types'
 
 function organizationNode(site: SiteConfig): JsonLdNode {
   const { organization: org } = site
@@ -77,12 +77,10 @@ export function buildJsonLd(
 
   for (const ref of page.blocks) {
     const id = typeof ref === 'string' ? ref : ref.id
-    // Widened to `BlockManifest<any, any>` explicitly — see the matching comment in
-    // render-blocks.tsx: `registry[id]` for a `BlockId` union otherwise resolves to a union of
-    // each block's own manifest type, and calling a union of differently-typed `schema`
-    // functions forces the argument to satisfy an intersection of their `copy` types instead.
-    // biome-ignore lint/suspicious/noExplicitAny: any stays bivariant here; unknown breaks assignability (see registry.ts).
-    const manifest: BlockManifest<any, any> = registry[id]
+    // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export (see
+    // registry.ts), so `registry[id]` already resolves to `BlockManifest<any, any>` here —
+    // no per-call-site widening needed.
+    const manifest = registry[id]
     if (!manifest.schema) continue
     graph.push(...manifest.schema({ copy: manifest.copy[locale], site, page }))
   }
