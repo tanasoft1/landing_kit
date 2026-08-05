@@ -3145,6 +3145,15 @@ Fix rather than relax the thresholds; the budget existing to be demonstrable to 
 
 Replace `README.md` with the operating manual a second developer needs: the `pnpm` scripts and what each verifies; how to add a block (copy folder → edit `id`/component/copy → add one registry line → add the id to a page); how to add a variant; the token surface and how to reskin via `src/styles/presets/`; the Cyrillic font requirement; and the three env flags (`KIT_CONFIG`, `KIT_ANIMATION`, `KIT_SUBMIT`) with their values.
 
+Also document these, each of which cost real time to discover during the build:
+
+- **`VITE_CONTACT_ENDPOINT` must send CORS headers.** In `endpoint` mode the browser POSTs cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight. The form surfaces this correctly as the generic error, which looks like a code bug and is not. This is the first thing to check when a client's form "silently fails".
+- **The contact form's 2-second timing guard rejects fast submissions** — including your own during testing. That is the spam check working.
+- **`<input type="email">` triggers native browser validation** that blocks submit before any handler runs, so a malformed email never reaches the schema.
+- **`submit.rpc.ts` is not named `submit.server.ts` on purpose.** Any `*.server.*` filename is refused by TanStack Start's client import protection regardless of content; renaming keeps that guard intact rather than excluding a file from it.
+- **React logs `Invalid DOM property 'hreflang'` in dev.** Expected and deliberate: the lowercase form is what SEO tooling reads, and `verify-build.mjs` asserts it.
+- **A light-only or dark-only build ships no theme-switching code at all** — not merely a hidden toggle. Same for `KIT_ANIMATION=off` and `motion`.
+
 - [ ] **Step 9: Full verification**
 
 ```bash
