@@ -150,7 +150,17 @@ export type BlockSchema<C> = (ctx: {
 
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  variants: Record<V, (props: BlockProps<C>) => ReactNode>
+  /**
+   * Lazily loaded, via `lazy(() => import('./hero-split'))`.
+   *
+   * The rest of the manifest — copy, nav label, schema — must stay eager, because the SEO
+   * layer needs it synchronously to build the head, the JSON-LD graph and the nav. Only the
+   * *component* is deferred, and that is where the weight is: a page renders one or two
+   * blocks but the registry names all of them, so eager component imports put every block's
+   * dependencies in every page's bundle. With eight blocks that is most of the payload
+   * unused on any given page. See §6's performance notes.
+   */
+  variants: Record<V, ComponentType<BlockProps<C>>>
   defaultVariant: V                      // constrained to a key of `variants`
   copy: Record<Locale, C>                // ONE copy shape, shared by every variant
   nav?: { labelKey: keyof C & string }   // omit → block never appears in nav
@@ -404,6 +414,24 @@ export type SiteConfig = {
   everything below the fold lazy.
 - Animations are restricted to `transform` and `opacity`, so entrance animations cannot
   contribute to CLS.
+- **Block components are lazily loaded** so a page ships only the blocks it renders. The routing
+  is a single config-driven splat route, so the route module can render *any* block — which means
+  eager component imports put every block's dependencies into one chunk that every page loads.
+  Measured on the two-block v1: the contact block alone added 99 KB raw / 30 KB gzip to the bundle
+  that the hero-only home page downloaded, and Lighthouse attributed 450 ms to unused JavaScript.
+  With eight blocks, most of a page's payload would be code it never runs.
+
+  Only the component is deferred; copy, nav labels and schema stay eager because the SEO layer
+  needs them synchronously. The prerendered HTML must still contain the fully rendered block —
+  `verify-build.mjs`'s existing assertions (one `<h1>`, canonical, JSON-LD types) catch a Suspense
+  fallback leaking into the static output, which would otherwise be an invisible SEO catastrophe.
+
+- **Bilingual pages carry two font subsets.** A Mongolian page whose chrome contains Latin text —
+  a Latin brand name, an email address, a phone number — legitimately downloads both the Cyrillic
+  and Latin subsets, roughly twice an English page's font payload. That is inherent to the design,
+  not a defect; it is also why the Mongolian page is the harder one to keep inside the performance
+  budget, and why the critical-font preload is locale-aware.
+
 - Lighthouse CI budget, enforced in CI (§11).
 
 ### Honest limitation
