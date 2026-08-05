@@ -238,6 +238,18 @@ export const schema: BlockSchema<PricingCopy> = ({ copy }) => [
 The shell concatenates every rendered block's contribution into one `@graph`. Adding an
 FAQ block to a page emits `FAQPage` markup automatically — nobody has to remember.
 
+**A block must not emit a page-identity node.** `WebPage` is already emitted once by the shell,
+with the page's own SEO title and description and an `@id` of `${url}#webpage`. A block that also
+emits `WebPageElement`, `ContactPage`, `AboutPage` or similar produces a *second* node implicitly
+describing the same page, with different `name`/`description` values and nothing linking the two —
+and because its `isPartOf` still points at a node that exists, the `@id` integrity check does not
+catch it. It is invisible in a browser and earns nothing from Google.
+
+So `BlockSchema` is reserved for markup that actually earns rich results from the block's own
+content: `FAQPage`, `Product`, `Offer`, `Review`, `BreadcrumbList`. A block with nothing of that
+kind to say should omit `schema` entirely rather than inventing a node. If a block genuinely needs
+to attach itself to the page, it references `${url}#webpage` — never re-describes it.
+
 ### Registry
 
 ```ts
