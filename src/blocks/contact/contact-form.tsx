@@ -9,7 +9,8 @@ import type { ContactCopy } from './copy.mn'
 
 type Fields = { name: string; email: string; message: string; honeypot_url: string }
 
-export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>) {
+export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProps<ContactCopy>) {
+  const H = headingLevel === 1 ? 'h1' : 'h2'
   const { register, handleSubmit, reset } = useForm<Fields>()
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -49,7 +50,7 @@ export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>
   return (
     <Section id={anchorId} surface={surface}>
       <Container width="narrow">
-        <h2 className="text-h2 font-semibold">{copy.heading}</h2>
+        <H className="text-h2 font-semibold">{copy.heading}</H>
         <p className="text-muted-foreground mt-3 text-lead">{copy.lead}</p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-8 grid gap-4">

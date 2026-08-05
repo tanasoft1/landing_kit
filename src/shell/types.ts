@@ -58,6 +58,14 @@ export type BlockProps<C> = {
    * (first is the bare block id, a second becomes `${id}-2`, etc).
    */
   anchorId: string
+  /**
+   * Assigned by the renderer, never chosen by the block: a block cannot know whether it opens
+   * the page. The first block on a page gets `1` and owns the page's single <h1>; every other
+   * block gets `2`. A block with a heading renders `const H = headingLevel === 1 ? 'h1' : 'h2'`
+   * and uses `<H>`, never a literal `<h1>`/`<h2>` — check-conventions forbids the literal tags
+   * outright, with no exceptions, because heading level is never the block's decision.
+   */
+  headingLevel: 1 | 2
 }
 
 export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig }) => JsonLdNode[]
