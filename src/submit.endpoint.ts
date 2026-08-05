@@ -1,12 +1,13 @@
 import {
-  type ContactInput,
-  contactSchema,
+  type SubmissionInput,
   type SubmitModule,
   type SubmitResult,
+  submissionSchema,
 } from '~/submit-schema'
 
-export async function submitContact(input: ContactInput): Promise<SubmitResult> {
-  const parsed = contactSchema.safeParse(input)
+export async function submitContact(input: SubmissionInput): Promise<SubmitResult> {
+  // Same schema the RPC variant validates, so neither mode is the weaker one.
+  const parsed = submissionSchema.safeParse(input)
   if (!parsed.success) return { ok: false, error: 'invalid' }
 
   const endpoint = import.meta.env.VITE_CONTACT_ENDPOINT
