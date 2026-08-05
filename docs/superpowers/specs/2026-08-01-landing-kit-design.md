@@ -151,14 +151,7 @@ export type BlockSchema<C> = (ctx: {
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
   /**
-   * Lazily loaded, via `lazy(() => import('./hero-split'))`.
-   *
-   * The rest of the manifest — copy, nav label, schema — must stay eager, because the SEO
-   * layer needs it synchronously to build the head, the JSON-LD graph and the nav. Only the
-   * *component* is deferred, and that is where the weight is: a page renders one or two
-   * blocks but the registry names all of them, so eager component imports put every block's
-   * dependencies in every page's bundle. With eight blocks that is most of the payload
-   * unused on any given page. See §6's performance notes.
+   * Eagerly imported. `React.lazy` was tried here and reverted — see §6.
    */
   variants: Record<V, ComponentType<BlockProps<C>>>
   defaultVariant: V                      // constrained to a key of `variants`
@@ -414,17 +407,33 @@ export type SiteConfig = {
   everything below the fold lazy.
 - Animations are restricted to `transform` and `opacity`, so entrance animations cannot
   contribute to CLS.
-- **Block components are lazily loaded** so a page ships only the blocks it renders. The routing
-  is a single config-driven splat route, so the route module can render *any* block — which means
-  eager component imports put every block's dependencies into one chunk that every page loads.
-  Measured on the two-block v1: the contact block alone added 99 KB raw / 30 KB gzip to the bundle
-  that the hero-only home page downloaded, and Lighthouse attributed 450 ms to unused JavaScript.
-  With eight blocks, most of a page's payload would be code it never runs.
+- **Blocks are eagerly bundled, and the known cost is accepted for now.** Routing is a single
+  config-driven splat route, so the route module can render any block, which puts every block's
+  dependencies into one chunk that every page loads. Measured on the two-block v1: the contact
+  block adds 99 KB raw / 30 KB gzip to the bundle a hero-only home page downloads, and Lighthouse
+  attributes 450 ms to unused JavaScript. With eight blocks this gets worse.
 
-  Only the component is deferred; copy, nav labels and schema stay eager because the SEO layer
-  needs them synchronously. The prerendered HTML must still contain the fully rendered block —
-  `verify-build.mjs`'s existing assertions (one `<h1>`, canonical, JSON-LD types) catch a Suspense
-  fallback leaking into the static output, which would otherwise be an invisible SEO catastrophe.
+  **`React.lazy` per variant was implemented, measured, and reverted.** It did exactly what it was
+  supposed to at the bundle level — the main chunk fell from 553 KB to 331 KB and the home page
+  stopped loading the form code — and the prerendered HTML still contained the fully rendered
+  blocks. But it made the metric it targeted worse and broke another:
+
+  | | before | after `React.lazy` |
+  |---|---|---|
+  | Performance (mn, mobile) | 0.90 | **0.82** |
+  | CLS (mobile) | 0.000 | **0.169** |
+  | CLS (desktop) | 0.000 | **0.078** |
+
+  Cause: a lazy component suspends on its first render *during hydration*, so React discards the
+  server-rendered subtree for that boundary and re-renders it once the chunk resolves. Content is
+  present, then absent, then present — a layout shift on every page. A `modulepreload` of the block
+  chunks was tried and changed CLS by exactly zero, which proves this is React's hydration-discard
+  behaviour and not network timing. Every page in this kit has its first and often only block above
+  the fold, which is the worst possible place for that shift.
+
+  So splitting blocks needs a mechanism that resolves the chunk *before* hydration rather than
+  suspending during it — route-level splitting, or a framework-supported lazy that awaits. That is
+  Plan 2 work, and it should be judged on CLS as well as bundle size.
 
 - **Bilingual pages carry two font subsets.** A Mongolian page whose chrome contains Latin text —
   a Latin brand name, an email address, a phone number — legitimately downloads both the Cyrillic
