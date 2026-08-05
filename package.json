@@ -1,0 +1,41 @@
+{
+  "name": "landing-kit",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.2.0",
+    "@fontsource-variable/manrope": "^5.2.0",
+    "@tanstack/react-router": "^1.168.0",
+    "@tanstack/react-start": "^1.168.0",
+    "motion": "^12.43.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-hook-form": "^7.83.0",
+    "zod": "^4.4.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.6",
+    "@lhci/cli": "^0.15.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "6.0.3",
+    "vite": "^7.0.0"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome ci .",
+    "fix": "biome check --write .",
+    "conventions": "node scripts/check-conventions.mjs",
+    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs",
+    "smoke:full": "KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server vite build && node scripts/verify-build.mjs",
+    "smoke:onepage": "KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint vite build && node scripts/verify-build.mjs",
+    "lighthouse": "rm -rf .lighthouseci && lhci autorun",
+    "lighthouse:desktop": "rm -rf .lighthouseci && lhci autorun --config=lighthouserc.desktop.json"
+  }
+}

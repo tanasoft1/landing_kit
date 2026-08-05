@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: true
+  lightningcss: true
+overrides:
+  typescript: 6.0.3

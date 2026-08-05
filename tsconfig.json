@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "~/motion": ["./src/motion.animated.tsx"],
+      "~/theme": ["./src/theme.both.tsx"],
+      "~/submit": ["./src/submit.endpoint.ts"],
+      "~/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "scripts", "configs", "vite.config.ts"]
+}

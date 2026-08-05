@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "DESKTOP preset. Performance is a HARD failure here, unlike the mobile config, because both",
+    "locales measure 1.00 — so there is a real guarantee to protect and no reason to weaken it.",
+    "Keeping the two presets at different severities is deliberate: it preserves the desktop",
+    "guarantee instead of letting one known mobile gap soften the whole budget."
+  ],
+  "ci": {
+    "collect": {
+      "staticDistDir": "dist/client",
+      "url": ["http://localhost/index.html", "http://localhost/en/index.html"],
+      "numberOfRuns": 5,
+      "settings": { "preset": "desktop" }
+    },
+    "assert": {
+      "assertions": {
+        "categories:seo": ["error", { "minScore": 1 }],
+        "categories:performance": ["error", { "minScore": 0.95 }],
+        "categories:accessibility": ["error", { "minScore": 0.95 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.01 }]
+      }
+    },
+    "upload": { "target": "temporary-public-storage" }
+  }
+}

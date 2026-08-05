@@ -1,0 +1,36 @@
+:root {
+  /* Skin: font pairing. Both families must have Cyrillic coverage. */
+  --face-display: "Manrope Variable", system-ui, sans-serif;
+  --face-body: "Inter Variable", system-ui, sans-serif;
+
+  /* Skin: shape, rhythm, measure. */
+  --radius: 0.75rem;
+  --section-y: clamp(3.5rem, 8vw, 7rem);
+  --gutter: clamp(1rem, 4vw, 2rem);
+  --width-page: 72rem;
+  --width-narrow: 36rem;
+
+  /* Skin: light palette. */
+  --c-background: oklch(99% 0.004 250);
+  --c-foreground: oklch(21% 0.02 255);
+  --c-muted: oklch(96.5% 0.006 250);
+  --c-muted-foreground: oklch(48% 0.02 255);
+  --c-accent: oklch(97% 0.02 250);
+  --c-border: oklch(91% 0.008 255);
+  --c-primary: oklch(55% 0.19 264);
+  --c-primary-foreground: oklch(99% 0.004 250);
+  --c-ring: oklch(55% 0.19 264);
+}
+
+.dark {
+  /* Authored, not derived: dark surfaces step up in lightness and drop saturation. */
+  --c-background: oklch(17% 0.015 260);
+  --c-foreground: oklch(96% 0.006 250);
+  --c-muted: oklch(23% 0.017 260);
+  --c-muted-foreground: oklch(72% 0.014 255);
+  --c-accent: oklch(27% 0.02 262);
+  --c-border: oklch(31% 0.018 260);
+  --c-primary: oklch(72% 0.15 264);
+  --c-primary-foreground: oklch(17% 0.015 260);
+  --c-ring: oklch(72% 0.15 264);
+}
