@@ -552,6 +552,17 @@ export type BlockProps<C> = {
    * anchor links.
    */
   anchorId: string
+  /**
+   * Heading level for this block's section heading: `1` for the first block on the page,
+   * `2` for the rest. Assigned by the renderer, for the same reason `anchorId` is — the
+   * block cannot know whether it is the page's opening section.
+   *
+   * This exists so the page's VISIBLE main heading is its `<h1>`. The alternative — every
+   * block hardcoding `<h2>` and the shell adding a hidden `<h1>` — gives a page whose real
+   * heading is an `h2` shadowed by invisible duplicate text, which is the wrong shape for a
+   * kit whose whole purpose is search visibility.
+   */
+  headingLevel: 1 | 2
 }
 
 export type BlockSchema<C> = (ctx: {
@@ -804,14 +815,14 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroCentered({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
+export function HeroCentered({ copy, resolve, surface, anchorId, headingLevel }: BlockProps<HeroCopy>) {
+  // The renderer decides whether this block opens the page; the block just obeys.
+  const H = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <Section id={anchorId} surface={surface}>
       <Container className="text-center">
         <p className="text-primary text-sm font-semibold tracking-wide uppercase">{copy.eyebrow}</p>
-        <h1 className="mt-3 text-display font-bold text-balance">
-          {copy.heading}
-        </h1>
+        <H className="mt-3 text-display font-bold text-balance">{copy.heading}</H>
         <p className="text-muted-foreground mx-auto mt-5 text-lead text-pretty">
           {copy.lead}
         </p>
@@ -845,7 +856,9 @@ import { Section } from '~/shell/layout/section'
 import type { BlockProps } from '~/shell/types'
 import type { HeroCopy } from './copy.mn'
 
-export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroCopy>) {
+export function HeroSplit({ copy, resolve, surface, anchorId, headingLevel }: BlockProps<HeroCopy>) {
+  // The renderer decides whether this block opens the page; the block just obeys.
+  const H = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <Section id={anchorId} surface={surface}>
       <Container>
@@ -854,9 +867,7 @@ export function HeroSplit({ copy, resolve, surface, anchorId }: BlockProps<HeroC
             <p className="text-primary text-sm font-semibold tracking-wide uppercase">
               {copy.eyebrow}
             </p>
-            <h1 className="mt-3 text-display font-bold text-balance">
-              {copy.heading}
-            </h1>
+            <H className="mt-3 text-display font-bold text-balance">{copy.heading}</H>
             <p className="text-muted-foreground mt-5 text-lead text-pretty">
               {copy.lead}
             </p>
@@ -1038,6 +1049,8 @@ export function RenderBlocks({
             // index into ALTERNATION can never actually miss.
             surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
             anchorId={anchorId}
+            // First block on the page owns the <h1>; everything after it is an <h2>.
+            headingLevel={index === 0 ? 1 : 2}
           />
         )
       })}
@@ -2579,7 +2592,9 @@ const RULES = [
   // honeypot — a violation of the same rule, in a class the checker simply did not look for.
   { re: /className="[^"]*\b-?[a-z][a-z0-9-]*-\[/, msg: 'arbitrary-value escape — use a token or scale value' },
   { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
-  { re: /<h1[\s>]/, msg: 'only the hero may render <h1>; other blocks use <h2>' },
+  // Heading level is the renderer's decision, not the block's — see BlockProps.headingLevel.
+  { re: /<h1[\s>]/, msg: 'hardcoded <h1> — render `H` from props.headingLevel instead' },
+  { re: /<h2[\s>]/, msg: 'hardcoded <h2> — render `H` from props.headingLevel instead' },
 ]
 
 const failures = []
@@ -2602,14 +2617,6 @@ function check(file) {
 }
 
 walk('src/blocks')
-
-// The <h1> rule has exactly one legitimate exception: the hero owns the page's single <h1>.
-// Filtering here rather than weakening the rule keeps it absolute for every other block.
-const filtered = failures.filter(
-  (f) => !(f.includes('src/blocks/hero/') && f.includes('only the hero may render')),
-)
-failures.length = 0
-failures.push(...filtered)
 
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
@@ -2863,7 +2870,13 @@ import type { ContactCopy } from './copy.mn'
 
 type Fields = { name: string; email: string; message: string; company: string }
 
-export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>) {
+export function ContactForm({
+  copy,
+  surface,
+  anchorId,
+  headingLevel,
+}: BlockProps<ContactCopy>) {
+  const H = headingLevel === 1 ? 'h1' : 'h2'
   const { register, handleSubmit, reset } = useForm<Fields>()
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -2903,7 +2916,7 @@ export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>
   return (
     <Section id={anchorId} surface={surface}>
       <Container width="narrow">
-        <h2 className="text-h2 font-semibold">{copy.heading}</h2>
+        <H className="text-h2 font-semibold">{copy.heading}</H>
         <p className="text-muted-foreground mt-3 text-lead">{copy.lead}</p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-8 grid gap-4">
