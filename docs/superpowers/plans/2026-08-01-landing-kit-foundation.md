@@ -951,11 +951,28 @@ Create `src/blocks/registry.ts`:
 import type { BlockManifest } from '~/shell/types'
 import { hero } from './hero/manifest'
 
-export const registry = {
+const definitions = {
   hero,
 } satisfies Record<string, BlockManifest<any, any>>
 
-export type BlockId = keyof typeof registry
+export type BlockId = keyof typeof definitions
+
+/**
+ * Exported with an explicit annotation, not as `typeof definitions`.
+ *
+ * Without this, `registry[id]` for a `BlockId` union resolves to a union of each block's own
+ * manifest type, and TypeScript checks function-typed members of a union contravariantly — so
+ * calling `variants[…]` or `schema(…)` demands an argument satisfying the *intersection* of
+ * every block's `copy` type, which nothing satisfies. That forced each consumer to rediscover
+ * the problem and paste its own `BlockManifest<any, any>` widening plus a `biome-ignore`.
+ * Widening once, here, means consumers just work.
+ *
+ * The `satisfies` above still checks each definition precisely at its definition site, and each
+ * block's own `manifest.ts` carries `satisfies BlockManifest<HeroCopy, 'centered' | 'split'>`.
+ * So nothing is unchecked; the widening only affects how the map is *read*.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: any stays bivariant here; unknown collapses keyof C to never.
+export const registry: Record<BlockId, BlockManifest<any, any>> = definitions
 ```
 
 - [ ] **Step 10: Write the block renderer with automatic surface alternation**
@@ -2557,9 +2574,12 @@ const RULES = [
   { re: /className="[^"]*\bcontainer\b/, msg: 'container utility — use <Container>' },
   { re: /<section[\s>]/, msg: 'raw <section> element — use <Section>' },
   { re: /\bmin-h-screen\b/, msg: 'min-h-screen — blocks must not assume viewport height' },
-  { re: /\btext-\[length:/, msg: 'arbitrary font-size — use text-display/h2/h3/lead' },
-  { re: /\brounded-\[/, msg: 'arbitrary radius — use rounded-base' },
+  // Any arbitrary-value escape, not a hand-picked list of two. An earlier version only checked
+  // `text-[length:` and `rounded-[`, and duly let `-left-[9999px]` through in the contact
+  // honeypot — a violation of the same rule, in a class the checker simply did not look for.
+  { re: /className="[^"]*\b-?[a-z][a-z0-9-]*-\[/, msg: 'arbitrary-value escape — use a token or scale value' },
   { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
+  { re: /<h1[\s>]/, msg: 'only the hero may render <h1>; other blocks use <h2>' },
 ]
 
 const failures = []
@@ -2582,6 +2602,14 @@ function check(file) {
 }
 
 walk('src/blocks')
+
+// The <h1> rule has exactly one legitimate exception: the hero owns the page's single <h1>.
+// Filtering here rather than weakening the rule keeps it absolute for every other block.
+const filtered = failures.filter(
+  (f) => !(f.includes('src/blocks/hero/') && f.includes('only the hero may render')),
+)
+failures.length = 0
+failures.push(...filtered)
 
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
@@ -2679,15 +2707,26 @@ Create `src/submit-schema.ts`. Both implementations and the form import this one
 ```ts
 import { z } from 'zod'
 
+/**
+ * Field validation only. Timing is checked separately and deliberately NOT folded in here:
+ * a single schema covering both means a genuinely fast human — someone using autofill or a
+ * password manager — is told "please complete every field correctly" when every field is in
+ * fact correct. Misattributing the cause on a lead-capture form loses the lead.
+ */
 export const contactSchema = z.object({
   name: z.string().min(2).max(120),
   email: z.email(),
   message: z.string().min(10).max(4000),
-  /** Honeypot — must stay empty. */
-  company: z.string().max(0).optional().default(''),
-  /** Milliseconds the form was on screen before submit. */
-  elapsedMs: z.number().int().min(2000),
+  /**
+   * Honeypot — must stay empty. Named `honeypot_url` rather than a plausible real field like
+   * `company`, because autofill matches recognised field names even with `autoComplete="off"`,
+   * and an autofilled honeypot rejects a genuine submission.
+   */
+  honeypot_url: z.string().max(0).optional().default(''),
 })
+
+/** Minimum time on screen before a submission is treated as human-paced. */
+export const MIN_ELAPSED_MS = 2000
 
 export type ContactInput = z.infer<typeof contactSchema>
 export type SubmitResult = { ok: true } | { ok: false; error: string }
@@ -2831,16 +2870,23 @@ export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>
   const mountedAt = useRef(Date.now())
 
   async function onSubmit(values: Fields) {
-    const parsed = contactSchema.safeParse({
-      ...values,
-      elapsedMs: Date.now() - mountedAt.current,
-    })
+    const parsed = contactSchema.safeParse(values)
     if (!parsed.success) {
       setState('error')
       setMessage(copy.validation)
       return
     }
+
     setState('sending')
+
+    // Timing guard, handled separately from field validation. If the fields are valid but the
+    // submission arrived too fast, wait out the remainder rather than rejecting: a bot does not
+    // stay to see the promise resolve, and a fast human should never be told their correct
+    // fields are wrong. The user sees the normal "sending" state throughout.
+    const elapsed = Date.now() - mountedAt.current
+    if (elapsed < MIN_ELAPSED_MS) {
+      await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
+    }
     const result = await submitContact(parsed.data)
     if (result.ok) {
       setState('sent')
@@ -2874,8 +2920,24 @@ export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>
             <textarea className={field} rows={5} {...register('message')} />
           </label>
 
-          <div aria-hidden="true" className="absolute -left-[9999px]">
-            <input tabIndex={-1} autoComplete="off" {...register('company')} />
+          {/*
+            Honeypot. Three things matter here:
+            - `-left-96` is a scale value, not an arbitrary `-left-[9999px]` bracket escape —
+              blocks may not use arbitrary values, and the convention checker now catches them.
+            - It must NOT be `display:none`: verify-build rejects hidden content, and bots
+              detect it.
+            - The field is named `honeypot_url`, not something like `company`, because browsers
+              and password managers autofill recognised field names even with
+              `autoComplete="off"` — and an autofilled honeypot silently discards a real lead,
+              the one failure a client never reports and never forgives.
+          */}
+          <div aria-hidden="true" className="absolute -left-96">
+            <input
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              {...register('honeypot_url')}
+            />
           </div>
 
           <button
@@ -2886,14 +2948,26 @@ export function ContactForm({ copy, surface, anchorId }: BlockProps<ContactCopy>
             {state === 'sending' ? copy.submitting : copy.submit}
           </button>
 
-          {message ? (
-            <p
-              role="status"
-              className={state === 'error' ? 'text-sm text-red-600' : 'text-sm text-green-700'}
-            >
-              {message}
-            </p>
-          ) : null}
+          {/*
+            The live region is ALWAYS mounted and only its text changes. A `role="status"`
+            node inserted fresh on state change is announced inconsistently across
+            screen-reader and browser combinations — so on a form whose entire purpose is
+            lead capture, the failure message can go unheard by exactly the users who most
+            need it.
+          */}
+          <p
+            role="status"
+            aria-live="polite"
+            className={
+              !message
+                ? 'sr-only'
+                : state === 'error'
+                  ? 'text-sm text-red-600'
+                  : 'text-sm text-green-700'
+            }
+          >
+            {message}
+          </p>
         </form>
       </Container>
     </Section>
