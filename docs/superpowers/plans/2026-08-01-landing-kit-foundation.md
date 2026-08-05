@@ -2705,7 +2705,7 @@ git commit -m "feat: add motion boundary, theme modes with no-flash script, conv
 
 **Interfaces:**
 - Consumes: the block contract (Task 3); `<Section>`, `<Container>` (Task 2).
-- Produces: `contactSchema` (zod); `submitContact(input) → Promise<{ ok: true } | { ok: false; error: string }>` from `~/submit`; the `contact` block registered and placed on the `/contact` page.
+- Produces: `contactSchema` + `submissionSchema` (zod); `submitContact(input: SubmissionInput) → Promise<{ ok: true } | { ok: false; error: string }>` from `~/submit`; the `contact` block registered and placed on the `/contact` page.
 
 - [ ] **Step 1: Write the shared schema**
 
@@ -2735,6 +2735,25 @@ export const contactSchema = z.object({
 /** Minimum time on screen before a submission is treated as human-paced. */
 export const MIN_ELAPSED_MS = 2000
 
+/**
+ * What actually goes over the wire, and what BOTH submit variants validate.
+ *
+ * `elapsedMs` is required here, deliberately. Splitting it out of `contactSchema` above fixed a
+ * real bug — a fast human was told their correct fields were wrong — but dropping it from
+ * validation altogether would have left the timing guard purely client-side, where a bot never
+ * runs it. A naive script POSTing `{name, email, message}` straight at the endpoint would then
+ * sail through with only the honeypot standing in its way.
+ *
+ * Keeping it required restores that: the client computes `elapsedMs` *after* waiting out any
+ * remainder, so a genuine fast submission passes, while a request that never ran the form is
+ * rejected for a missing field.
+ */
+export const submissionSchema = contactSchema.extend({
+  elapsedMs: z.number().int().min(MIN_ELAPSED_MS),
+})
+
+export type SubmissionInput = z.infer<typeof submissionSchema>
+
 export type ContactInput = z.infer<typeof contactSchema>
 export type SubmitResult = { ok: true } | { ok: false; error: string }
 
@@ -2744,7 +2763,7 @@ export type SubmitResult = { ok: true } | { ok: false; error: string }
  * becomes the one nobody verifies. Same rule as `~/motion` and `~/theme`.
  */
 export type SubmitModule = {
-  submitContact: (input: ContactInput) => Promise<SubmitResult>
+  submitContact: (input: SubmissionInput) => Promise<SubmitResult>
 }
 ```
 
@@ -2763,10 +2782,11 @@ The honeypot and the 2-second minimum are the spam handling — no CAPTCHA, per 
 Create `src/submit.endpoint.ts`:
 
 ```ts
-import { contactSchema, type ContactInput, type SubmitResult } from '~/submit-schema'
+import { submissionSchema, type SubmissionInput, type SubmitResult } from '~/submit-schema'
 
-export async function submitContact(input: ContactInput): Promise<SubmitResult> {
-  const parsed = contactSchema.safeParse(input)
+export async function submitContact(input: SubmissionInput): Promise<SubmitResult> {
+  // Same schema the RPC variant validates, so neither mode is the weaker one.
+  const parsed = submissionSchema.safeParse(input)
   if (!parsed.success) return { ok: false, error: 'invalid' }
 
   const endpoint = import.meta.env.VITE_CONTACT_ENDPOINT
@@ -2795,17 +2815,18 @@ Create `src/submit.rpc.ts`. It revalidates server-side because the client can be
 
 ```ts
 import { createServerFn } from '@tanstack/react-start'
-import { contactSchema, type ContactInput, type SubmitResult } from '~/submit-schema'
+import { submissionSchema, type SubmissionInput, type SubmitResult } from '~/submit-schema'
 
 const handler = createServerFn({ method: 'POST' })
-  .validator((data: unknown) => contactSchema.parse(data))
+  // Revalidates server-side, including the timing minimum — the client can be bypassed.
+  .validator((data: unknown) => submissionSchema.parse(data))
   .handler(async ({ data }): Promise<SubmitResult> => {
     console.log('[contact]', data.name, data.email)
     // Wire an email provider here per project.
     return { ok: true }
   })
 
-export async function submitContact(input: ContactInput): Promise<SubmitResult> {
+export async function submitContact(input: SubmissionInput): Promise<SubmitResult> {
   try {
     return await handler({ data: input })
   } catch {
@@ -2900,7 +2921,11 @@ export function ContactForm({
     if (elapsed < MIN_ELAPSED_MS) {
       await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
     }
-    const result = await submitContact(parsed.data)
+
+    // Recomputed AFTER the wait, so it reflects real time on screen and satisfies the
+    // server-side minimum that `submissionSchema` enforces.
+    const payload = { ...parsed.data, elapsedMs: Date.now() - mountedAt.current }
+    const result = await submitContact(payload)
     if (result.ok) {
       setState('sent')
       setMessage(copy.success)
