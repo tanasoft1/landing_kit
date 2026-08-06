@@ -5,7 +5,7 @@ export const pages: PageConfig<BlockId>[] = [
   {
     id: 'home',
     path: '/',
-    blocks: ['hero'],
+    blocks: ['hero', 'features'],
     seo: {
       mn: { title: 'Эхлэл', description: 'Хурдан, хайлтад оновчлогдсон вэб хуудас.' },
       en: { title: 'Home', description: 'A fast, search-optimised landing page.' },
