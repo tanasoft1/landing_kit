@@ -1,5 +1,6 @@
 import type { BlockManifest } from '~/shell/types'
 import { contact } from './contact/manifest'
+import { cta } from './cta/manifest'
 import { features } from './features/manifest'
 import { hero } from './hero/manifest'
 
@@ -13,6 +14,7 @@ const manifests = {
   hero,
   contact,
   features,
+  cta,
   // `variants` is a property (not a method), so TS checks its function type contravariantly:
   // a manifest's `(props: BlockProps<HeroCopy>) => ReactNode` would not be assignable to the
   // `(props: BlockProps<unknown>) => ReactNode` that `BlockManifest<unknown, unknown>` demands,
@@ -39,4 +41,5 @@ export const registry: Record<BlockId, BlockManifest<any, any>> = {
   hero,
   contact,
   features,
+  cta,
 }
