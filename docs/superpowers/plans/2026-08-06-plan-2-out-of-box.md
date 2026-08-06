@@ -51,7 +51,12 @@ The kit's entire value proposition is technical SEO plus measurable performance.
 | `src/blocks/cta/` | The closer block: `banner` + `split` variants | 3 |
 | `src/blocks/registry.ts` | One line per block | 2, 3 |
 | `src/config/pages.config.ts` | Page composition | 3 |
-| `src/blocks/block-modules.ts` | Block id → dynamic component import. The split point | 4 |
+| `src/blocks/<id>/variants.ts` | Component map per block — the code behind the split point | 4 |
+| `src/blocks/variant-registry.ts` | Synchronous component lookup, populated by whichever entry ran | 4 |
+| `src/blocks/variants.all.ts` | Static registration for the server/prerender path only | 4 |
+| `src/blocks/block-modules.ts` | Block id → dynamic import of that block's `variants.ts` | 4 |
+| `src/shell/types.ts` | `BlockManifest.variants` becomes `variantNames` | 4 |
+| `src/shell/blocks/render-blocks.tsx` | Resolves components via `getVariants()` | 4 |
 | `src/client.tsx` | Custom client entry: resolve chunks, *then* hydrate | 4 |
 | `src/routes/docs.tsx` | The developer surface | 5 |
 | `src/routes/debug.tsx` | **Deleted** — folded into `/docs` | 5 |
@@ -777,11 +782,80 @@ void hydrate()
 
 If the installed version's client-entry contract differs — a different export shape, or `hydrateRoot` targeting an element rather than `document` — adapt to it, but keep the `await` before hydration. That ordering is the entire point. Report what shape the installed version required.
 
-- [ ] **Step 3: Make the registry import components dynamically**
+- [ ] **Step 3: Break the static chain from the registry to the components**
 
-For Vite to actually split, the eager import chain from `registry.ts` to the component files must be broken. Change each block's `manifest.ts` so `variants` reference components that Vite can code-split, while the manifest itself stays eagerly importable for its copy and schema.
+**This is the crux of the task, and doing it wrong produces a passing build with an unchanged bundle.**
 
-The mechanism that works without reintroducing Suspense: keep `variants` as direct component references, but ensure the *manifest module* is what `blockModules` imports — so the component lands in the manifest's chunk rather than the main one.
+Today `manifest.ts` statically imports its components, and `registry.ts` statically imports every manifest. So `registry → manifests → components` is an unbroken static chain, and every component is reachable from the entry. Dynamic imports of the *same* modules split nothing: Vite sees them already reachable and keeps them in the main chunk. The chain has to actually be cut.
+
+Split each block's manifest in two — metadata stays eager because the SEO layer needs it synchronously; components move behind the split point.
+
+**a.** Create `src/blocks/<id>/variants.ts` per block, holding only the component map:
+
+```ts
+// src/blocks/hero/variants.ts
+import { HeroCentered } from './hero-centered'
+import { HeroSplit } from './hero-split'
+
+export const variants = { centered: HeroCentered, split: HeroSplit }
+```
+
+**b.** Change each `manifest.ts` to drop its component imports and declare variant *names* instead:
+
+```ts
+// src/blocks/hero/manifest.ts — no component import anywhere
+export const hero = {
+  id: 'hero',
+  variantNames: ['centered', 'split'] as const,
+  defaultVariant: 'centered',
+  copy: { mn, en },
+  nav: { labelKey: 'navLabel' },
+  requires: { npm: [], ui: [] },
+} satisfies BlockManifest<HeroCopy, 'centered' | 'split'>
+```
+
+Update `BlockManifest` in `src/shell/types.ts` accordingly: `variants` becomes `variantNames: readonly V[]`. Keep `defaultVariant: V` — with `as const` on the names array, a `defaultVariant` not in the list stays a compile error.
+
+**c.** Create `src/blocks/variant-registry.ts`, the synchronous lookup `RenderBlocks` reads:
+
+```ts
+import type { ComponentType } from 'react'
+import type { BlockProps } from '~/shell/types'
+import type { BlockId } from './registry'
+
+// biome-ignore lint/suspicious/noExplicitAny: one map holds every block's differently-typed copy.
+type VariantMap = Record<string, ComponentType<BlockProps<any>>>
+
+const loaded = new Map<BlockId, VariantMap>()
+
+export function registerVariants(id: BlockId, variants: VariantMap) {
+  loaded.set(id, variants)
+}
+
+export function getVariants(id: BlockId): VariantMap {
+  const v = loaded.get(id)
+  if (!v) {
+    // Reaching here means a block rendered before its module was loaded — a wiring bug, not a
+    // user-facing condition. Failing loudly beats rendering an empty section.
+    throw new Error(
+      `Variants for block '${id}' were never registered. The entry point must load and register a block's module before rendering it.`,
+    )
+  }
+  return v
+}
+```
+
+**d.** `src/blocks/block-modules.ts` points at the new `variants.ts` files, and registers on load:
+
+```ts
+hero: () => import('./hero/variants').then((m) => registerVariants('hero', m.variants)),
+```
+
+**e.** `RenderBlocks` resolves the component via `getVariants(id)[variantName]` instead of `manifest.variants[...]`, keeping its existing unknown-variant error.
+
+**f.** The server still needs every component synchronously at prerender. Create `src/blocks/variants.all.ts` that statically imports and registers all four, and import it from the **server** side only — the module must be unreachable from `src/client.tsx`, or the split is undone.
+
+TanStack Start's server entry override is `src/server.ts`; verify the installed version's contract before relying on it. **If the server entry cannot be hooked**, the fallback is to have `block-modules.ts` do `if (import.meta.env.SSR) { … }` with a static registration path, since Vite eliminates the false branch from the client build. Report which mechanism the installed version required.
 
 Verify the split actually happened before proceeding:
 
