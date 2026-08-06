@@ -9,6 +9,8 @@
   --gutter: clamp(1.25rem, 5vw, 2.5rem);
   --width-page: 68rem;
   --width-narrow: 34rem;
+  /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
+     differ between themes is declared once here rather than repeated below. */
   --elevation-card: none;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
