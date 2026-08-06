@@ -372,7 +372,51 @@ export function FeaturesGrid({ copy, surface, anchorId, headingLevel }: BlockPro
 }
 ```
 
-`max-w-2xl` on the intro column will be rejected by `check-conventions.mjs` — that rule forbids `max-w-*` in blocks. Use `<Container width="narrow">` for the intro instead, nested inside the outer `<Container>`, or drop the constraint. Resolve this in Step 6 when the checker tells you; do not pre-emptively weaken the rule.
+**Do not use `max-w-2xl`** — `check-conventions.mjs` rejects `max-w-*` in blocks, because page measure belongs to `<Container>`. And do not nest one `<Container>` inside another: each applies `px-gutter`, so nesting indents the inner content by a second gutter.
+
+Instead, `<Container>` gains an alignment prop, and the intro becomes a **sibling** of the grid rather than a child:
+
+```tsx
+// src/shell/layout/container.tsx
+const WIDTH = { page: 'max-w-page', narrow: 'max-w-narrow' } as const
+const ALIGN = { center: 'mx-auto', start: 'mr-auto' } as const
+
+export function Container({
+  width = 'page',
+  align = 'center',
+  className = '',
+  children,
+}: {
+  width?: keyof typeof WIDTH
+  align?: keyof typeof ALIGN
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className={`w-full px-gutter ${ALIGN[align]} ${WIDTH[width]} ${className}`}>
+      {children}
+    </div>
+  )
+}
+```
+
+`align` is a prop rather than a `className` override because `mx-auto` and `ml-0` are both margin utilities whose precedence depends on Tailwind's internal ordering, not on the order you write them — a coin-flip that would work until it silently didn't.
+
+The block then uses two sibling containers, so both share a left edge:
+
+```tsx
+<Section id={anchorId} surface={surface}>
+  <Container width="narrow" align="start">
+    <H className="text-h2 font-semibold text-balance">{copy.heading}</H>
+    <p className="text-muted-foreground text-lead mt-4 text-pretty">{copy.lead}</p>
+  </Container>
+  <Container className="mt-14">
+    {/* the grid */}
+  </Container>
+</Section>
+```
+
+A narrow intro is worth keeping rather than letting the lead run the full 68rem — that would be roughly 110 characters a line, well past comfortable reading. The point is a narrow *measure*, not a centred box.
 
 - [ ] **Step 5: Write the `alternating` variant**
 
