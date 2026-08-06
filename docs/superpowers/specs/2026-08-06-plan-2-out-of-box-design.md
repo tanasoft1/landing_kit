@@ -206,7 +206,34 @@ Two additions:
   both themes. That is eight combinations per page; the `/docs` token section exists partly to make
   that sweep quick.
 
-## 8. Deferred to Plan 3
+## 8. How this eventually ships (context for Plan 3)
+
+Not built here, but it constrains decisions in this plan, so it is recorded rather than assumed.
+
+The consumer already has a monorepo — `apps/backend`, `apps/db`, and so on, with the backend
+boilerplate built separately by someone else. They install the CLI (`pnpm add -D landing-kit`) and
+it writes `apps/frontend`: its own `package.json`, `src/blocks/`, `src/shell/`, sample pages and
+routes. Flat and readable inside that folder.
+
+**Exactly one thing is published, and it is the generator.** The code the CLI writes carries no
+`@tanasoft/*` dependency — it is the client's outright, free to diverge. This is the shadcn model,
+and it is why D1 keeps this repo a single package: the repo is the source the CLI copies from, and
+the consumer's workspace is theirs, not ours.
+
+Two requirements this places on Plan 3:
+
+- **The CLI must work inside an existing workspace.** Detect a `pnpm-workspace.yaml`, write into a
+  target directory the user names, and never assume it owns the repo root. Scaffolding into an
+  occupied monorepo is a different problem from scaffolding an empty directory.
+- **`~/submit` defaults to `endpoint`.** With a real backend beside it in the same monorepo, the
+  TanStack server-function variant is the exception, not the default.
+
+Two things this confirms about the present plan: `/docs` shipping in the output (D7) is right,
+because the developer receiving `apps/frontend` has never seen this repo; and copying source rather
+than depending on published packages (foundation decision) is what lets a client site diverge
+without our release cadence reaching into their monorepo.
+
+## 9. Deferred to Plan 3
 
 - `logos`, `testimonials`, `pricing`, `faq`.
 - `hero`'s `screenshot` variant.
