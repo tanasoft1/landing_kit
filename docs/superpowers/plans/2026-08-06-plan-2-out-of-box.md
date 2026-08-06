@@ -87,13 +87,39 @@ The scale is *system*, not skin, so it lives in `theme.css` and both presets sha
 ```css
 @theme {
   --text-display: clamp(2.75rem, 7.5vw, 5.5rem);
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.035em;
+
   --text-h2: clamp(2rem, 4vw, 3rem);
+  --text-h2--line-height: 1.12;
+  --text-h2--letter-spacing: -0.025em;
+
   --text-h3: clamp(1.25rem, 2vw, 1.5rem);
+  --text-h3--line-height: 1.3;
+  --text-h3--letter-spacing: -0.015em;
+
   --text-lead: clamp(1.125rem, 1.6vw, 1.375rem);
+  --text-lead--line-height: 1.55;
 }
 ```
 
 The display size grows most, the body least — that widening ratio is what reads as editorial rather than merely large.
+
+**The `--line-height` companions are not optional polish.** A font-size token without one inherits Tailwind preflight's ambient `1.5`, which at a 5.5rem display size produces an 8.25rem line box — the hero heading then breaks into two lines separated by nearly a blank line and reads as two disconnected fragments rather than one statement. Leading has to tighten as size grows, which is exactly what a paired scale expresses and a bare font-size cannot.
+
+Letter-spacing moves here too, per step, because display type wants tighter tracking than a subhead does. Tracking Mongolian Cyrillic tighter than about `-0.04em` starts to crowd, so `-0.035em` on display is the floor.
+
+- [ ] **Step 1b: Remove the now-duplicate letter-spacing from the base layer**
+
+`theme.css`'s `@layer base` currently sets `letter-spacing: -0.02em` on `h1, h2, h3`. With the token companions above, that is a second source for the same property — the kind of split this project has repeatedly been bitten by. Delete the `letter-spacing` declaration from that rule, keeping the `font-family`:
+
+```css
+  h1, h2, h3 {
+    font-family: var(--face-display);
+  }
+```
+
+Tracking now comes from the scale step alone, which is also more correct: it varies with size instead of applying one value to three very different sizes.
 
 - [ ] **Step 2: Add the shadow token to the `@theme inline` block**
 
@@ -121,6 +147,8 @@ Create `src/styles/presets/editorial.css`. Note `--elevation-card: none` — edi
   --gutter: clamp(1.25rem, 5vw, 2.5rem);
   --width-page: 68rem;
   --width-narrow: 34rem;
+  /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
+     differ between themes is declared once here rather than repeated below. */
   --elevation-card: none;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
