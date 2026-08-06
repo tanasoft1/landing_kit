@@ -8,7 +8,7 @@ export function FeaturesGrid({ copy, surface, anchorId, headingLevel }: BlockPro
   const H = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <Section id={anchorId} surface={surface}>
-      <Container width="narrow">
+      <Container width="narrow" align="start">
         <H className="text-h2 font-semibold text-balance">{copy.heading}</H>
         <p className="text-muted-foreground text-lead mt-4 text-pretty">{copy.lead}</p>
       </Container>
