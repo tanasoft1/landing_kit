@@ -181,6 +181,15 @@ Blocks read no context and no hooks for data. Everything arrives as props. Conse
   router, no theme provider.
 - The CLI can compose blocks freely, because there is no hidden wiring to reproduce.
 
+**Internal navigation is a full page load, deliberately.** The client entry resolves the current
+URL's block modules before hydrating, so no component suspends during the hydration pass. It does
+*not* re-resolve them on a client-side route change — so introducing TanStack Router's `<Link>` for
+internal navigation would render a page whose block modules were never loaded, throwing from
+`getVariants`. Every page here is prerendered static HTML, so a full load is cheap and is the
+model the kit is built on; `<a href>` is the correct element, not a missing optimisation.
+`scripts/check-conventions.mjs` enforces this, because the failure would otherwise appear only at
+runtime on whichever page someone linked to.
+
 **Anchor ids belong to the renderer, not the block.** A page may carry the same block twice —
 two CTAs, or a hero above and below a feature list — and a block hardcoding
 `<Section id="cta">` would then emit duplicate ids: invalid HTML, plus anchor links that always
