@@ -1,12 +1,14 @@
 import type { BlockManifest } from '~/shell/types'
 import { en } from './copy.en'
 import { type HeroCopy, mn } from './copy.mn'
-import { HeroCentered } from './hero-centered'
-import { HeroSplit } from './hero-split'
 
+// No component import here — deliberately. See `./variants.ts` for the component map and
+// `~/blocks/block-modules.ts` for why: this manifest is imported eagerly by `registry.ts` because
+// the SEO layer needs `copy`/`nav`/`schema` synchronously, but a component import here would put
+// every block's component right back on that same eager chain, undoing the split.
 export const hero = {
   id: 'hero',
-  variants: { centered: HeroCentered, split: HeroSplit },
+  variantNames: ['centered', 'split'] as const,
   defaultVariant: 'centered',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },

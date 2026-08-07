@@ -1,12 +1,11 @@
 import type { BlockManifest } from '~/shell/types'
 import { en } from './copy.en'
 import { type CtaCopy, mn } from './copy.mn'
-import { CtaBanner } from './cta-banner'
-import { CtaSplit } from './cta-split'
 
+// No component import here — see `./variants.ts` and hero/manifest.ts's header comment.
 export const cta = {
   id: 'cta',
-  variants: { banner: CtaBanner, split: CtaSplit },
+  variantNames: ['banner', 'split'] as const,
   defaultVariant: 'banner',
   copy: { mn, en },
   requires: { npm: [], ui: [] },

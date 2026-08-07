@@ -1,12 +1,11 @@
 import type { BlockManifest } from '~/shell/types'
 import { en } from './copy.en'
 import { type FeaturesCopy, mn } from './copy.mn'
-import { FeaturesAlternating } from './features-alternating'
-import { FeaturesGrid } from './features-grid'
 
+// No component import here — see `./variants.ts` and hero/manifest.ts's header comment.
 export const features = {
   id: 'features',
-  variants: { grid: FeaturesGrid, alternating: FeaturesAlternating },
+  variantNames: ['grid', 'alternating'] as const,
   defaultVariant: 'grid',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },

@@ -15,10 +15,12 @@ const manifests = {
   contact,
   features,
   cta,
-  // `variants` is a property (not a method), so TS checks its function type contravariantly:
-  // a manifest's `(props: BlockProps<HeroCopy>) => ReactNode` would not be assignable to the
-  // `(props: BlockProps<unknown>) => ReactNode` that `BlockManifest<unknown, unknown>` demands,
-  // so every concrete manifest would fail this `satisfies` check.
+  // `schema` is a property (not a method), so TS checks its function type contravariantly:
+  // a manifest's `BlockSchema<HeroCopy>` would not be assignable to the `BlockSchema<unknown>`
+  // that `BlockManifest<unknown, unknown>` demands, so every concrete manifest would fail this
+  // `satisfies` check. (Components moved off this type entirely — see `variantNames` on
+  // `BlockManifest` in `~/shell/types` and `~/blocks/block-modules.ts` — but `schema` keeps the
+  // same problem alive.)
   // biome-ignore lint/suspicious/noExplicitAny: unknown breaks assignability here (see above); any stays bivariant.
 } satisfies Record<string, BlockManifest<any, any>>
 
@@ -33,9 +35,9 @@ export type BlockId = keyof typeof manifests
 // `Record<BlockId, BlockManifest<any, any>>` so the union-contravariance problem is widened once,
 // here, rather than at every call site that indexes the registry (`render-blocks.tsx`,
 // `json-ld.ts`): `registry[id]` for a `BlockId` union would otherwise resolve to a union of each
-// block's *own* manifest type, and TS checks a union of function-typed properties
-// (`variants[...]`) contravariantly — the same bivariant-`any` problem as above, resurfacing at
-// every call site instead of paying for it once, here.
+// block's *own* manifest type, and TS checks a union of function-typed properties (`schema`)
+// contravariantly — the same bivariant-`any` problem as above, resurfacing at every call site
+// instead of paying for it once, here.
 // biome-ignore lint/suspicious/noExplicitAny: any stays bivariant here; unknown breaks assignability (see above).
 export const registry: Record<BlockId, BlockManifest<any, any>> = {
   hero,

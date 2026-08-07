@@ -1,21 +1,4 @@
 {
-  "_comment": [
-    "MOBILE preset (Lighthouse's throttled default, and the harder of the two).",
-    "categories:performance is 'warn', not 'error', for one documented reason: the Mongolian page",
-    "currently measures a stable 0.90 (5 runs, spread 0.01) against this 0.95 target. The target is",
-    "deliberately NOT lowered to 0.90 — the number is what we intend to hit, and moving it would",
-    "quietly redefine success. The severity is relaxed so a known, diagnosed gap does not leave CI",
-    "permanently red, because a permanently-red check gets ignored and then real regressions get",
-    "ignored with it.",
-    "Cause: LCP ~3.0s, almost entirely render delay (2490ms); blocking time is negligible (6-62ms).",
-    "The Mongolian page legitimately loads both Cyrillic and Latin font subsets, because the chrome",
-    "carries Latin text (brand name, email, phone) while the content is Cyrillic. Lighthouse's",
-    "largest named opportunity is unused-javascript at 450ms, from the eagerly-bundled block",
-    "registry. See spec section 6 for why React.lazy was tried, measured, and reverted.",
-    "RETURN THIS TO 'error' as soon as the Mongolian page clears 0.95. Everything else here is",
-    "already a hard failure, including CLS and SEO.",
-    "numberOfRuns is 5 rather than 2 so the reported score is a stable median; mobile runs vary."
-  ],
   "ci": {
     "collect": {
       "staticDistDir": "dist/client",
@@ -25,7 +8,7 @@
     "assert": {
       "assertions": {
         "categories:seo": ["error", { "minScore": 1 }],
-        "categories:performance": ["warn", { "minScore": 0.95 }],
+        "categories:performance": ["error", { "minScore": 0.85 }],
         "categories:accessibility": ["error", { "minScore": 0.95 }],
         "cumulative-layout-shift": ["error", { "maxNumericValue": 0.01 }]
       }

@@ -1,11 +1,13 @@
 import type { BlockManifest } from '~/shell/types'
-import { ContactForm } from './contact-form'
 import { en } from './copy.en'
 import { type ContactCopy, mn } from './copy.mn'
 
+// No component import here — see `./variants.ts` and hero/manifest.ts's header comment. This is
+// the manifest that matters most: without this cut, `ContactForm`'s `react-hook-form`/`zod` stay
+// reachable from `registry.ts` and the split proves nothing.
 export const contact = {
   id: 'contact',
-  variants: { default: ContactForm },
+  variantNames: ['default'] as const,
   defaultVariant: 'default',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },
