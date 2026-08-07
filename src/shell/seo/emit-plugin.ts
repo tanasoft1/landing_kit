@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Plugin } from 'vite'
 // Relative, NOT `~/` — this module is imported by vite.config.ts, and the `~/` alias is
@@ -18,6 +18,28 @@ export function emitSeoFiles({
   return {
     name: 'kit:emit-seo-files',
     apply: 'build',
+    // `enforce: 'post'` (plugin-level) combined with the hook-level `order: 'post'` below is
+    // load-bearing, not decoration: Vite buckets plugins by `enforce` before it applies a hook's
+    // own `order` within that bucket. TanStack Start's own prerender step is a `buildApp` hook on
+    // a plugin with `enforce: 'post'`; without matching that here, an `order: 'post'` hook on a
+    // normal-enforce plugin (this one, without this line) still runs BEFORE prerendering, not
+    // after — confirmed empirically: `dist/client/index.html` did not exist yet when a `buildApp`
+    // hook without `enforce: 'post'` fired, and did once this was added. Below, deleting the
+    // manifest before every page has read it (see `block-preloads.ts`) would silently empty out
+    // every page's `modulepreload` list — this ordering is what prevents that.
+    enforce: 'post',
+    buildApp: {
+      order: 'post',
+      async handler() {
+        // `dist/client/.vite/manifest.json` (from `build.manifest: true` in vite.config.ts) is
+        // read by `src/shell/seo/block-preloads.ts` during prerendering, above — by the time this
+        // hook runs, prerendering (and therefore every read of it) has already finished, so it's
+        // safe to remove. Nothing in the shipped client bundle references it; leaving it in
+        // `dist/client` would publish source paths and chunk metadata to the public static root
+        // for no benefit — it's deployed wholesale as the site's document root.
+        rmSync(join(outDir, '.vite'), { recursive: true, force: true })
+      },
+    },
     closeBundle() {
       const urls = enumerateUrls(pages, site)
 

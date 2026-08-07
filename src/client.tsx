@@ -31,6 +31,15 @@ async function hydrate() {
   // component suspend during the hydration pass and forces React to discard the
   // server-rendered subtree — measured at CLS 0.169. Awaiting here means the modules are
   // already in memory when hydrateRoot runs, so no boundary suspends and nothing is discarded.
+  //
+  // This resolves ONLY the initial URL's blocks, once, here — nothing re-runs it on a later
+  // client-side navigation. That is safe only because every navigation on this stack is a plain
+  // `<a href>` (a full page load, cheap since every page is prerendered static HTML), never a
+  // `@tanstack/react-router` `<Link>` (a client-side transition that would render a page whose
+  // blocks were never fetched, throwing from `getVariants` with no build-time signal). This is a
+  // deliberate design property of the kit, not an oversight — and it's enforced, not just
+  // documented: `scripts/check-conventions.mjs` fails the build on a `Link` import from
+  // `@tanstack/react-router` anywhere in `src/blocks` or `src/shell`.
   await Promise.all(blocksForCurrentUrl().map((id) => blockModules[id]?.()))
 
   startTransition(() => {

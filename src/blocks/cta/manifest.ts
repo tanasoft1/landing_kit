@@ -2,11 +2,15 @@ import type { BlockManifest } from '~/shell/types'
 import { en } from './copy.en'
 import { type CtaCopy, mn } from './copy.mn'
 
-// No component import here — see `./variants.ts` and hero/manifest.ts's header comment.
+// No component import here — see `./variants.ts` and hero/manifest.ts's header comment. The
+// variant union is derived from `variantNames` (see hero/manifest.ts's comment on why a
+// hand-written union alongside the array is a silent-drift compile hole).
+const variantNames = ['banner', 'split'] as const
+
 export const cta = {
   id: 'cta',
-  variantNames: ['banner', 'split'] as const,
+  variantNames,
   defaultVariant: 'banner',
   copy: { mn, en },
   requires: { npm: [], ui: [] },
-} satisfies BlockManifest<CtaCopy, 'banner' | 'split'>
+} satisfies BlockManifest<CtaCopy, (typeof variantNames)[number]>

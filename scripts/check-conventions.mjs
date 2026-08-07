@@ -109,9 +109,48 @@ function check(file) {
 
 walk('src/blocks')
 
+// --- no client-side <Link> outside src/routes -----------------------------------------------
+// Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
+// `src/client.tsx`'s `hydrate()` await. A `<Link>` from `@tanstack/react-router` performs a
+// client-side transition, which can land on a page whose blocks were never fetched: the block
+// renders with a module that was never registered, and `getVariants` throws — with no build-time
+// signal. Every navigation on this stack is deliberately a plain `<a href>` (a full page load,
+// cheap because every page is prerendered static HTML). That's a recorded design property, not a
+// gap, so it's enforced here rather than left to be rediscovered by whoever adds the next nav
+// link. Scoped to `src/blocks` and `src/shell`, not `src/routes` — route-level `<Link>` usage
+// would legitimately belong there if this kit ever grew one.
+const LINK_IMPORT_RE = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*(['"])@tanstack\/react-router\2/g
+
+function walkFiles(dir, visit) {
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry)
+    if (statSync(p).isDirectory()) walkFiles(p, visit)
+    else if (p.endsWith('.tsx')) visit(p)
+  }
+}
+
+function checkNoRouterLink(file) {
+  const text = readFileSync(file, 'utf8')
+  for (const match of text.matchAll(LINK_IMPORT_RE)) {
+    if (!/\bLink\b/.test(match[1])) continue
+    const line = text.slice(0, match.index).split('\n').length
+    failures.push(
+      `${file}:${line}  imports Link from '@tanstack/react-router' — block modules are ` +
+        `resolved once, pre-hydration, off the initial URL only (src/client.tsx); a client-side ` +
+        `route transition via <Link> would render a page whose blocks were never registered. ` +
+        `Use a plain <a href> instead.`,
+    )
+  }
+}
+
+walkFiles('src/blocks', checkNoRouterLink)
+walkFiles('src/shell', checkNoRouterLink)
+
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
   for (const f of failures) console.error(`  - ${f}`)
   process.exit(1)
 }
-console.log('✓ check-conventions: blocks follow layout primitives')
+console.log(
+  '✓ check-conventions: blocks follow layout primitives, no client-side <Link> in blocks/shell',
+)

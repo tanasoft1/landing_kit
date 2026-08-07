@@ -6,9 +6,20 @@ import { type HeroCopy, mn } from './copy.mn'
 // `~/blocks/block-modules.ts` for why: this manifest is imported eagerly by `registry.ts` because
 // the SEO layer needs `copy`/`nav`/`schema` synchronously, but a component import here would put
 // every block's component right back on that same eager chain, undoing the split.
+//
+// The variant union is DERIVED from this array (`(typeof variantNames)[number]` below), not
+// hand-written as `'centered' | 'split'` alongside it. `variantNames: readonly V[]` doesn't force
+// every member of `V` to appear in the array the way the old `variants: Record<V, Component>` did
+// — TS arrays are covariant and don't enforce per-element completeness, so a hand-written union
+// listing a variant this array omits compiles with zero errors and fails only at runtime, on
+// whichever page requests it. Deriving the union the other direction makes that drift a compile
+// error instead: add a name here and it flows into the type; the type can never be wider or
+// narrower than the actual list.
+const variantNames = ['centered', 'split'] as const
+
 export const hero = {
   id: 'hero',
-  variantNames: ['centered', 'split'] as const,
+  variantNames,
   defaultVariant: 'centered',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },
@@ -19,4 +30,4 @@ export const hero = {
   // description of the same thing. `schema` is reserved for markup a block's own content earns
   // (`FAQPage`, `Product`, `Offer`, `Review`, …); page identity is never a block's to claim.
   requires: { npm: [], ui: [] },
-} satisfies BlockManifest<HeroCopy, 'centered' | 'split'>
+} satisfies BlockManifest<HeroCopy, (typeof variantNames)[number]>
