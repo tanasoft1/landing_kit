@@ -1245,6 +1245,29 @@ In `scripts/verify-build.mjs`:
 - `ALLOWED_ROUTE_FILES` — replace `'debug.tsx'` with `'docs.tsx'`.
 - The prerender-exclusion check — change `debug/index.html` to `docs/index.html`, and the message accordingly.
 
+- [ ] **Step 5b: Assert every page preloads its block chunks**
+
+Task 4 made the per-page `modulepreload` list depend on a build-hook ordering — specifically on `tanstackStart()` being registered before `emitSeoFiles()` in `vite.config.ts`, so the manifest still exists when preloads are computed and is deleted only afterwards. That ordering is currently correct and deliberate, but nothing asserts it. A plugin reorder, or an upstream change to TanStack Start's hook `enforce`/`order`, would produce a build that **succeeds with empty preload lists** — reintroducing the request waterfall that cost 0.90 → 0.88, with no signal at all.
+
+Add to the per-page loop, after the existing head assertions:
+
+```js
+  // Every page must preload the chunks for the blocks it renders. This is a fragile ordering
+  // dependency (see emit-plugin.ts) and its failure mode is silent: the build succeeds, the page
+  // works, and only a Lighthouse run weeks later shows the waterfall came back.
+  const preloaded = [
+    ...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g),
+  ].map((m) => m[1] ?? '')
+  const blockChunks = preloaded.filter((h) => /\/variants-[^/]+\.js$/.test(h))
+  if (blockChunks.length === 0) {
+    fail(u.path, 'no block chunks preloaded — check plugin ordering in vite.config.ts')
+  }
+```
+
+Then prove it bites: temporarily move `emitSeoFiles(...)` **before** `tanstackStart(...)` in `vite.config.ts`'s plugin array, rebuild, and confirm `verify-build` fails naming the pages. Restore the order and confirm it passes.
+
+A count rather than an exact set, deliberately: the chunk filenames are content-hashed and the block-to-chunk mapping is Vite's business, so asserting specific names would break on every unrelated edit. Zero-versus-nonzero is the signal that actually distinguishes working from broken.
+
 In `src/shell/seo/emit-plugin.ts`, change the `robots.txt` line from `Disallow: /debug` to `Disallow: /docs`.
 
 Confirm nothing still references the old route:
