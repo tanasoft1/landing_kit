@@ -265,6 +265,17 @@ Radius, shadow, colour temperature and density all differ between the two — de
 preset swap reads as a different design, not a recolour. A third preset slot is open: add a file
 under `presets/` with the same variable set and repeat the one-line `@import` swap.
 
+"The same variable set" is enforced, not advisory. `pnpm conventions` reads every `var(--…)`
+referenced inside `theme.css`'s `@theme inline` block and asserts that **every** file in
+`presets/` declares all of them in `:root` — including presets that are not the one currently
+imported. It checks the reverse direction too: a token a preset declares that `@theme inline`
+never maps, and that nothing else in the preset references, is reported as dead weight (a token
+built on internally, like a shared `--brand-hue`, is exempt because the preset itself uses it).
+This exists because the failure is otherwise invisible: `--color-ring: var(--c-ring)` with no
+`--c-ring` is invalid at computed-value time, so the focus outline silently does not render, and
+both `pnpm verify` and Lighthouse stay green — the accessibility audit measures contrast, not
+whether a focus ring resolved.
+
 The fastest way to see either preset is **`/docs`** (see below) — its Tokens section renders
 every colour and type token live from whichever preset is imported, and its Blocks section
 previews every block and variant at true page geometry (each preview supplies its own `Section`

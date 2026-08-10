@@ -294,6 +294,87 @@ if (!existsSync(DOCS_ROUTE)) {
   )
 }
 
+// --- every preset must define the complete token surface --------------------------------------
+// The kit's headline claim is that a whole design swaps by changing one `@import` in `theme.css`,
+// and the README tells a third-preset author to use "the same variable set". Nothing verified it.
+//
+// The failure is silent by construction. `@theme inline` maps `--color-ring: var(--c-ring)`; a
+// preset that omits `--c-ring` leaves that unresolved, which makes the declaration invalid at
+// computed-value time — the focus outline simply does not render. `pnpm verify` is green (no CSS
+// is malformed), and Lighthouse is green too: its accessibility audit checks contrast ratios, not
+// whether a focus ring resolved to a colour. Both shipped presets happen to be complete, so this
+// is unproven rather than broken, and this project treats unproven as unsafe.
+const THEME_CSS = 'src/styles/theme.css'
+const PRESETS_DIR = 'src/styles/presets'
+
+/** Balanced-brace extraction, so a nested `calc(…)` or a rule inside the block cannot truncate it. */
+function extractBlock(src, marker) {
+  const start = src.indexOf(marker)
+  if (start === -1) return null
+  const open = src.indexOf('{', start)
+  if (open === -1) return null
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}' && --depth === 0) return src.slice(open + 1, i)
+  }
+  return null
+}
+
+if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
+  failures.push(
+    `${THEME_CSS} / ${PRESETS_DIR}  missing — the preset token-surface check needs both`,
+  )
+} else {
+  const themeInline = extractBlock(readFileSync(THEME_CSS, 'utf8'), '@theme inline')
+  if (!themeInline) {
+    failures.push(`${THEME_CSS}  could not locate the \`@theme inline { … }\` block`)
+  } else {
+    // Every token the theme layer expects a preset to provide.
+    const required = new Set([...themeInline.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]))
+    if (required.size === 0) {
+      failures.push(
+        `${THEME_CSS}  \`@theme inline\` references no var(--…) tokens — check the block`,
+      )
+    }
+    for (const file of readdirSync(PRESETS_DIR)
+      .filter((f) => f.endsWith('.css'))
+      .sort()) {
+      const path = `${PRESETS_DIR}/${file}`
+      const css = readFileSync(path, 'utf8')
+      const root = extractBlock(css, ':root')
+      if (!root) {
+        failures.push(`${path}  no \`:root { … }\` block — a preset must declare its tokens there`)
+        continue
+      }
+      const declared = new Set([...root.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map((m) => m[1]))
+      for (const token of [...required].sort()) {
+        if (!declared.has(token)) {
+          failures.push(
+            `${path}  does not declare ${token}, which ${THEME_CSS}'s @theme inline maps. The ` +
+              `mapped utility resolves to an invalid value and silently renders nothing — a ` +
+              `missing --c-ring means no focus outline, a missing --width-page means no page ` +
+              `measure, with a green build and a green Lighthouse run either way.`,
+          )
+        }
+      }
+      // Reverse direction: a token no one maps is dead weight. Exempted if the preset itself
+      // references it — an author may legitimately build a palette on an internal helper
+      // (`--brand-hue`, say) that the theme layer has no business knowing about.
+      for (const token of [...declared].sort()) {
+        if (required.has(token)) continue
+        const referencedInPreset = new RegExp(`var\\(\\s*${token}\\b`).test(css)
+        if (!referencedInPreset) {
+          failures.push(
+            `${path}  declares ${token}, which ${THEME_CSS} never maps and nothing in the preset ` +
+              `references — dead weight, or a token whose @theme inline mapping was forgotten`,
+          )
+        }
+      }
+    }
+  }
+}
+
 // --- /docs' RECIPES list must name real README headings ---------------------------------------
 // `src/shell/docs/config-reference.tsx`'s RECIPES array names README `##` sections verbatim, as
 // plain text rather than links (README.md ships in neither `public/` nor `dist/client/`, so a link
