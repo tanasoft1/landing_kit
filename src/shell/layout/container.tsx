@@ -14,23 +14,50 @@ const ALIGN = {
   start: 'mr-auto',
 } as const
 
-export function Container({
-  width = 'page',
-  align = 'center',
-  className = '',
-  children,
-}: {
-  width?: keyof typeof WIDTH
-  /**
-   * `'center'` (default) centres the container — the only behaviour any call site saw before
-   * this prop existed, since it's additive. `'start'` left-aligns it instead, for a narrower-
-   * than-page column that should share a left edge with a sibling `width="page"` Container
-   * under the same `<Section>` (e.g. a block's narrow intro next to its page-width body).
-   */
-  align?: keyof typeof ALIGN
-  className?: string
-  children: ReactNode
-}) {
+type Width = keyof typeof WIDTH
+type Align = keyof typeof ALIGN
+
+/**
+ * `align` means "left edge of the page grid", and that is only a meaningful thing to ask for on a
+ * container narrower than the page grid — so the type makes `align="start"` unavailable on
+ * `width="page"` rather than accepting it and doing something else.
+ *
+ * This was first recorded as a harmless no-op. It is not. `mr-auto` sets `margin-right: auto` with
+ * `margin-left` at its initial `0`, so a `max-w-page` box with `align="start"` is shoved against
+ * the left edge of the *viewport* — 192px of slack at 1280px, and more on a wider screen. One prop
+ * name would then mean "left edge of the page grid" for `width="narrow"` and "left edge of the
+ * viewport" for `width="page"`: two different behaviours, silently selected by a sibling prop.
+ * That is a worse trap than a no-op, because the no-op reading is what a reader assumes.
+ *
+ * Expressed as a union rather than a runtime guard so the combination cannot be written at all.
+ * `Exclude<Width, 'page'>` rather than a literal `'narrow'`, so a third width added to `WIDTH`
+ * gets `align` support automatically and only `page` stays excluded.
+ */
+type ContainerProps = { className?: string; children: ReactNode } & (
+  | {
+      width?: 'page'
+      /** Not available at `width="page"`: the page grid IS the reference frame. */
+      align?: 'center'
+    }
+  | {
+      width: Exclude<Width, 'page'>
+      /**
+       * `'center'` (default) centres the container — the only behaviour any call site saw before
+       * this prop existed, since it's additive. `'start'` left-aligns it instead, for a narrower-
+       * than-page column that should share a left edge with a sibling `width="page"` Container
+       * under the same `<Section>` (e.g. a block's narrow intro next to its page-width body).
+       */
+      align?: Align
+    }
+)
+
+export function Container(props: ContainerProps) {
+  const { width = 'page', className = '', children } = props
+  // Unreachable through `ContainerProps`, and kept anyway as a runtime floor: a `.jsx` consumer,
+  // a spread of a loosely-typed object, or an `as` cast can still deliver the forbidden pair, and
+  // falling through with it would apply `mr-auto` to a `max-w-page` box — precisely the left-shove
+  // the type above exists to prevent. Degrading to `center` is the safe reading.
+  const align: Align = width === 'page' ? 'center' : (props.align ?? 'center')
   // `align="start"` on anything narrower than the page needs a shared reference frame, not just
   // `mr-auto` on its own box. `mr-auto` alone hugs the LEFT of this container's *immediate*
   // parent (the `<Section>`, full viewport width) — which only happens to match a sibling
@@ -46,7 +73,9 @@ export function Container({
   // Every other combination — including the existing `width="narrow"`, default `align="center"`
   // used by the contact block — renders the original single `<div>`, byte-for-byte unchanged, so
   // this prop is purely additive for every call site that predates it.
-  if (align === 'start' && width !== 'page') {
+  // No `&& width !== 'page'` here any more: `align` is normalised above, so it can only be
+  // `'start'` when `width` is narrower than the page.
+  if (align === 'start') {
     return (
       <div className="w-full px-gutter mx-auto max-w-page">
         <div className={`${ALIGN[align]} ${WIDTH[width]} ${className}`}>{children}</div>
