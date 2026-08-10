@@ -399,10 +399,10 @@ before any aliasing applies.
 
 ## Lighthouse budget
 
-`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) each assert, on both
-`http://localhost/index.html` (default locale) and `http://localhost/en/index.html`, against the
-**default** config's build (`pnpm build`, i.e. `KIT_ANIMATION=on`, `KIT_SUBMIT=endpoint`,
-`KIT_CONFIG=default`):
+`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) each assert on **all four**
+prerendered pages — `/index.html`, `/en/index.html`, `/contact/index.html` and
+`/en/contact/index.html` — against the **default** config's build (`KIT_ANIMATION=on`,
+`KIT_SUBMIT=endpoint`, `KIT_CONFIG=default`):
 
 - `categories:seo` ≥ 1
 - `categories:accessibility` ≥ 0.95
@@ -412,6 +412,10 @@ before any aliasing applies.
 Every one of these is a hard `error`, on **both** Lighthouse presets — mobile and desktop — and
 on both token presets (`editorial`, `warm`). Nothing here is a `warn`.
 
+Including `/contact` matters because it is the page carrying the 96 KB form chunk and the kit's
+only interactive surface: until it was added, both its performance and its **form accessibility**
+were unmeasured by anything.
+
 `pnpm lighthouse` runs Lighthouse CI's default **mobile** preset (throttled CPU + network) — the
 harder, more representative run for these sites. `pnpm lighthouse:desktop` uses
 `lighthouserc.desktop.json`. Each runs 5 times per URL so the reported score is a stable median.
@@ -419,20 +423,36 @@ Each script clears `.lighthouseci/` before running, so `pnpm lighthouse && pnpm 
 is safe to chain — without that, the second run's assert step would pick up the first preset's
 leftover reports alongside its own and could fail on a URL that was never part of its own run.
 
+**Each script runs `pnpm build` first**, and that is load-bearing rather than tidy. `lhci` reads
+whatever is sitting in `dist/client`; the smoke scripts overwrite it with a *different* config's
+output. Run in the documented gate order (`… && pnpm smoke:onepage && pnpm lighthouse`), the
+Lighthouse step would otherwise measure the one-page, light-only, unanimated smoke build while
+reporting it against the default config's budget — and with `/contact` in the URL list it would
+simply fail, since that build has no contact page. The rebuild makes each script measure the build
+it says it measures.
+
 ### Current status
 
-Measured on the default config's build, both token presets — the numbers are the same, within
-run-to-run noise, because a preset swap changes CSS variables and fonts, not the JavaScript that
-Lighthouse's performance score is dominated by:
+Measured on the default config's build with the **`editorial`** preset — the committed default,
+and the only preset any committed configuration has ever built. Task 6 measured `warm` through a
+temporary local `@import` swap and found the numbers unchanged within run-to-run noise, which is
+expected (a preset swap moves CSS variables and fonts, not the JavaScript the performance score is
+dominated by) but is not reproducible from anything in the repository. See
+[Known limitations](docs/superpowers/known-limitations.md) before treating the `warm` figures as
+measured.
 
-| | Performance | Accessibility | SEO | CLS |
-|---|---|---|---|---|
-| Desktop, both locales, both presets | **1.00** | 1.00 | 1.00 | ~0 |
-| Mobile, `en`, both presets | 0.94 | 1.00 | 1.00 | 0 |
-| Mobile, `mn`, both presets | **0.90** | 1.00 | 1.00 | 0 |
+Median of 5 runs per URL, all four pages:
+
+| Page | Mobile perf | Desktop perf | Accessibility | SEO | CLS |
+|---|---|---|---|---|---|
+| `/` (mn) | **0.90** | 1.00 | 1.00 | 1.00 | 0.000 |
+| `/en` | 0.94 | 1.00 | 1.00 | 1.00 | 0.000 |
+| `/contact` (mn) | 0.91 | 1.00 | 1.00 | 1.00 | 0.000 |
+| `/en/contact` | 0.95 | 1.00 | 1.00 | 1.00 | 0.000 |
 
 All comfortably clear their floor (mobile ≥ 0.85, desktop ≥ 0.95) and every assertion is a hard
-failure — there is no relaxed severity left on either preset. Mongolian mobile is the harder case
+failure — there is no relaxed severity left on either preset. Accessibility is 1.00 on the contact
+pages too, which is the first machine check the form has ever had. Mongolian mobile is the harder case
 for one inherent, unavoidable reason: a bilingual page carries two font subsets. The chrome
 contains Latin text — the brand name, the email address, the phone number — while the content is
 Cyrillic, so `unicode-range` correctly fetches both subsets, roughly twice the English page's font
