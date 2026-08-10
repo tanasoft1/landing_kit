@@ -316,11 +316,27 @@ else {
   // explicit request to index a URL, which is the opposite of what `/docs` is for. `/docs` is a
   // developer surface with no localized copy, no `pages.config.ts` entry and no prerendered file;
   // advertising it here would ask Google to index a URL that 404s on a static deploy.
-  if (/\/docs\b/.test(xml)) {
-    fail(
-      'sitemap.xml',
-      'contains /docs — the developer docs route must never be listed for indexing',
-    )
+  //
+  // Compared as PARSED PATHS, not with a `/\/docs\b/` regex over the raw XML. That regex matched
+  // the `//docs` inside any `site.url` on a host beginning `docs.` — `<loc>https://docs.example.mn/
+  // </loc>` tested true and failed a completely correct build — and it also matched legitimate
+  // paths like `/docs-guide` (`\b` sits between `s` and `-`). A false failure in the project's only
+  // machine gate is the failure mode this file's `decodeEntities` docstring warns about at length:
+  // it teaches people to distrust the gate, which is worse than the gap it was closing.
+  const forbiddenDocsPaths = new Set(['/docs', ...new Set(urls.map((u) => `/${u.locale}/docs`))])
+  const locPaths = [...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => {
+    const loc = decodeEntities(m[1] ?? '').trim()
+    const path = loc.startsWith(site) ? loc.slice(site.length) : loc
+    // Normalise a trailing slash so `/docs/` is not a way around this.
+    return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
+  })
+  for (const path of locPaths) {
+    if (forbiddenDocsPaths.has(path)) {
+      fail(
+        'sitemap.xml',
+        `lists '${path}' — the developer docs route must never be advertised for indexing`,
+      )
+    }
   }
 
   // The sitemap's alternate set must match what the <head> declares, x-default included.
