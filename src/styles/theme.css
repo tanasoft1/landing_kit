@@ -37,6 +37,8 @@
   --color-primary: var(--c-primary);
   --color-primary-foreground: var(--c-primary-foreground);
   --color-ring: var(--c-ring);
+  --color-destructive: var(--c-destructive);
+  --color-success: var(--c-success);
 
   --font-display: var(--face-display);
   --font-body: var(--face-body);

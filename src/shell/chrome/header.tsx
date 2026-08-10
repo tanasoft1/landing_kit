@@ -83,7 +83,10 @@ export function Header({
           </summary>
           <nav
             aria-label={navLabel}
-            className="border-border bg-background rounded-base absolute right-0 z-50 mt-2 flex w-56 flex-col border p-3 text-sm shadow-lg"
+            // `shadow-card`, not Tailwind's `shadow-lg`: `shadow-card` maps to the preset's own
+            // `--elevation-card`, so the mobile menu's elevation moves with a preset swap the way
+            // every other surface does. `shadow-lg` is a fixed palette value that would not.
+            className="border-border bg-background rounded-base shadow-card absolute right-0 z-50 mt-2 flex w-56 flex-col border p-3 text-sm"
           >
             {pageLinks}
             <span className="border-border my-2 border-t" aria-hidden="true" />

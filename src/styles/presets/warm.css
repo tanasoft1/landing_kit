@@ -30,6 +30,13 @@
   --c-primary: oklch(55% 0.16 40);
   --c-primary-foreground: oklch(99% 0.006 85);
   --c-ring: oklch(55% 0.16 40);
+
+  /* Status, hue-nudged toward warm's amber/terracotta family rather than reusing editorial's
+     values — a preset swap should move these like everything else. Measured against every surface
+     this text can land on (background/muted/accent), worst case: destructive 5.08:1,
+     success 5.18:1, both over the 4.5:1 AA floor. */
+  --c-destructive: oklch(52% 0.19 30);
+  --c-success: oklch(48% 0.12 150);
 }
 
 .dark {
@@ -46,4 +53,8 @@
   --c-primary: oklch(76% 0.13 45);
   --c-primary-foreground: oklch(19% 0.014 55);
   --c-ring: oklch(76% 0.13 45);
+  /* Re-authored for warm's 19%-lightness dark background, same as editorial's.
+     Worst case: destructive 5.53:1, success 6.43:1. */
+  --c-destructive: oklch(72% 0.16 32);
+  --c-success: oklch(73% 0.12 150);
 }

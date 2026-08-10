@@ -30,6 +30,15 @@
   --c-primary: oklch(52% 0.17 258);
   --c-primary-foreground: oklch(99.2% 0.002 260);
   --c-ring: oklch(52% 0.17 258);
+
+  /* Status. Part of the preset surface, not a hardcoded `text-red-600`/`text-green-700`: a
+     Tailwind palette colour does not move when the preset swaps, and both read poorly against
+     either preset's dark background. Lighthouse never sees these — the live region is `sr-only`
+     until a submission resolves — so they are chosen by measurement rather than by eye.
+     Measured against every surface this text can land on (background/muted/accent), worst case:
+     destructive 5.33:1, success 5.42:1, both over the 4.5:1 AA floor for normal-weight text. */
+  --c-destructive: oklch(52% 0.19 27);
+  --c-success: oklch(48% 0.12 152);
 }
 
 .dark {
@@ -43,4 +52,9 @@
   --c-primary: oklch(74% 0.14 258);
   --c-primary-foreground: oklch(15.5% 0.008 265);
   --c-ring: oklch(74% 0.14 258);
+  /* Re-authored for the dark surfaces, not carried forward: the light-mode values are far too
+     dark to read on a 15.5%-lightness background. Worst case here: destructive 5.90:1,
+     success 7.18:1. */
+  --c-destructive: oklch(70% 0.16 27);
+  --c-success: oklch(72% 0.13 152);
 }

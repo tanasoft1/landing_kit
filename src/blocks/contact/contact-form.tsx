@@ -109,12 +109,17 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
           <p
             role="status"
             aria-live="polite"
+            // Preset tokens, not `text-red-600`/`text-green-700`: a Tailwind palette colour does
+            // not move when the preset swaps, and both read poorly on either preset's dark
+            // background. Lighthouse never audits these — the region is `sr-only` until a
+            // submission resolves — so the contrast was measured rather than eyeballed; see the
+            // notes beside `--c-destructive`/`--c-success` in each preset.
             className={
               !message
                 ? 'sr-only'
                 : state === 'error'
-                  ? 'text-sm text-red-600'
-                  : 'text-sm text-green-700'
+                  ? 'text-destructive text-sm'
+                  : 'text-success text-sm'
             }
           >
             {message}
