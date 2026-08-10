@@ -170,6 +170,57 @@ if (!existsSync(DOCS_ROUTE)) {
   )
 }
 
+// --- /docs' RECIPES list must name real README headings ---------------------------------------
+// `src/shell/docs/config-reference.tsx`'s RECIPES array names README `##` sections verbatim, as
+// plain text rather than links (README.md ships in neither `public/` nor `dist/client/`, so a link
+// would 404 in every real deployment — see that file's header comment). Plain text is the right
+// call and it has a cost: nothing about renaming a README heading tells you that `/docs` still
+// points readers at the old name. A developer following a stale pointer finds nothing and
+// concludes the docs are unreliable, which is the exact failure the "don't link a 404" decision
+// was avoiding in the first place.
+//
+// Deliberately one-directional: every RECIPES entry must be a README heading, but not every README
+// heading need be a recipe (the README also has `## Quick start`, `## Scripts`, `## Contents`,
+// `## Architecture in one page` — reference material, not tasks). A two-directional check would
+// force every future README section into the /docs list.
+const CONFIG_REFERENCE = 'src/shell/docs/config-reference.tsx'
+const README = 'README.md'
+if (!existsSync(CONFIG_REFERENCE) || !existsSync(README)) {
+  failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
+} else {
+  const refSrc = readFileSync(CONFIG_REFERENCE, 'utf8')
+  const recipesBlock = refSrc.match(/const RECIPES\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1]
+  if (!recipesBlock) {
+    // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
+    // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
+    // something this regex misses is exactly when the coupling stops being watched.
+    failures.push(
+      `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
+        `verifies every entry names a real README '## ' heading and cannot run without it`,
+    )
+  } else {
+    const recipes = [...recipesBlock.matchAll(/(['"])((?:(?!\1)[^\\]|\\.)*)\1/g)].map((m) => m[2])
+    if (recipes.length === 0) {
+      failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
+    }
+    const headings = new Set(
+      readFileSync(README, 'utf8')
+        .split('\n')
+        .filter((l) => l.startsWith('## '))
+        .map((l) => l.slice(3).trim()),
+    )
+    for (const r of recipes) {
+      if (!headings.has(r)) {
+        failures.push(
+          `${CONFIG_REFERENCE}  RECIPES entry '${r}' is not a '## ' heading in ${README} — ` +
+            `/docs points developers at a README section that does not exist. Rename the entry ` +
+            `to match the heading, or restore the heading.`,
+        )
+      }
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
   for (const f of failures) console.error(`  - ${f}`)
