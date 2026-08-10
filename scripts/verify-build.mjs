@@ -30,7 +30,7 @@ for (const entry of readdirSync(blocksDir)) {
 // never prerendered, never in the sitemap, and never checked by anything below.
 // No `routeTree.gen.ts` here: the generated file lives at `src/routeTree.gen.ts`, a sibling of
 // this directory, so listing it would be dead weight that reads as though it were expected here.
-const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'debug.tsx'])
+const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'docs.tsx'])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {
     fail(
@@ -265,6 +265,17 @@ for (const u of urls) {
       }
     }
   }
+
+  // Every page must preload the chunks for the blocks it renders. This is a fragile ordering
+  // dependency (see emit-plugin.ts) and its failure mode is silent: the build succeeds, the page
+  // works, and only a Lighthouse run weeks later shows the waterfall came back.
+  const preloaded = [...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g)].map(
+    (m) => m[1] ?? '',
+  )
+  const blockChunks = preloaded.filter((h) => /\/variants-[^/]+\.js$/.test(h))
+  if (blockChunks.length === 0) {
+    fail(u.path, 'no block chunks preloaded — check plugin ordering in vite.config.ts')
+  }
 }
 
 // --- generated files ----------------------------------------------------------
@@ -312,7 +323,7 @@ if (!existsSync(robotsPath)) {
   fail('robots.txt', 'not emitted')
 } else {
   const robots = readFileSync(robotsPath, 'utf8')
-  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /debug` — deindexes the
+  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /docs` — deindexes the
   // entire site. Existence-only checking would pass that silently.
   if (!/^Allow: \/[ \t]*$/m.test(robots)) fail('robots.txt', "missing 'Allow: /'")
   if (/^Disallow: \/[ \t]*$/m.test(robots)) {
@@ -324,9 +335,9 @@ if (!existsSync(robotsPath)) {
   }
 }
 
-// --- debug route must not ship ------------------------------------------------
-if (existsSync(join(outDir, 'debug/index.html'))) {
-  fail('/debug', 'debug route was prerendered; it must be excluded')
+// --- docs route must not ship ---------------------------------------------------
+if (existsSync(join(outDir, 'docs/index.html'))) {
+  fail('/docs', 'docs route was prerendered; it must be excluded')
 }
 
 if (failures.length) {

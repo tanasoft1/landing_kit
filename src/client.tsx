@@ -5,7 +5,7 @@ import { blockModules } from '~/blocks/block-modules'
 import type { BlockId } from '~/blocks/registry'
 import { pages } from '~/config/pages.config'
 import { site } from '~/config/site.config'
-import { resolveRequest } from '~/shell/pages/resolve-request'
+import { normalizePath, resolveRequest } from '~/shell/pages/resolve-request'
 
 // Overrides `@tanstack/react-start`'s generated client entry — a supported override, resolved by
 // filename convention (see `resolveEntry` in `@tanstack/start-plugin-core`). The installed
@@ -21,6 +21,14 @@ import { resolveRequest } from '~/shell/pages/resolve-request'
  * An unresolvable path (404) needs none.
  */
 function blocksForCurrentUrl(): BlockId[] {
+  // `/docs` is deliberately absent from pages.config.ts (see src/routes/docs.tsx), so
+  // `resolveRequest` returns null for it exactly as it would for a real 404 — but unlike a 404,
+  // `/docs` renders every variant of every block and needs every block module registered before
+  // hydration, not none. Special-cased here rather than by widening `resolveRequest`, which would
+  // have to start knowing about a route that isn't a page.
+  if (normalizePath(window.location.pathname) === '/docs') {
+    return Object.keys(blockModules) as BlockId[]
+  }
   const resolved = resolveRequest(window.location.pathname, pages, site)
   if (!resolved) return []
   return resolved.page.blocks.map((b) => (typeof b === 'string' ? b : b.id))
