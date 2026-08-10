@@ -154,12 +154,24 @@ for (const u of urls) {
   // Nothing in the static HTML may be invisible. An entrance animation that ships
   // `opacity:0` leaves a JS-less visitor staring at a blank hero, and defers LCP until the
   // bundle hydrates and animates. See the FadeIn docstring.
+  //
+  // `transform: scale(0)` and `clip-path: inset(100%)` are checked alongside the original three
+  // because this scan is the only thing standing between a motion preset and invisible prerendered
+  // content, and it was matching by property name rather than by effect. `FadeIn`/`Reveal` already
+  // ship a legitimate `transform: translateY(12px)`, so `transform` is an expected property here —
+  // which means a future `initial={{ scale: 0 }}` would have shipped genuinely invisible content
+  // through a check that was looking right at it. The `(?!\.\d*[1-9])` guard mirrors the opacity
+  // rule so a real `scale(0.98)` entrance is not flagged.
+  const HIDDEN_PATTERNS = [
+    /opacity:\s*0(?!\.\d*[1-9])/,
+    /visibility:\s*hidden/,
+    /display:\s*none/,
+    /transform:[^;]*\bscale(?:3d)?\(\s*0(?!\.\d*[1-9])/,
+    /clip-path:\s*inset\(\s*100%/,
+  ]
   for (const m of html.matchAll(/style="([^"]*)"/g)) {
     const decl = m[1] ?? ''
-    if (/opacity:\s*0(?!\.\d*[1-9])/.test(decl)) {
-      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
-    }
-    if (/visibility:\s*hidden|display:\s*none/.test(decl)) {
+    if (HIDDEN_PATTERNS.some((re) => re.test(decl))) {
       fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
     }
   }
@@ -299,6 +311,78 @@ for (const u of urls) {
   const blockChunks = preloaded.filter((h) => /\/variants-[^/]+\.js$/.test(h))
   if (blockChunks.length === 0) {
     fail(u.path, 'no block chunks preloaded — check plugin ordering in vite.config.ts')
+  }
+}
+
+// --- the split actually held --------------------------------------------------
+// The preload check above is zero-vs-nonzero, and it is the only thing between a plugin reorder
+// and a silent waterfall regression — a build preloading 1 of the home page's 3 block chunks
+// passes it. An exact count is the wrong strengthening, because Vite may legitimately merge small
+// chunks. This asserts the property that actually matters instead: the contact form's form library
+// is NOT in the main entry chunk. That is the whole point of the split (99 KB raw / 30 KB gzip of
+// react-hook-form and zod, previously downloaded by every page including ones with no form), and
+// it is true or false regardless of how Vite chose to group anything else.
+//
+// Markers are react-hook-form's own public option names, not the string 'react-hook-form' — that
+// string legitimately appears in the entry chunk already, inside the contact manifest's
+// `requires: { npm: [...] }` metadata, which registry.ts imports eagerly on purpose. A check keyed
+// on the package name would have failed a correct build on day one.
+//
+// Self-validating, deliberately: the markers must be found SOMEWHERE outside the entry chunk as
+// well as being absent from it. Absence alone would quietly become a no-op the day react-hook-form
+// renames its internals or the block stops shipping — this project has already shipped assertions
+// that could never fire, and an assertion whose subject has vanished is exactly that.
+const RHF_MARKERS = ['shouldUnregister', 'criteriaMode', 'reValidateMode', 'shouldFocusError']
+if (existsSync(join(blocksDir, 'contact'))) {
+  const assetsDir = join(outDir, 'assets')
+  const entryHrefs = new Set()
+  for (const u of urls) {
+    const file = join(outDir, u.outputPath)
+    if (!existsSync(file)) continue
+    const html = readFileSync(file, 'utf8')
+    for (const m of html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)) {
+      entryHrefs.add((m[1] ?? '').replace(/^\/+/, ''))
+    }
+  }
+  if (entryHrefs.size === 0) {
+    fail(
+      'bundle-split',
+      'found no <script type="module"> entry in any page — cannot locate the entry chunk',
+    )
+  }
+  const entryFiles = [...entryHrefs].map((h) => join(outDir, h)).filter((p) => existsSync(p))
+  const allChunks = existsSync(assetsDir)
+    ? readdirSync(assetsDir)
+        .filter((f) => f.endsWith('.js'))
+        .map((f) => join(assetsDir, f))
+    : []
+  const nonEntryChunks = allChunks.filter((p) => !entryFiles.includes(p))
+
+  const foundOutside = RHF_MARKERS.filter((marker) =>
+    nonEntryChunks.some((p) => readFileSync(p, 'utf8').includes(marker)),
+  )
+  if (foundOutside.length === 0) {
+    fail(
+      'bundle-split',
+      `none of the react-hook-form markers (${RHF_MARKERS.join(', ')}) appear in any non-entry ` +
+        `chunk. Either the library no longer uses these names — in which case this assertion has ` +
+        `silently stopped testing anything and the markers must be updated — or the contact block ` +
+        `is no longer built. Do not delete this check to make it pass.`,
+    )
+  }
+  for (const entryFile of entryFiles) {
+    const code = readFileSync(entryFile, 'utf8')
+    const leaked = RHF_MARKERS.filter((marker) => code.includes(marker))
+    if (leaked.length > 0) {
+      fail(
+        'bundle-split',
+        `the main entry chunk (${entryFile}) contains react-hook-form (${leaked.join(', ')}). ` +
+          `The contact form's dependencies are back in the chunk every page downloads, so pages ` +
+          `with no form pay for it — the exact regression the block split exists to prevent. ` +
+          `Check that manifest.ts files import no components and that block-modules.ts is still ` +
+          `the only path to them.`,
+      )
+    }
   }
 }
 
