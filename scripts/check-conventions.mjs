@@ -1,9 +1,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
-const RULES = [
-  { re: /\bpy-section\b/, msg: 'py-section belongs to <Section>, not to a block' },
-  { re: /\bpx-gutter\b/, msg: 'px-gutter belongs to <Container>, not to a block' },
+// Layout rules. These are about who is allowed to WRITE spacing/width/positioning — the answer
+// is `<Section>` and `<Container>` and nothing else — so they apply to every directory that
+// renders markup, not just `src/blocks`. `README.md`'s Scripts table has always stated the rule
+// generally; until this round the scan only ever walked `src/blocks`, so `src/routes/docs.tsx`
+// could have written `py-section` or a raw `<section>` and nothing would have said a word.
+const LAYOUT_RULES = [
+  { re: /\bpy-section\b/, msg: 'py-section belongs to <Section>, not written directly' },
+  { re: /\bpx-gutter\b/, msg: 'px-gutter belongs to <Container>, not written directly' },
   {
     re: /className="[^"]*\bmax-w-/,
     contentRe: /\bmax-w-/,
@@ -15,7 +20,7 @@ const RULES = [
     msg: 'container utility — use <Container>',
   },
   { re: /<section[\s>]/, msg: 'raw <section> element — use <Section>' },
-  { re: /\bmin-h-screen\b/, msg: 'min-h-screen — blocks must not assume viewport height' },
+  { re: /\bmin-h-screen\b/, msg: 'min-h-screen — nothing here may assume viewport height' },
   // Catches ANY Tailwind arbitrary-value bracket escape (`text-[length:...]`, `rounded-[...]`,
   // `-left-[9999px]`, etc.), not just the two specific utilities named below — a previous
   // version of this rule only matched `text-[length:` and `rounded-[`, so `-left-[9999px]`
@@ -27,11 +32,22 @@ const RULES = [
     msg: 'arbitrary Tailwind value (bracket syntax) — use a scale/preset utility',
   },
   { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
-  // No exception list, unlike the rule this replaced. Heading level is never a block's own
-  // decision — it depends on whether the block happens to be first on the page, which only the
-  // renderer knows (`headingLevel` on `BlockProps`, assigned by `RenderBlocks`). A block with a
-  // heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and render `<H>`; a literal
-  // `<h1>` or `<h2>` anywhere in `src/blocks` — hero included — is always wrong.
+]
+
+// Blocks-only, and unlike the layout rules above this one genuinely does NOT generalise.
+//
+// No exception list, unlike the rule this replaced. Heading level is never a block's own
+// decision — it depends on whether the block happens to be first on the page, which only the
+// renderer knows (`headingLevel` on `BlockProps`, assigned by `RenderBlocks`). A block with a
+// heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and render `<H>`; a literal
+// `<h1>` or `<h2>` anywhere in `src/blocks` — hero included — is always wrong.
+//
+// A route is the opposite case: it is a fixed page, it knows exactly what it is, and it owns its
+// own heading outline. `src/routes/docs.tsx` writes a literal `<h1>Developer docs</h1>` and three
+// literal `<h2>`s, correctly — there is no renderer above it assigning levels, because `/docs` is
+// not built from `pages.config.ts` blocks. Applying this rule outside `src/blocks` would flag
+// correct code, and a gate that flags correct code stops being believed.
+const BLOCK_ONLY_RULES = [
   {
     re: /<h[12][\s>]/,
     msg: "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>",
@@ -46,15 +62,100 @@ const RULES = [
 // `className="…"` in the first place, so they already see a class string wherever it appears
 // literally in the file — including on the `const IDENT = '…'` declaration line itself — and
 // need no extra handling here.
-const CONTENT_RULES = RULES.filter((r) => r.contentRe)
+const CONTENT_RULES = LAYOUT_RULES.filter((r) => r.contentRe)
 
 const failures = []
 
-function walk(dir) {
+/**
+ * Blank out comment bodies, preserving every newline (so reported line numbers stay exact) and
+ * every non-comment character position.
+ *
+ * Required by the scope widening, not a nicety. These rules match raw line text, and the files
+ * that DOCUMENT the layout primitives naturally name them in prose: `src/shell/layout/section.tsx`
+ * explains `py-section`, `container.tsx` explains `px-gutter`, `src/shell/docs/block-gallery.tsx`
+ * describes what a block's own `<Section>`/`<Container>` render, and `src/routes/docs.tsx:35`
+ * opens with a comment about `py-section` being tuned for marketing pages. Every one of those is
+ * correct code explaining itself, and every one would have been reported as a violation the moment
+ * the scan reached its directory. A false failure in the project's only machine gate teaches
+ * people to distrust the gate — the exact failure mode `verify-build.mjs` warns about in its
+ * `decodeEntities` docstring.
+ *
+ * String and template-literal states are tracked so a `//` inside `'https://example.mn'` is not
+ * mistaken for a comment — which would blank the rest of a real line of code and hide a genuine
+ * violation sitting after it.
+ */
+function blankComments(text) {
+  let out = ''
+  let i = 0
+  // 'code' | 'line' | 'block' | 'single' | 'double' | 'template'
+  let state = 'code'
+  while (i < text.length) {
+    const c = text[i]
+    const next = text[i + 1]
+    if (state === 'code') {
+      if (c === '/' && next === '/') {
+        state = 'line'
+        out += '  '
+        i += 2
+        continue
+      }
+      if (c === '/' && next === '*') {
+        state = 'block'
+        out += '  '
+        i += 2
+        continue
+      }
+      if (c === "'") state = 'single'
+      else if (c === '"') state = 'double'
+      else if (c === '`') state = 'template'
+      out += c
+      i += 1
+      continue
+    }
+    if (state === 'line') {
+      if (c === '\n') {
+        state = 'code'
+        out += c
+      } else out += ' '
+      i += 1
+      continue
+    }
+    if (state === 'block') {
+      if (c === '*' && next === '/') {
+        state = 'code'
+        out += '  '
+        i += 2
+        continue
+      }
+      out += c === '\n' ? c : ' '
+      i += 1
+      continue
+    }
+    // Inside a string or template literal: copy verbatim, honouring backslash escapes so an
+    // escaped quote does not close the literal early.
+    if (c === '\\') {
+      out += c + (next ?? '')
+      i += 2
+      continue
+    }
+    if (
+      (state === 'single' && c === "'") ||
+      (state === 'double' && c === '"') ||
+      (state === 'template' && c === '`')
+    ) {
+      state = 'code'
+    }
+    out += c
+    i += 1
+  }
+  return out
+}
+
+function walk(dir, rules, isExempt = () => false) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
-    if (statSync(p).isDirectory()) walk(p)
-    else if (p.endsWith('.tsx')) check(p)
+    if (statSync(p).isDirectory()) walk(p, rules, isExempt)
+    else if (p.endsWith('.tsx') && !isExempt(p)) check(p, rules)
   }
 }
 
@@ -74,13 +175,13 @@ function resolveStringConsts(text) {
   return consts
 }
 
-function check(file) {
-  const text = readFileSync(file, 'utf8')
+function check(file, rules) {
+  const text = blankComments(readFileSync(file, 'utf8'))
   const lines = text.split('\n')
   const consts = resolveStringConsts(text)
 
   lines.forEach((line, i) => {
-    for (const rule of RULES) {
+    for (const rule of rules) {
       if (rule.re.test(line)) failures.push(`${file}:${i + 1}  ${rule.msg}`)
     }
 
@@ -107,9 +208,22 @@ function check(file) {
   })
 }
 
-walk('src/blocks')
+// The two files that DEFINE the layout primitives are the only legitimate authors of the
+// utilities the rules ban — `section.tsx` is where `py-section` and the one raw `<section>`
+// element belong, `container.tsx` is where `px-gutter`/`max-w-*` belong. Exempting them by exact
+// path, not by a `src/shell/layout/` prefix: a third file added to that directory would be a new
+// primitive nobody reviewed, and it should have to argue for its exemption explicitly.
+const LAYOUT_PRIMITIVES = new Set([
+  'src/shell/layout/section.tsx',
+  'src/shell/layout/container.tsx',
+])
+const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
-// --- no client-side <Link> outside src/routes -----------------------------------------------
+walk('src/blocks', [...LAYOUT_RULES, ...BLOCK_ONLY_RULES])
+walk('src/routes', LAYOUT_RULES)
+walk('src/shell', LAYOUT_RULES, isLayoutPrimitive)
+
+// --- no client-side <Link> anywhere ------------------------------------------------------------
 // Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
 // `src/client.tsx`'s `hydrate()` await. A `<Link>` from `@tanstack/react-router` performs a
 // client-side transition, which can land on a page whose blocks were never fetched: the block
@@ -117,8 +231,17 @@ walk('src/blocks')
 // signal. Every navigation on this stack is deliberately a plain `<a href>` (a full page load,
 // cheap because every page is prerendered static HTML). That's a recorded design property, not a
 // gap, so it's enforced here rather than left to be rediscovered by whoever adds the next nav
-// link. Scoped to `src/blocks` and `src/shell`, not `src/routes` — route-level `<Link>` usage
-// would legitimately belong there if this kit ever grew one.
+// link.
+//
+// `src/routes` is scanned too, and it is the MOST important directory for this rule, not an
+// exempt one. An earlier version of this comment claimed route-level `<Link>` "would legitimately
+// belong there"; that was wrong, and wrong in the direction that matters. The mechanism does not
+// care which directory the `<Link>` sits in — a `<Link>` in `src/routes/__root.tsx`, the natural
+// home for a skip-link or a global nav, transitions client-side to a page whose block modules
+// were never fetched, and `getVariants` throws at render exactly as it would from anywhere else.
+// Routes are where a global nav would actually be written, so exempting them exempted the one
+// file the trap is most likely to be sprung in. `src/router.tsx`'s `defaultPreload: 'intent'` is
+// dead config that exists only for `<Link>`, which makes the invitation more tempting still.
 const LINK_IMPORT_RE = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*(['"])@tanstack\/react-router\2/g
 
 function walkFiles(dir, visit) {
@@ -145,6 +268,7 @@ function checkNoRouterLink(file) {
 
 walkFiles('src/blocks', checkNoRouterLink)
 walkFiles('src/shell', checkNoRouterLink)
+walkFiles('src/routes', checkNoRouterLink)
 
 // --- /docs must keep its `noindex` ------------------------------------------------------------
 // Asserted here, at the source level, because it CANNOT be asserted from `dist/`: `/docs` is
@@ -227,5 +351,6 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(
-  '✓ check-conventions: blocks follow layout primitives, no client-side <Link> in blocks/shell',
+  '✓ check-conventions: layout primitives in blocks/routes/shell, no literal <h1>/<h2> in blocks, ' +
+    'no client-side <Link> anywhere, /docs noindex intact, /docs RECIPES match README headings',
 )
