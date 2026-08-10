@@ -21,6 +21,18 @@ import { Section } from '~/shell/layout/section'
 // `Disallow` for `/docs` reappears, and `scripts/check-conventions.mjs` fails if this meta tag
 // is removed.
 export const Route = createFileRoute('/docs')({
+  // `<html lang>` comes from `useActiveLocale` in `__root.tsx`, which reads `locale` off the
+  // deepest match's loader data and falls back to `site.defaultLocale` when no match has any.
+  // `/docs` had no loader, so it fell back to `mn` and shipped `<html lang="mn">` for a page whose
+  // own first paragraph says "English only". A wrong `lang` is not cosmetic: it tells a screen
+  // reader to pronounce English prose with Mongolian phonetics, and tells a translation service
+  // the page is already in the user's language.
+  //
+  // A loader rather than a special case in `__root.tsx`: `useActiveLocale`'s contract is "the
+  // deepest match that declares a locale wins", and this route simply had nothing to declare.
+  // Teaching the root about a locale-less match would put knowledge of one specific route into
+  // the one component that is meant to know about none of them.
+  loader: () => ({ locale: 'en' as const }),
   head: () => ({
     meta: [
       { title: 'Landing Kit — developer docs' },
