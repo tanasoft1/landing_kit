@@ -1,3 +1,5 @@
+import { ThemeToggle } from '~/theme'
+
 const COLOR_TOKENS = [
   'background',
   'foreground',
@@ -8,6 +10,8 @@ const COLOR_TOKENS = [
   'primary',
   'primary-foreground',
   'ring',
+  'destructive',
+  'success',
 ] as const
 
 const TYPE_TOKENS = ['display', 'h2', 'h3', 'lead'] as const
@@ -28,6 +32,8 @@ const COLOR_SWATCH_CLASS: Record<(typeof COLOR_TOKENS)[number], string> = {
   primary: 'bg-primary',
   'primary-foreground': 'bg-primary-foreground',
   ring: 'bg-ring',
+  destructive: 'bg-destructive',
+  success: 'bg-success',
 }
 
 const TYPE_SCALE_CLASS: Record<(typeof TYPE_TOKENS)[number], string> = {
@@ -42,9 +48,23 @@ export function TokenGallery() {
     <div className="grid gap-10">
       <div>
         <h3 className="text-h3 font-semibold">Colour</h3>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Rendered from the live CSS variables. Toggle the theme to see the dark palette.
-        </p>
+        {/*
+          The instruction used to say "Toggle the theme to see the dark palette" on a page that
+          rendered no toggle — `DocsPage` renders no `<Header>`, which is where the site's toggle
+          lives. Rather than reword it into an instruction to go and find one somewhere else, the
+          toggle is rendered here, next to the swatches it changes.
+
+          In a single-mode build (`site.theme.mode` is not `'both'`) `~/theme` resolves to
+          `theme.single.tsx`, whose `ThemeToggle` renders `null` and imports no implementation —
+          so this adds no theme-switching code to a build that has none, and the sentence below
+          adjusts with it rather than promising a control that cannot exist.
+        */}
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-muted-foreground text-sm">
+            Rendered from the live CSS variables, for whichever preset is imported.
+          </p>
+          <ThemeToggle label="Toggle theme" />
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {COLOR_TOKENS.map((t) => (
             <div key={t} className="border-border rounded-base border p-3">

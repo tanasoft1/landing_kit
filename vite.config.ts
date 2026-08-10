@@ -9,6 +9,7 @@ import { pages as defaultPages } from './src/config/pages.config'
 import { site as defaultSite } from './src/config/site.config'
 import { enumerateUrls } from './src/shell/pages/enumerate'
 import { emitSeoFiles } from './src/shell/seo/emit-plugin'
+import { OUT_DIR } from './src/shell/seo/out-dir'
 
 const animation = process.env.KIT_ANIMATION ?? 'on'
 const submit = process.env.KIT_SUBMIT ?? 'endpoint'
@@ -22,8 +23,6 @@ const pages = config === 'onepage' ? onepagePages : defaultPages
 const site = config === 'onepage' ? onepageSite : defaultSite
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
-
-const OUT_DIR = 'dist/client'
 
 export default defineConfig({
   // Read by `src/shell/seo/block-preloads.ts` at prerender time: `dist/client/.vite/manifest.json`

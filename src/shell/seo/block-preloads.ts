@@ -7,6 +7,7 @@
 // access itself is still never reached there once the dead branch is stripped.
 import * as nodeFs from 'node:fs'
 import type { BlockId } from '~/blocks/registry'
+import { OUT_DIR } from './out-dir'
 
 type ManifestChunk = {
   file: string
@@ -22,7 +23,10 @@ let manifestCache: ViteManifest | null | undefined
 
 function loadManifest(): ViteManifest | null {
   if (manifestCache !== undefined) return manifestCache
-  const manifestPath = 'dist/client/.vite/manifest.json'
+  // Derived from the shared `OUT_DIR` rather than restating `'dist/client'` here: a changed output
+  // directory would otherwise leave this looking in the old place, and a missing manifest is
+  // indistinguishable from the normal `pnpm dev` case below — the preloads would just stop.
+  const manifestPath = `${OUT_DIR}/.vite/manifest.json`
   if (!nodeFs.existsSync(manifestPath)) {
     // `pnpm dev` runs this same server code path with no client build on disk at all — a
     // missing manifest is the normal case there, not an error.

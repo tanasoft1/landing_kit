@@ -249,8 +249,14 @@ Two presets exist today, and the swap between them is a one-line change:
 ```
 
 - **`editorial.css`** (default) — near-hueless neutrals with one blue accent, a small `0.5rem`
-  radius, no card shadow (`--elevation-card: none`), and the most generous vertical rhythm
-  (`--section-y` up to `9.5rem`). Reads as a quiet, editorial/magazine layout.
+  radius, no visible card shadow, and the most generous vertical rhythm (`--section-y` up to
+  `9.5rem`). Reads as a quiet, editorial/magazine layout. Its `--elevation-card` is
+  `0 0 #0000` — a legal, fully transparent shadow — and **not** `none`, which looks tidier and is
+  wrong: the generated `.shadow-card` utility substitutes the token into a comma-separated
+  `box-shadow` list, where `none` is not a legal item and invalidates the whole declaration. It
+  happens to render correctly anyway, by falling back to the initial value, which is why the bug
+  is invisible. The comment at `src/styles/presets/editorial.css:12-21` says the same thing at the
+  point of temptation; don't "tidy" either one.
 - **`warm.css`** — an amber/terracotta palette with chroma raised on purpose, a `1rem` radius
   (visibly rounder corners), a real soft `--elevation-card` shadow, and a tighter `--section-y`
   (up to `6.5rem`). Reads as a warmer, denser, more "product" layout. Its light-mode

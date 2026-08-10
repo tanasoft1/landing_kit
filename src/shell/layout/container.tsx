@@ -46,6 +46,20 @@ type ContainerProps = { className?: string; children: ReactNode } & (
        * this prop existed, since it's additive. `'start'` left-aligns it instead, for a narrower-
        * than-page column that should share a left edge with a sibling `width="page"` Container
        * under the same `<Section>` (e.g. a block's narrow intro next to its page-width body).
+       *
+       * **`align="start"` changes what `className` attaches to.** Every other combination renders
+       * a single `<div>` that is both the padded box and the content box, and `className` lands on
+       * it. `align="start"` renders two nested boxes — an outer page-width box carrying the gutter,
+       * and an inner box capped to `width` — and `className` lands on the **inner** one, next to
+       * the content.
+       *
+       * That is deliberate rather than an oversight, and it is the reason this is documented
+       * instead of "fixed" by always using the outer element: the classes call sites actually pass
+       * are content classes (`text-center`, `grid`, `flex`, `mt-14`). Moving `grid` or `flex` to
+       * the outer box would lay out the inner box as a single grid/flex item rather than laying
+       * out the content, which is never what the call site meant. Both targets are defensible for
+       * some class; only one is defensible for the classes this kit passes. If you need a class on
+       * the outer, page-width box under `align="start"`, put it on the enclosing `<Section>`.
        */
       align?: Align
     }
