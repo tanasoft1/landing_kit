@@ -1301,6 +1301,14 @@ cat dist/client/robots.txt
 
 Expected: 4 pages pass; `dist/client/docs` does not exist; `0` occurrences in the sitemap; `robots.txt` contains `Disallow: /docs`. All four matter — the route must be invisible to crawlers by three independent mechanisms.
 
+> **Superseded (Task 5 fix round 1).** The `Disallow: /docs` line was removed and must not come
+> back. A `Disallow` and a `noindex` do not layer, they cancel: a crawler obeying the `Disallow`
+> never fetches `/docs`, so it never reads the `noindex`, and a URL linked from elsewhere is
+> indexed URL-only — the outcome the `noindex` exists to prevent. `/docs` is excluded **three**
+> ways, not four: never prerendered, absent from the sitemap, and `noindex` on any SSR deploy.
+> `scripts/verify-build.mjs` now fails the build if `robots.txt` disallows `/docs`, and
+> `scripts/check-conventions.mjs` fails if the `noindex` meta leaves `src/routes/docs.tsx`.
+
 - [ ] **Step 8: Commit**
 
 ```bash

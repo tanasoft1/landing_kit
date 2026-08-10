@@ -97,8 +97,17 @@ Each is low-risk and was judged not worth churn during the build.
   Mechanically necessary for file-based routing to have an explicit `/` route, but a shared helper
   would stop one drifting from the other.
 - `src/submit-schema.ts` — `ContactInput` is dead since the wire type became `SubmissionInput`.
-- `src/routes/debug.tsx` is excluded from prerendering and disallowed in `robots.txt`, but nothing
-  stops it live-rendering on an SSR deploy. Contents mirror the public sitemap, so cosmetic.
+- `src/routes/docs.tsx` (which replaced `src/routes/debug.tsx`) is excluded from prerendering and
+  from the sitemap, but nothing stops it live-rendering on an SSR deploy. Its `noindex, nofollow`
+  meta is what keeps it out of the index there — and `robots.txt` deliberately does **not**
+  `Disallow: /docs`, because a crawler that obeys a `Disallow` never fetches the page and so never
+  reads the `noindex`. Both halves are now gated: `verify-build.mjs` fails on a `/docs` `Disallow`
+  or a `/docs` sitemap entry, `check-conventions.mjs` fails if the meta is removed.
+- Headings on `/docs` are not sequentially descending: the page's `h2` section headings are
+  followed by the gallery's `h3` block headings, and each preview then renders the block's own
+  `h2` (blocks support `headingLevel` 1 or 2 only, and every preview must be 2 so the page keeps
+  exactly one `h1`). Unavoidable without widening the block heading contract; `/docs` is
+  `noindex` and developer-facing, so the cost is confined to that page.
 - `biome.json` emits one info-level notice about a deprecated field on every run.
 
 ## Deferred scope (not defects)
