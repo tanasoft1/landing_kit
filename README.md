@@ -13,6 +13,7 @@ exists to keep that true.
 - [Adding a block](#adding-a-block)
 - [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
 - [Reskinning: the token surface](#reskinning-the-token-surface)
+- [`/docs`: the living developer reference](#docs-the-living-developer-reference)
 - [The Cyrillic font requirement](#the-cyrillic-font-requirement)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
@@ -43,8 +44,8 @@ pnpm dev
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
-| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a `warn`. |
-| `pnpm lighthouse:desktop` | Same, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
+| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a hard `error` at `minScore: 0.85`. |
+| `pnpm lighthouse:desktop` | Same, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error` at `minScore: 0.95`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
 
 `node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
 `.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
@@ -147,7 +148,7 @@ every colour and type token live from whichever preset is imported, and its Bloc
 previews every block and variant at true page geometry (each preview supplies its own `Section`
 and `Container`, so it shows exactly what a real page renders).
 
-### `/docs`: the living developer reference
+## `/docs`: the living developer reference
 
 `/docs` is a generated, English-only reference page — every design token, every block and its
 variants (rendered from the live registry, not a fixture), and the resolved

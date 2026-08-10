@@ -1,4 +1,5 @@
 :root {
+  /* Skin: font pairing. Both families must have Cyrillic coverage. */
   --face-display: "Manrope Variable", system-ui, sans-serif;
   --face-body: "Inter Variable", system-ui, sans-serif;
 
@@ -8,6 +9,11 @@
   --gutter: clamp(1rem, 4vw, 2rem);
   --width-page: 74rem;
   --width-narrow: 36rem;
+  /* Unlike editorial's `none` (same in both themes, so declared once — see its own comment),
+     warm's shadow is real and must get darker AND more opaque in `.dark`, not just carry the
+     same value forward: a shadow colour lighter than the surface it falls on reads as a glow,
+     not elevation. This light-mode value is tuned against warm's 99%-lightness background;
+     `.dark` below redefines it against warm's 19%-lightness background. */
   --elevation-card: 0 1px 2px oklch(30% 0.02 70 / 0.06), 0 8px 24px oklch(30% 0.02 70 / 0.08);
 
   /* Warm neutrals — hue pulled toward amber, chroma raised. */
@@ -27,6 +33,10 @@
 }
 
 .dark {
+  /* Darker AND more opaque than the light-mode value above, not the same value carried forward —
+     against a 19%-lightness background, a shadow at the light-mode's oklch(30% … / 0.06-0.08)
+     is LIGHTER than its surface and reads as a faint glow, not elevation. Tuned by eye. */
+  --elevation-card: 0 1px 2px oklch(0% 0 0 / 0.35), 0 10px 28px oklch(0% 0 0 / 0.5);
   --c-background: oklch(19% 0.014 55);
   --c-foreground: oklch(96% 0.008 80);
   --c-muted: oklch(23.5% 0.016 55);

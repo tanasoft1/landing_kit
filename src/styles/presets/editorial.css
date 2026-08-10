@@ -10,8 +10,15 @@
   --width-page: 68rem;
   --width-narrow: 34rem;
   /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
-     differ between themes is declared once here rather than repeated below. */
-  --elevation-card: none;
+     differ between themes is declared once here rather than repeated below.
+     Deliberately `0 0 #0000`, not `none`: the generated `.shadow-card` utility substitutes this
+     token into a comma-separated `box-shadow` list alongside Tailwind's other shadow layers
+     (`box-shadow: var(--tw-inset-shadow), …, var(--tw-shadow)`), and `none` is not a legal item
+     inside a comma-separated shadow list — a value of `none` there makes the whole declaration
+     invalid at computed-value time, which happens to also fall back to initial (`none`), so it
+     renders correctly by accident. `0 0 #0000` is a legal, fully transparent shadow: same visible
+     result (nothing), reached for the right reason. Do not "tidy" this back to `none`. */
+  --elevation-card: 0 0 #0000;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
   --c-background: oklch(99.2% 0.002 260);

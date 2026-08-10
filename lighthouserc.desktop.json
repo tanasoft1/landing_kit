@@ -1,9 +1,13 @@
 {
   "_comment": [
-    "DESKTOP preset. Performance is a HARD failure here, unlike the mobile config, because both",
-    "locales measure 1.00 — so there is a real guarantee to protect and no reason to weaken it.",
-    "Keeping the two presets at different severities is deliberate: it preserves the desktop",
-    "guarantee instead of letting one known mobile gap soften the whole budget."
+    "DESKTOP preset. Performance is a HARD failure here, same severity as the mobile config —",
+    "both are 'error', not 'warn'. Only the floor differs: 0.95 here because both locales measure",
+    "1.00, vs. mobile's 0.85, which is the number mobile's throttled numbers actually clear.",
+    "Keeping the two presets at different floors (not different severities) is deliberate: mobile",
+    "is inherently harder (throttled CPU/network, two font subsets on the Mongolian page), so",
+    "holding it to the same 0.95 floor as desktop would either fail the build on a known, understood",
+    "gap or force lowering desktop's own floor to match — this keeps each preset's floor honest to",
+    "what it actually measures, without softening either one to a 'warn'."
   ],
   "ci": {
     "collect": {
