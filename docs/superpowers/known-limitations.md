@@ -159,15 +159,24 @@ Each is low-risk and was judged not worth churn during the build.
 Things that have never actually been exercised, recorded here so "we never tried it" is not
 mistaken for "it works".
 
-- **No build has ever been produced with `warm` as the default preset.** Every artifact in `dist/`,
-  every number in this file and the README, and every assertion in both verification scripts
-  describes an `editorial` build. Task 6's `warm` measurements came from a temporary local swap of
-  `theme.css`'s `@import` that is not reproducible from any committed config, and the swap was
-  reverted. So **warm + dark — the combination most likely to look wrong — has never rendered a
-  real page in a real build.** The preset-completeness check added this round asserts warm declares
-  the whole token surface, which is a genuine guarantee but a narrow one: it says nothing about
-  whether the result looks right, and nothing about Lighthouse. Anyone making `warm` the default
-  should expect to be the first person to see it.
+- **No *committed* configuration has ever produced a `warm` build.** Every artifact in `dist/`,
+  every Lighthouse number in this file and the README, and every assertion in both verification
+  scripts describes an `editorial` build. Task 6's `warm` measurements came from a temporary local
+  swap of `theme.css`'s `@import` that is not reproducible from anything in the repository, and the
+  swap was reverted; the same is true of the check below. The preset-completeness check added in
+  the final fix round asserts that `warm` declares the whole token surface — a real guarantee, but
+  a narrow one that says nothing about whether the result *looks* right, and nothing about
+  Lighthouse.
+
+  What has now been checked, once, by hand (fix round): with the `@import` swapped to `warm`,
+  `pnpm build` succeeds and `verify-build.mjs` passes all 4 pages, and **warm + dark — the
+  combination most likely to look wrong — was rendered and looked at** on `/` and `/contact`.
+  It is correct: warm's dark background resolves (`oklch(0.19 0.014 55)`), `--radius: 1rem` gives
+  the visibly rounder buttons and inputs the preset promises, the terracotta primary reads
+  properly against it, and Mongolian Cyrillic including `ө`/`ү`/`ж` renders in the intended face
+  rather than a fallback. **`warm` has still never been measured by Lighthouse from a committed
+  config**, and no artifact of that build is committed — so treat the visual check as evidence it
+  is not broken, not as evidence it is verified.
 - **`<html>` hydration mismatch, React error #418.** Observed on a production build served
   statically, identically with and without this round's `src/client.tsx` change (two builds, same
   error, same element) — so it is not a regression from that change. Not checked against `main`.
