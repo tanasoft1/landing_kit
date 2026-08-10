@@ -38,13 +38,25 @@ export function BlockGallery() {
           <div key={id}>
             <Section density="compact">
               <Container>
-                <h3 className="text-h3 font-semibold">
+                {/*
+                  `h2`, not `h3`. Each preview below this label renders the block's own heading at
+                  `headingLevel={2}` — every preview must be 2, so the page keeps exactly one `h1`
+                  — so an `h3` label sitting above `h2` content made the label subordinate to the
+                  thing it labels. `h2` puts each block's section at the same level as the page's
+                  own `Tokens`/`Blocks`/`Config` sections, which is what it is.
+
+                  Styling is unchanged (`text-h3`): this is a semantic level, not a size. The
+                  literal `<h2>` is fine here because `check-conventions.mjs` bans literal
+                  `<h1>`/`<h2>` only in `src/blocks`, where the renderer assigns heading level. A
+                  gallery is not a block and knows exactly what it is.
+                */}
+                <h2 className="text-h3 font-semibold">
                   {id}{' '}
                   <span className="text-muted-foreground text-sm font-normal">
                     {variantNames.length} variant{variantNames.length === 1 ? '' : 's'} · default:{' '}
                     {manifest.defaultVariant}
                   </span>
-                </h3>
+                </h2>
               </Container>
             </Section>
             {variantNames.map((v) => {
