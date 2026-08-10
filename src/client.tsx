@@ -48,7 +48,35 @@ async function hydrate() {
   // deliberate design property of the kit, not an oversight — and it's enforced, not just
   // documented: `scripts/check-conventions.mjs` fails the build on a `Link` import from
   // `@tanstack/react-router` anywhere in `src/blocks` or `src/shell`.
-  await Promise.all(blocksForCurrentUrl().map((id) => blockModules[id]?.()))
+  const ids = blocksForCurrentUrl()
+  const results = await Promise.allSettled(ids.map((id) => blockModules[id]?.()))
+
+  // `allSettled`, not `all`, so a failure names the block(s) that failed instead of surfacing
+  // whichever one happened to reject first. Before the split there was one thing that could fail
+  // to load; there are now up to four per page, and the realistic trigger is mundane — a visitor
+  // on stale cached HTML after a deploy that purged the old hashed assets requests a chunk that
+  // no longer exists.
+  const failed = ids.filter((_, i) => results[i]?.status === 'rejected')
+  if (failed.length > 0) {
+    const reasons = results
+      .map((r, i) => (r.status === 'rejected' ? `${ids[i]}: ${r.reason}` : null))
+      .filter(Boolean)
+    console.error(
+      `[landing-kit] Hydration skipped: ${failed.length} block chunk(s) failed to load ` +
+        `(${failed.join(', ')}). The prerendered HTML is still on screen and readable — links ` +
+        `are plain <a href> and every page is static — but nothing on it is interactive: the ` +
+        `contact form and the theme toggle will not respond. The usual cause is stale cached ` +
+        `HTML pointing at hashed assets a later deploy purged; a hard reload fetches HTML that ` +
+        `references chunks which exist.\n${reasons.join('\n')}`,
+    )
+    // Deliberately does NOT hydrate. Hydrating with a block module missing means `getVariants`
+    // throws during the hydration render; React responds by discarding the server-rendered tree
+    // and client-rendering the root, which throws again and leaves a blank page. Keeping the
+    // prerendered HTML is strictly better than replacing readable content with nothing, and it
+    // is the one recovery that cannot suspend — see the React.lazy account in
+    // docs/superpowers/known-limitations.md for why anything that suspends here is off the table.
+    return
+  }
 
   startTransition(() => {
     hydrateRoot(
@@ -60,4 +88,12 @@ async function hydrate() {
   })
 }
 
-void hydrate()
+// The `.catch` is the point: `void hydrate()` on its own discarded the rejection, so a failed
+// chunk left the page permanently inert with no error, no boundary and no signal of any kind.
+// This branch covers anything the in-function handling above did not anticipate.
+void hydrate().catch((err) => {
+  console.error(
+    '[landing-kit] Hydration failed before it could start. The page is not interactive.',
+    err,
+  )
+})
