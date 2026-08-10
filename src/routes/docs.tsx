@@ -8,10 +8,18 @@ import { Section } from '~/shell/layout/section'
 // Deliberately absent from pages.config.ts, which is what excludes it from prerendering (the
 // `tanstackStart` plugin only prerenders `enumerateUrls(pages, site)`, and both
 // `autoStaticPathsDiscovery` and `crawlLinks` are off in vite.config.ts) and from the sitemap
-// (emit-plugin.ts builds it from the same `enumerateUrls` call). `robots.txt`'s `Disallow: /docs`
-// stops crawling; the `noindex` meta tag below stops indexing even if some other page links here
-// — robots.txt only prevents a crawler from fetching the URL, not a search engine from indexing
-// a URL it learned about some other way.
+// (emit-plugin.ts builds it from the same `enumerateUrls` call). Three mechanisms in total, the
+// third being the `noindex, nofollow` meta below.
+//
+// There is deliberately NO `Disallow: /docs` in robots.txt, and that omission is a decision, not
+// an oversight. `Disallow` and `noindex` do not layer — they cancel: a crawler that obeys a
+// `Disallow` never fetches the page, so it never reads the `noindex`, and a URL linked from
+// anywhere else still gets indexed URL-only, which is precisely what the `noindex` is here to
+// prevent. `/docs` must stay FETCHABLE so the `noindex` is actually seen; a crawler then drops
+// the URL from the index authoritatively. Adding a `Disallow` here would defeat the one
+// mechanism that works on an SSR deploy. `scripts/verify-build.mjs` fails the build if a
+// `Disallow` for `/docs` reappears, and `scripts/check-conventions.mjs` fails if this meta tag
+// is removed.
 export const Route = createFileRoute('/docs')({
   head: () => ({
     meta: [

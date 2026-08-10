@@ -1,6 +1,30 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+// --- build freshness, before anything else ------------------------------------
+// Every check in this file is an assertion about the CONTENT of `dist/`, and a failed build does
+// not empty `dist/` — it leaves the previous successful output in place. So "build failed, verify
+// passed" is a real combination, observed once when a corrupted `vite.config.ts` broke the build
+// and this script still printed `✓ 4 pages` about artifacts nobody had just produced. Two of the
+// checks below (the block-chunk preload assertion, and the `/docs` prerender-exclusion check) are
+// pure statements about `dist/` state with no cross-check against source at all, so a stale
+// `dist/` false-greens them by construction.
+//
+// The stamp is written by `src/shell/seo/emit-plugin.ts` as the last act of a build that ran to
+// completion, and deleted at that build's start — so its absence means exactly one thing, and
+// nothing this script could report afterwards would be meaningful.
+const STAMP_PATH = '.kit/build-stamp.json'
+if (!existsSync(STAMP_PATH)) {
+  console.error(
+    `\n✗ verify-build: no build stamp at ${STAMP_PATH}.\n\n` +
+      '  The last build did not run to completion (or no build has run at all).\n' +
+      '  A failed build leaves the PREVIOUS successful output in dist/, so anything this\n' +
+      '  script reported about it would describe stale artifacts, not the current source.\n\n' +
+      '  Run `pnpm build` and fix the build first; verify-build cannot grade what it has.\n',
+  )
+  process.exit(1)
+}
+
 const manifest = JSON.parse(readFileSync('.kit/urls.json', 'utf8'))
 const { site, outDir, urls } = manifest
 const failures = []
@@ -287,6 +311,18 @@ else {
     if (!xml.includes(`<loc>${site}${u.path}</loc>`)) fail('sitemap.xml', `missing ${u.path}`)
   }
 
+  // Exclusion, not just inclusion. The loop above proves every EXPECTED url is present and would
+  // pass just as happily with a `/docs` entry sitting alongside them — and a sitemap entry is an
+  // explicit request to index a URL, which is the opposite of what `/docs` is for. `/docs` is a
+  // developer surface with no localized copy, no `pages.config.ts` entry and no prerendered file;
+  // advertising it here would ask Google to index a URL that 404s on a static deploy.
+  if (/\/docs\b/.test(xml)) {
+    fail(
+      'sitemap.xml',
+      'contains /docs — the developer docs route must never be listed for indexing',
+    )
+  }
+
   // The sitemap's alternate set must match what the <head> declares, x-default included.
   // Two different answers to "what are this page's alternates" is worse than one.
   const perUrl = xml.split('<url>').slice(1)
@@ -323,11 +359,25 @@ if (!existsSync(robotsPath)) {
   fail('robots.txt', 'not emitted')
 } else {
   const robots = readFileSync(robotsPath, 'utf8')
-  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /docs` — deindexes the
+  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /private` — deindexes the
   // entire site. Existence-only checking would pass that silently.
   if (!/^Allow: \/[ \t]*$/m.test(robots)) fail('robots.txt', "missing 'Allow: /'")
   if (/^Disallow: \/[ \t]*$/m.test(robots)) {
     fail('robots.txt', "bare 'Disallow: /' would deindex the entire site")
+  }
+
+  // `/docs` must stay CRAWLABLE. This looks backwards and is not: `Disallow` and the
+  // `noindex, nofollow` meta on `src/routes/docs.tsx` do not layer, they cancel. A crawler that
+  // obeys a `Disallow` never fetches /docs, so it never reads the `noindex` — and a URL linked
+  // from anywhere else is then indexed URL-only, which is the exact outcome the `noindex` exists
+  // to prevent. This assertion turns a future well-meaning "let's block /docs too" edit into a
+  // build failure that explains itself, instead of a silent SEO regression.
+  const docsDisallow = robots.split('\n').find((line) => /^[ \t]*Disallow:[ \t]*\/docs/i.test(line))
+  if (docsDisallow) {
+    fail(
+      'robots.txt',
+      `'${docsDisallow.trim()}' stops crawlers FETCHING /docs, so they never read its 'noindex, nofollow' meta — a URL linked from elsewhere then gets indexed URL-only, the exact outcome the noindex prevents. /docs must stay fetchable; see the header comment in src/routes/docs.tsx`,
+    )
   }
   const wantSitemapLine = `Sitemap: ${site}/sitemap.xml`
   if (!robots.includes(wantSitemapLine)) {

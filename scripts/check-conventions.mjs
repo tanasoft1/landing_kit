@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const RULES = [
@@ -145,6 +145,30 @@ function checkNoRouterLink(file) {
 
 walkFiles('src/blocks', checkNoRouterLink)
 walkFiles('src/shell', checkNoRouterLink)
+
+// --- /docs must keep its `noindex` ------------------------------------------------------------
+// Asserted here, at the source level, because it CANNOT be asserted from `dist/`: `/docs` is
+// deliberately never prerendered, so there is no artifact for `scripts/verify-build.mjs` to read.
+//
+// This meta tag is now the ONLY mechanism keeping `/docs` out of the search index on an SSR
+// deploy. On a static deploy the route simply 404s and the sitemap never mentions it, but an SSR
+// deploy serves `/docs` at a real URL, and robots.txt deliberately does NOT `Disallow` it — a
+// `Disallow` would stop the crawler fetching the page and therefore stop it ever reading this
+// tag (see src/routes/docs.tsx's header comment, and the matching assertion in verify-build.mjs).
+// Delete this tag and `/docs` becomes indexable with no other signal saying otherwise.
+const DOCS_ROUTE = 'src/routes/docs.tsx'
+const DOCS_ROBOTS_META = /name:\s*(['"])robots\1[\s\S]{0,120}?content:\s*(['"])[^'"]*\bnoindex\b/
+if (!existsSync(DOCS_ROUTE)) {
+  failures.push(
+    `${DOCS_ROUTE}  missing — the docs route is allow-listed in verify-build.mjs and expected here`,
+  )
+} else if (!DOCS_ROBOTS_META.test(readFileSync(DOCS_ROUTE, 'utf8'))) {
+  failures.push(
+    `${DOCS_ROUTE}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
+      `this tag is the ONLY thing keeping /docs out of the index on an SSR deploy (robots.txt ` +
+      `deliberately does not Disallow /docs, precisely so crawlers can fetch the page and read it)`,
+  )
+}
 
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
