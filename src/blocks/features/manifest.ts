@@ -7,6 +7,9 @@ import { type FeaturesCopy, mn } from './copy.mn'
 // hand-written union alongside the array is a silent-drift compile hole).
 const variantNames = ['grid', 'alternating'] as const
 
+/** See hero/manifest.ts: `./variants.ts` constrains its component map to exactly this union. */
+export type FeaturesVariant = (typeof variantNames)[number]
+
 export const features = {
   id: 'features',
   variantNames,
@@ -17,4 +20,4 @@ export const features = {
   // `Review`, …), and the shell already emits exactly one `WebPage` node per page — see the same
   // note on ./hero/manifest.ts and ./contact/manifest.ts.
   requires: { npm: [], ui: [] },
-} satisfies BlockManifest<FeaturesCopy, (typeof variantNames)[number]>
+} satisfies BlockManifest<FeaturesCopy, FeaturesVariant>

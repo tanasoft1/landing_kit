@@ -17,6 +17,16 @@ import { type HeroCopy, mn } from './copy.mn'
 // narrower than the actual list.
 const variantNames = ['centered', 'split'] as const
 
+/**
+ * Exported so `./variants.ts` can constrain its component map to exactly these names — a variant
+ * declared here but missing from that map is then a compile error, not a blank space on `/docs`.
+ *
+ * The dependency runs variants.ts → manifest.ts and must never be reversed: this module imports
+ * no components, which is the entire reason the split exists (see the header comment above).
+ * `variants.ts` imports it with `import type`, so nothing is added to the runtime graph either.
+ */
+export type HeroVariant = (typeof variantNames)[number]
+
 export const hero = {
   id: 'hero',
   variantNames,
@@ -30,4 +40,4 @@ export const hero = {
   // description of the same thing. `schema` is reserved for markup a block's own content earns
   // (`FAQPage`, `Product`, `Offer`, `Review`, …); page identity is never a block's to claim.
   requires: { npm: [], ui: [] },
-} satisfies BlockManifest<HeroCopy, (typeof variantNames)[number]>
+} satisfies BlockManifest<HeroCopy, HeroVariant>

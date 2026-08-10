@@ -43,6 +43,10 @@
 
   --radius-base: var(--radius);
   --spacing-section: var(--section-y);
+  /* Derived from the preset's own rhythm, not a second hand-tuned value: a preset that changes
+     --section-y moves both. Used only by <Section density="compact">, for reference surfaces
+     like /docs where ~300px between sections works against scanning. */
+  --spacing-section-tight: calc(var(--section-y) * 0.4);
   --spacing-gutter: var(--gutter);
   --container-page: var(--width-page);
   --container-narrow: var(--width-narrow);

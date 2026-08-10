@@ -7,10 +7,13 @@ import { type CtaCopy, mn } from './copy.mn'
 // hand-written union alongside the array is a silent-drift compile hole).
 const variantNames = ['banner', 'split'] as const
 
+/** See hero/manifest.ts: `./variants.ts` constrains its component map to exactly this union. */
+export type CtaVariant = (typeof variantNames)[number]
+
 export const cta = {
   id: 'cta',
   variantNames,
   defaultVariant: 'banner',
   copy: { mn, en },
   requires: { npm: [], ui: [] },
-} satisfies BlockManifest<CtaCopy, (typeof variantNames)[number]>
+} satisfies BlockManifest<CtaCopy, CtaVariant>

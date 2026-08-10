@@ -10,6 +10,9 @@ import { type ContactCopy, mn } from './copy.mn'
 // hand-written union alongside the array is a silent-drift compile hole).
 const variantNames = ['default'] as const
 
+/** See hero/manifest.ts: `./variants.ts` constrains its component map to exactly this union. */
+export type ContactVariant = (typeof variantNames)[number]
+
 export const contact = {
   id: 'contact',
   variantNames,
@@ -22,4 +25,4 @@ export const contact = {
   // reserved for markup this block's own content earns (e.g. a future structured contact
   // method via `ContactPoint` embedded on `Organization`), never for page identity.
   requires: { npm: ['react-hook-form', 'zod'], ui: [] },
-} satisfies BlockManifest<ContactCopy, (typeof variantNames)[number]>
+} satisfies BlockManifest<ContactCopy, ContactVariant>

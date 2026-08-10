@@ -32,8 +32,12 @@ export const Route = createFileRoute('/docs')({
 
 function DocsPage() {
   return (
+    // `density="compact"` throughout: `py-section` is tuned for marketing pages (up to 9.5rem top
+    // AND bottom, ~300px of air between sections), which is most of the look and stays put
+    // everywhere else. This is a reference document a developer scans, and that much air works
+    // against reading it quickly.
     <main>
-      <Section>
+      <Section density="compact">
         <Container>
           <h1 className="text-h2 font-semibold">Developer docs</h1>
           <p className="text-muted-foreground text-lead mt-3">
@@ -44,7 +48,7 @@ function DocsPage() {
         </Container>
       </Section>
 
-      <Section surface="muted">
+      <Section surface="muted" density="compact">
         <Container>
           <h2 className="text-h2 font-semibold">Tokens</h2>
           <div className="mt-8">
@@ -53,16 +57,19 @@ function DocsPage() {
         </Container>
       </Section>
 
-      <Section>
+      <Section density="compact">
         <Container>
           <h2 className="text-h2 font-semibold">Blocks</h2>
-          <div className="mt-8">
-            <BlockGallery />
-          </div>
+          <p className="text-muted-foreground mt-2 text-sm">
+            Each preview below renders at true page geometry — its own Section and Container, no
+            extra wrapper — so it shows the block exactly as a real page would.
+          </p>
         </Container>
       </Section>
+      {/* Outside any Section/Container on purpose: every block brings its own. See BlockGallery. */}
+      <BlockGallery />
 
-      <Section surface="muted">
+      <Section surface="muted" density="compact">
         <Container>
           <h2 className="text-h2 font-semibold">Config</h2>
           <div className="mt-8">

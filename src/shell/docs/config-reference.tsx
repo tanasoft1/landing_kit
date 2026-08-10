@@ -3,24 +3,25 @@ import { site } from '~/config/site.config'
 import { enumerateUrls } from '~/shell/pages/enumerate'
 
 // Prose describing how to do these tasks lives in exactly one place: the README. Restating it
-// here would be a second copy that drifts the moment the first one changes — this section is
-// pointers to headings, not a rewrite of them.
+// here would be a second copy that drifts the moment the first one changes — this section names
+// the headings to read, and nothing more.
+//
+// Plain text, NOT links. `README.md` ships in neither `public/` nor `dist/client/`, so an
+// `<a href="/README.md#…">` 404s in every real deployment; on the dev server it "works" only by
+// serving raw text/markdown, where the `#anchor` fragment is inert anyway. A dead link in
+// developer docs is worse than a plain instruction — the reader who clicks it learns the docs
+// are unreliable. Copying the README into `public/` was considered and rejected: that is a
+// second copy of the file, which is the thing this list exists to avoid.
 const RECIPES = [
-  { label: 'Add a block', href: '/README.md#adding-a-block' },
-  {
-    label: 'Add a variant to an existing block',
-    href: '/README.md#adding-a-variant-to-an-existing-block',
-  },
-  { label: 'Reskin: the token surface', href: '/README.md#reskinning-the-token-surface' },
-  { label: 'The Cyrillic font requirement', href: '/README.md#the-cyrillic-font-requirement' },
-  { label: 'The three env flags', href: '/README.md#the-three-env-flags' },
-  { label: 'Swap the whole config', href: '/README.md#swapping-the-whole-config-configs' },
-  { label: 'The contact form', href: '/README.md#the-contact-form' },
-  {
-    label: 'Gotchas that cost real debugging time',
-    href: '/README.md#gotchas-that-cost-real-debugging-time',
-  },
-  { label: 'Lighthouse budget', href: '/README.md#lighthouse-budget' },
+  'Adding a block',
+  'Adding a variant to an existing block',
+  'Reskinning: the token surface',
+  'The Cyrillic font requirement',
+  'The three env flags',
+  'Swapping the whole config: `configs/`',
+  'The contact form',
+  'Gotchas that cost real debugging time',
+  'Lighthouse budget',
 ] as const
 
 export function ConfigReference() {
@@ -69,14 +70,13 @@ export function ConfigReference() {
       <div className="min-w-0">
         <h3 className="text-h3 font-semibold">Recipes</h3>
         <p className="text-muted-foreground mt-1 text-sm">
-          Common changes, documented once, in the README — not restated here.
+          Common changes, documented once, in the repository’s README — not restated here, and not
+          linked (README.md is not part of the deployed site).
         </p>
         <ul className="mt-3 grid gap-1">
           {RECIPES.map((r) => (
-            <li key={r.href}>
-              <a className="text-sm underline" href={r.href}>
-                {r.label}
-              </a>
+            <li key={r}>
+              <code className="text-sm">README.md § {r}</code>
             </li>
           ))}
         </ul>
