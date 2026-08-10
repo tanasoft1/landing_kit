@@ -57,9 +57,23 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 ## Architecture in one page
 
 - **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
-  A block exports a `manifest` (`variants`, `defaultVariant`, `copy` per locale, optional `nav`
-  and `schema`) and one or more variant components with the signature
-  `(props: BlockProps<Copy>) => ReactNode`.
+  A block is deliberately split across two modules:
+  - `manifest.ts` — metadata only: `variantNames` (a `readonly` array of **names**, not
+    components), `defaultVariant`, `copy` per locale, optional `nav` and `schema`. It imports
+    **no components**.
+  - `variants.ts` — the name→component map, constrained by
+    `satisfies Record<XVariant, ComponentType<BlockProps<XCopy>>>`. Variant components have the
+    signature `(props: BlockProps<Copy>) => ReactNode`.
+
+  The split is what makes per-block code-splitting possible, and it is load-bearing rather than
+  stylistic. `registry.ts` imports every manifest **eagerly**, because the `<head>`, the JSON-LD
+  graph and the nav all need `copy`/`nav`/`schema` synchronously — so a single component import
+  inside a `manifest.ts` puts every block's components back on that same eager chain and collapses
+  the split, silently and with no build error. Components are reached only through
+  `src/blocks/block-modules.ts` (dynamic `import()`, client) and `src/blocks/variants.all.ts`
+  (static, server). See
+  [Known limitations](docs/superpowers/known-limitations.md#resolved-pre-hydration-block-imports)
+  for the measurements and for the `React.lazy` approach that was tried and reverted.
 - **Pages** are declared *only* in `pages.config.ts` (`configs/<name>/pages.config.ts` or
   `src/config/pages.config.ts`) as an ordered list of block references. There is no manual
   routing — `src/routes/$.tsx` is a catch-all that resolves any path against the page list.
@@ -83,26 +97,134 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 
 ## Adding a block
 
-1. Copy an existing block folder, e.g. `src/blocks/hero/` → `src/blocks/testimonials/`.
-2. Edit `manifest.ts`: change `id`, point `variants`/`defaultVariant` at your component(s), and
-   provide `copy: { mn, en }` — both locales, always (there is no fallback locale for block copy;
-   a parity check across `copy.mn.ts`/`copy.en.ts` is enforced by TypeScript, not a script).
-3. Add one line to `src/blocks/registry.ts`'s `manifests`/`registry` objects. `BlockId` is
-   derived from these keys, so nothing else needs updating for TypeScript to know your new block
-   exists.
-4. Add the block's id (or `{ id, variant, surface }`) to a page's `blocks` array in
-   `pages.config.ts`.
+Seven edits: four files inside the block's own folder, three registration points outside it.
+Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
 
-`scripts/verify-build.mjs` cross-checks that every folder under `src/blocks/` appears in the
-registry, so a half-finished block (folder exists, not registered) fails `pnpm verify` loudly
-instead of silently shipping unused.
+1. **Copy a block folder**, e.g. `src/blocks/cta/` → `src/blocks/testimonials/`, and rename the
+   component files (`cta-banner.tsx` → `testimonials-grid.tsx`, …).
+2. **`copy.mn.ts`** — declare the copy type explicitly and export `mn`:
+   ```ts
+   export type TestimonialsCopy = { heading: string; items: { quote: string }[] }
+   export const mn: TestimonialsCopy = { heading: 'Сэтгэгдэл', items: [/* … */] }
+   ```
+   **`copy.en.ts`** imports that type and exports `en` against it:
+   ```ts
+   import type { TestimonialsCopy } from './copy.mn'
+   export const en: TestimonialsCopy = { heading: 'Testimonials', items: [/* … */] }
+   ```
+   Both locales, always — there is no fallback locale for block copy. Declare the type
+   explicitly; never infer it with `typeof mn`, which would make `copy.en.ts` conform to whatever
+   `copy.mn.ts` happens to say instead of to a shared contract. Written this way, locale parity is
+   a compile error, not a script's job.
+3. **`manifest.ts`** — metadata only, **no component imports**:
+   ```ts
+   import type { BlockManifest } from '~/shell/types'
+   import { en } from './copy.en'
+   import { type TestimonialsCopy, mn } from './copy.mn'
+
+   const variantNames = ['grid', 'single'] as const
+   export type TestimonialsVariant = (typeof variantNames)[number]
+
+   export const testimonials = {
+     id: 'testimonials',
+     variantNames,
+     defaultVariant: 'grid',
+     copy: { mn, en },
+     requires: { npm: [], ui: [] },
+   } satisfies BlockManifest<TestimonialsCopy, TestimonialsVariant>
+   ```
+   `as const` on the array is required: without it `defaultVariant` stops being checked against
+   the list. Derive the variant union from the array (`(typeof variantNames)[number]`) rather than
+   hand-writing `'grid' | 'single'` beside it — a hand-written union that lists a name the array
+   omits compiles cleanly and fails only at runtime, on whichever page asks for it.
+4. **`variants.ts`** — the name→component map, and the only place these components are statically
+   imported:
+   ```ts
+   import type { ComponentType } from 'react'
+   import type { BlockProps } from '~/shell/types'
+   import type { TestimonialsCopy } from './copy.mn'
+   import type { TestimonialsVariant } from './manifest'
+   import { TestimonialsGrid } from './testimonials-grid'
+   import { TestimonialsSingle } from './testimonials-single'
+
+   export const variants = {
+     grid: TestimonialsGrid,
+     single: TestimonialsSingle,
+   } satisfies Record<TestimonialsVariant, ComponentType<BlockProps<TestimonialsCopy>>>
+   ```
+   `satisfies Record<TestimonialsVariant, …>` is what makes a declared-but-unimplemented variant a
+   compile error here instead of an empty preview on `/docs`. Import the manifest with
+   `import type`, so the dependency stays compile-time only and `manifest.ts` never joins this
+   chunk's runtime graph. The direction is always `variants.ts → manifest.ts`, never the reverse.
+5. **`src/blocks/registry.ts`** — add the manifest to **both** the `manifests` and the `registry`
+   object literals. `BlockId` is derived from `manifests`' keys, and `registry` is annotated
+   `Record<BlockId, …>`, so adding it to one and not the other is a compile error.
+6. **`src/blocks/block-modules.ts`** — add a dynamic-import entry:
+   ```ts
+   testimonials: () =>
+     import('./testimonials/variants').then((m) => registerVariants('testimonials', m.variants)),
+   ```
+   This is the client's split point — one Vite chunk per entry. Point it at `variants.ts`, not
+   `manifest.ts`; the manifest imports no components, so importing it here would split nothing.
+7. **`src/blocks/variants.all.ts`** — import the variants and add them to the `all` map. This is
+   the server's synchronous path: the prerenderer renders every page in one process and cannot
+   await a per-page dynamic import before its first render.
+8. **`pages.config.ts`** — add the block's id (or `{ id, variant, surface }`) to a page's `blocks`
+   array. A block that is registered but on no page still renders on `/docs`.
+
+**What actually catches a half-finished block.** Step 5 is the pivot: once the manifest is in
+`registry.ts`, `BlockId` gains the new key and `tsc --noEmit` reports steps 6 and 7 as missing
+properties, by name. Concretely:
+
+| Missing | Caught by |
+|---|---|
+| Folder exists, not in `registry.ts` | `scripts/verify-build.mjs` (folder↔registry parity) |
+| In `registry.ts`'s `manifests` but not `registry` | `tsc` — `registry` is `Record<BlockId, …>` |
+| No `block-modules.ts` entry | `tsc` — `blockModules` is `Record<BlockId, …>` |
+| No `variants.all.ts` entry | `tsc` — `all` is `Record<BlockId, …>` |
+| Variant in `variantNames` with no component | `tsc` — `satisfies Record<XVariant, …>` in `variants.ts` |
+| Component in `variants.ts` that `variantNames` omits | `tsc` — `satisfies` rejects excess keys |
+| Putting components **in** the manifest object (`variants: { … }`, the pre-split shape) | `tsc` — `satisfies BlockManifest<…>` rejects the unknown property |
+| A `manifest.ts` whose components are reachable from an *eagerly imported* export | **Nothing.** See below. |
+
+Run `pnpm verify` when you are done; the folder↔registry half is a build-time check, the rest are
+type errors you will see in your editor first.
+
+**The one unguarded edit.** The last row is the only way to undo the split by accident, and it is
+worth knowing precisely, because the obvious mistakes are all caught and the remaining one is not.
+A bare re-export in a `manifest.ts` (`export { X } from './x'`) is harmless — Rollup tree-shakes
+it, measured at **zero** change to the main chunk. What is not harmless is a manifest export that
+*uses* a component value and is itself reachable from `registry.ts`'s eager import chain. That
+compiles cleanly, passes `pnpm conventions`, builds, and passes `verify-build.mjs` — while moving
+every block's components back into the main chunk. Measured on a five-block tree:
+
+| | main chunk |
+|---|---|
+| split intact | 334 KB raw / 108 KB gzip |
+| one manifest reaching a component from an eager export | **459 KB raw / 149 KB gzip** |
+
+The per-block `variants-*.js` chunks stay in the build, so nothing looks obviously wrong — they
+are just no longer where the weight is. Keep `manifest.ts` free of component imports entirely;
+that is the rule, and it is the rule *because* nothing below it will tell you.
 
 ## Adding a variant to an existing block
 
-Add a component with the `BlockProps<Copy>` signature, then add it to that block's
-`manifest.ts` under `variants: { ..., myVariant: MyComponent }`. Reference it from
-`pages.config.ts` as `{ id: 'hero', variant: 'myVariant' }`. No registry change needed — variants
-are scoped to their own block's manifest.
+Two edits inside the block's folder, plus the page reference:
+
+1. Add a component with the `BlockProps<Copy>` signature, e.g. `src/blocks/hero/hero-poster.tsx`.
+2. Add its **name** to `variantNames` in that block's `manifest.ts`
+   (`const variantNames = ['centered', 'split', 'poster'] as const`).
+3. Map that name to the component in that block's `variants.ts`
+   (`poster: HeroPoster`).
+
+Then reference it from `pages.config.ts` as `{ id: 'hero', variant: 'poster' }`.
+
+No change to `registry.ts`, `block-modules.ts` or `variants.all.ts` — those are per-block, and the
+new variant travels inside the block's existing chunk. Steps 2 and 3 are both required and you
+cannot forget the second one: `HeroVariant` is derived from `variantNames`, and `variants.ts`
+constrains its map with `satisfies Record<HeroVariant, …>`, so a name added to the array with no
+component is a compile error at `variants.ts`. (The reverse — a component in the map that
+`variantNames` never declares — is also an error, since `satisfies` rejects excess keys.)
 
 ## Reskinning: the token surface
 
