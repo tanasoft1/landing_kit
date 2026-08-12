@@ -1,211 +1,255 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
 
-// Layout rules. These are about who is allowed to WRITE spacing/width/positioning — the answer
-// is `<Section>` and `<Container>` and nothing else — so they apply to every directory that
-// renders markup, not just `src/blocks`. `README.md`'s Scripts table has always stated the rule
-// generally; until this round the scan only ever walked `src/blocks`, so `src/routes/docs.tsx`
-// could have written `py-section` or a raw `<section>` and nothing would have said a word.
-const LAYOUT_RULES = [
+// --- layout conventions, checked against the AST -----------------------------------------------
+//
+// These rules are about who may WRITE spacing/width/positioning — the answer is `<Section>` and
+// `<Container>` and nothing else — so they apply to every directory that renders markup, not just
+// `src/blocks`.
+//
+// They are matched against **what they are actually about**: the contents of `className`/`class`
+// attributes, and the identity of JSX elements. Not against raw file text.
+//
+// That distinction is the whole design, and it was learned the hard way. Matching raw lines meant
+// prose could participate: `section.tsx` explains `py-section`, `container.tsx` explains
+// `px-gutter`, `docs.tsx` opens with a comment about `py-section`. A comment-blanking pass was
+// added to compensate, and it moved the problem rather than removing it — a character-state
+// scanner cannot tell JSX text from code, so a bare `//` in JSX text blanked the rest of a real
+// line (a `min-h-screen` violation went undetected), and an unpaired apostrophe in JSX text
+// (`<p>don't</p>`) opened a string state that never closed, so later comments stopped being
+// blanked and correct code was failed. Both reproduced before this rewrite.
+//
+// Parsing with TypeScript's own parser removes the entire class of problem instead of defending
+// against it: comments are trivia and are never visited, JSX text is a `JsxText` node and is never
+// inspected, and an apostrophe in it is just a character. `typescript` is already a devDependency
+// (`pnpm typecheck` runs `tsc`), and this script runs only in dev/CI, never in the shipped output.
+import ts from 'typescript'
+
+// Matched against a resolved class string, never against a line of source.
+const CLASS_RULES = [
   { re: /\bpy-section\b/, msg: 'py-section belongs to <Section>, not written directly' },
   { re: /\bpx-gutter\b/, msg: 'px-gutter belongs to <Container>, not written directly' },
-  {
-    re: /className="[^"]*\bmax-w-/,
-    contentRe: /\bmax-w-/,
-    msg: 'max-width utility — use <Container width="narrow">',
-  },
-  {
-    re: /className="[^"]*\bcontainer\b/,
-    contentRe: /\bcontainer\b/,
-    msg: 'container utility — use <Container>',
-  },
-  { re: /<section[\s>]/, msg: 'raw <section> element — use <Section>' },
+  { re: /\bmax-w-/, msg: 'max-width utility — use <Container width="narrow">' },
+  { re: /\bcontainer\b/, msg: 'container utility — use <Container>' },
   { re: /\bmin-h-screen\b/, msg: 'min-h-screen — nothing here may assume viewport height' },
   // Catches ANY Tailwind arbitrary-value bracket escape (`text-[length:...]`, `rounded-[...]`,
-  // `-left-[9999px]`, etc.), not just the two specific utilities named below — a previous
-  // version of this rule only matched `text-[length:` and `rounded-[`, so `-left-[9999px]`
-  // (an arbitrary-value escape used to hide the contact form's honeypot) sailed straight
-  // through review. Use a scale/preset value (e.g. `-left-96`) instead.
-  {
-    re: /className="[^"]*-\[/,
-    contentRe: /-\[/,
-    msg: 'arbitrary Tailwind value (bracket syntax) — use a scale/preset utility',
-  },
-  { re: /style=\{\{/, msg: 'inline style — use a Tailwind utility from the token layer' },
+  // `-left-[9999px]`, etc.), not just a couple of specific utilities — an earlier version matched
+  // only `text-[length:` and `rounded-[`, so `-left-[9999px]` (used to hide the contact form's
+  // honeypot) sailed straight through review. Use a scale/preset value (e.g. `-left-96`).
+  { re: /-\[/, msg: 'arbitrary Tailwind value (bracket syntax) — use a scale/preset utility' },
 ]
 
-// Blocks-only, and unlike the layout rules above this one genuinely does NOT generalise.
+const RAW_SECTION_MSG = 'raw <section> element — use <Section>'
+const INLINE_STYLE_MSG = 'inline style — use a Tailwind utility from the token layer'
+// Blocks-only, and unlike the rules above this one genuinely does NOT generalise.
 //
-// No exception list, unlike the rule this replaced. Heading level is never a block's own
-// decision — it depends on whether the block happens to be first on the page, which only the
-// renderer knows (`headingLevel` on `BlockProps`, assigned by `RenderBlocks`). A block with a
-// heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and render `<H>`; a literal
-// `<h1>` or `<h2>` anywhere in `src/blocks` — hero included — is always wrong.
+// Heading level is never a block's own decision — it depends on whether the block happens to be
+// first on the page, which only the renderer knows (`headingLevel` on `BlockProps`, assigned by
+// `RenderBlocks`). A block with a heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and
+// render `<H>`; a literal `<h1>`/`<h2>` anywhere in `src/blocks` — hero included — is always wrong.
 //
 // A route is the opposite case: it is a fixed page, it knows exactly what it is, and it owns its
 // own heading outline. `src/routes/docs.tsx` writes a literal `<h1>Developer docs</h1>` and three
 // literal `<h2>`s, correctly — there is no renderer above it assigning levels, because `/docs` is
 // not built from `pages.config.ts` blocks. Applying this rule outside `src/blocks` would flag
 // correct code, and a gate that flags correct code stops being believed.
-const BLOCK_ONLY_RULES = [
-  {
-    re: /<h[12][\s>]/,
-    msg: "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>",
-  },
-]
-
-// Rules whose literal-match pattern (`re`) requires the text to appear inside a
-// `className="…"` attribute are the ones with a `contentRe` — the same pattern with that
-// requirement stripped, so it can be run against a class string resolved from a local
-// constant instead of read directly off the line. Rules without `contentRe` (py-section,
-// px-gutter, min-h-screen, raw <section>, inline style, literal <h1>/<h2>) are not scoped to
-// `className="…"` in the first place, so they already see a class string wherever it appears
-// literally in the file — including on the `const IDENT = '…'` declaration line itself — and
-// need no extra handling here.
-const CONTENT_RULES = LAYOUT_RULES.filter((r) => r.contentRe)
+const HEADING_MSG =
+  "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>"
 
 const failures = []
 
+function parseTsx(file) {
+  return ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TSX,
+  )
+}
+
+const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1
+
 /**
- * Blank out comment bodies, preserving every newline (so reported line numbers stay exact) and
- * every non-comment character position.
+ * `const NAME = <initializer>` declarations anywhere in the file, so `className={NAME}` and
+ * `className={`${MAP[key]}`}` can be resolved to the class strings they actually produce.
  *
- * Required by the scope widening, not a nicety. These rules match raw line text, and the files
- * that DOCUMENT the layout primitives naturally name them in prose: `src/shell/layout/section.tsx`
- * explains `py-section`, `container.tsx` explains `px-gutter`, `src/shell/docs/block-gallery.tsx`
- * describes what a block's own `<Section>`/`<Container>` render, and `src/routes/docs.tsx:35`
- * opens with a comment about `py-section` being tuned for marketing pages. Every one of those is
- * correct code explaining itself, and every one would have been reported as a violation the moment
- * the scan reached its directory. A false failure in the project's only machine gate teaches
- * people to distrust the gate — the exact failure mode `verify-build.mjs` warns about in its
- * `decodeEntities` docstring.
- *
- * String and template-literal states are tracked so a `//` inside `'https://example.mn'` is not
- * mistaken for a comment — which would blank the rest of a real line of code and hide a genuine
- * violation sitting after it.
+ * Flat and scope-blind, as the previous text-based version was: two `const field = …` in different
+ * scopes of one file collide, last one winning. Recorded in known-limitations.
  */
-function blankComments(text) {
-  let out = ''
-  let i = 0
-  // 'code' | 'line' | 'block' | 'single' | 'double' | 'template'
-  let state = 'code'
-  while (i < text.length) {
-    const c = text[i]
-    const next = text[i + 1]
-    if (state === 'code') {
-      if (c === '/' && next === '/') {
-        state = 'line'
-        out += '  '
-        i += 2
-        continue
-      }
-      if (c === '/' && next === '*') {
-        state = 'block'
-        out += '  '
-        i += 2
-        continue
-      }
-      if (c === "'") state = 'single'
-      else if (c === '"') state = 'double'
-      else if (c === '`') state = 'template'
-      out += c
-      i += 1
-      continue
-    }
-    if (state === 'line') {
-      if (c === '\n') {
-        state = 'code'
-        out += c
-      } else out += ' '
-      i += 1
-      continue
-    }
-    if (state === 'block') {
-      if (c === '*' && next === '/') {
-        state = 'code'
-        out += '  '
-        i += 2
-        continue
-      }
-      out += c === '\n' ? c : ' '
-      i += 1
-      continue
-    }
-    // Inside a string or template literal: copy verbatim, honouring backslash escapes so an
-    // escaped quote does not close the literal early.
-    if (c === '\\') {
-      out += c + (next ?? '')
-      i += 2
-      continue
-    }
-    if (
-      (state === 'single' && c === "'") ||
-      (state === 'double' && c === '"') ||
-      (state === 'template' && c === '`')
-    ) {
-      state = 'code'
-    }
-    out += c
-    i += 1
-  }
-  return out
-}
-
-function walk(dir, rules, isExempt = () => false) {
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry)
-    if (statSync(p).isDirectory()) walk(p, rules, isExempt)
-    else if (p.endsWith('.tsx') && !isExempt(p)) check(p, rules)
-  }
-}
-
-// Resolves `const IDENT = '…'` / `"…"` string-literal declarations anywhere in `text`, so that
-// `className={IDENT}` can be checked against the same content rules as a literal
-// `className="…"`. Deliberately simple: only a plain single- or double-quoted string literal
-// assigned directly to a bare identifier is resolved. Anything else — a template literal with
-// interpolation, a function call, a prop, a destructured value — is left unresolved, and a
-// `className={…}` that references an unresolved name is reported as a failure below rather
-// than silently skipped. A convention checker that stays quiet about what it cannot verify is
-// worse than one with a narrower reach: `className={field}` bypassed every content rule here
-// until this was fixed, and nothing said so.
-function resolveStringConsts(text) {
+function collectConsts(sf) {
   const consts = new Map()
-  const re = /^[^\n\S]*const\s+(\w+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*)\2/gm
-  for (const m of text.matchAll(re)) consts.set(m[1], m[3])
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      consts.set(node.name.text, node.initializer)
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
   return consts
 }
 
-function check(file, rules) {
-  const text = blankComments(readFileSync(file, 'utf8'))
-  const lines = text.split('\n')
-  const consts = resolveStringConsts(text)
-
-  lines.forEach((line, i) => {
-    for (const rule of rules) {
-      if (rule.re.test(line)) failures.push(`${file}:${i + 1}  ${rule.msg}`)
+/**
+ * Every class string an expression can contribute, each tagged with how it was reached so a
+ * failure can name the indirection.
+ *
+ * Returns `null` for an expression this cannot resolve — a prop, a destructured value, a call into
+ * another module. That is reported as a failure rather than skipped: a convention checker that
+ * stays quiet about what it cannot verify is worse than one with a narrower reach. `className=
+ * {field}` bypassed every rule until that was fixed, and nothing said so.
+ */
+function classStrings(node, sf, consts, seen = new Set()) {
+  if (!node) return []
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return [{ text: node.text, via: null }]
+  }
+  if (ts.isTemplateExpression(node)) {
+    // The literal chunks are class text; each `${…}` is resolved on its own.
+    const out = [{ text: node.head.text, via: null }]
+    for (const span of node.templateSpans) {
+      const inner = classStrings(span.expression, sf, consts, seen)
+      if (inner === null) return null
+      out.push(...inner, { text: span.literal.text, via: null })
     }
-
-    // `className={identifier}` — a bare identifier only (no ternaries, template literals, or
-    // calls; those aren't the "simple case" this resolves and are left to human review as
-    // before).
-    const identMatch = line.match(/className=\{(\w+)\}/)
-    if (!identMatch) return
-    const ident = identMatch[1]
-
-    if (!consts.has(ident)) {
-      failures.push(
-        `${file}:${i + 1}  className={${ident}} cannot verify — inline the classes or use a literal`,
-      )
-      return
+    return out
+  }
+  // `undefined` / `null` / `false` / `true` contribute no classes and are not "unresolvable" —
+  // `className={cond ? 'md:order-2' : undefined}` is the idiomatic way to write "no class here",
+  // and reporting it as unverifiable would be a false failure.
+  if (
+    node.kind === ts.SyntaxKind.NullKeyword ||
+    node.kind === ts.SyntaxKind.FalseKeyword ||
+    node.kind === ts.SyntaxKind.TrueKeyword ||
+    (ts.isIdentifier(node) && node.text === 'undefined')
+  ) {
+    return []
+  }
+  if (ts.isParenthesizedExpression(node)) return classStrings(node.expression, sf, consts, seen)
+  if (ts.isConditionalExpression(node)) {
+    const a = classStrings(node.whenTrue, sf, consts, seen)
+    const b = classStrings(node.whenFalse, sf, consts, seen)
+    return a === null || b === null ? null : [...a, ...b]
+  }
+  if (ts.isBinaryExpression(node)) {
+    const a = classStrings(node.left, sf, consts, seen)
+    const b = classStrings(node.right, sf, consts, seen)
+    return a === null || b === null ? null : [...a, ...b]
+  }
+  if (ts.isArrayLiteralExpression(node)) {
+    const out = []
+    for (const el of node.elements) {
+      const inner = classStrings(el, sf, consts, seen)
+      if (inner === null) return null
+      out.push(...inner)
     }
+    return out
+  }
+  // `cn(...)` / `clsx(...)` / `classNames(...)` / `twMerge(...)` and friends: every argument is a
+  // candidate class string. Handled generically rather than by helper name, so a project-local
+  // wrapper is covered without being enumerated here.
+  if (ts.isCallExpression(node)) {
+    const out = []
+    for (const arg of node.arguments) {
+      const inner = classStrings(arg, sf, consts, seen)
+      if (inner === null) return null
+      out.push(...inner)
+    }
+    // `['a', 'py-section'].join(' ')` and `arr.join(' ')` keep the class strings in the RECEIVER,
+    // not the arguments — scanning arguments alone let that form through. An unresolvable receiver
+    // is deliberately NOT fatal here: for a plain `cn(x, 'y')` the callee is a bare function
+    // identifier that resolves to nothing, and treating that as unverifiable would report every
+    // ordinary helper call as a failure.
+    if (ts.isPropertyAccessExpression(node.expression)) {
+      const receiver = classStrings(node.expression.expression, sf, consts, seen)
+      if (receiver !== null) out.push(...receiver)
+    }
+    return out
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    // A lookup map (`const SURFACE_CLASS = { default: 'bg-background', … }`) reached through an
+    // unknown key: every value is a class string this element could render, so check them all.
+    const out = []
+    for (const prop of node.properties) {
+      if (!ts.isPropertyAssignment(prop)) continue
+      const inner = classStrings(prop.initializer, sf, consts, seen)
+      if (inner === null) return null
+      out.push(...inner)
+    }
+    return out
+  }
+  if (ts.isIdentifier(node)) {
+    if (seen.has(node.text)) return []
+    const init = consts.get(node.text)
+    if (!init) return null
+    const inner = classStrings(init, sf, consts, new Set([...seen, node.text]))
+    if (inner === null) return null
+    return inner.map((s) => ({ text: s.text, via: s.via ?? node.text }))
+  }
+  // `MAP[key]` / `MAP.key` — resolve through the base identifier to the whole map.
+  if (ts.isElementAccessExpression(node) || ts.isPropertyAccessExpression(node)) {
+    return classStrings(node.expression, sf, consts, seen)
+  }
+  return null
+}
 
-    const value = consts.get(ident)
-    for (const rule of CONTENT_RULES) {
-      if (rule.contentRe.test(value)) {
-        failures.push(`${file}:${i + 1}  ${rule.msg} (via const ${ident} = '${value}')`)
+function checkFile(file, { headings }) {
+  const sf = parseTsx(file)
+  const consts = collectConsts(sf)
+
+  const visit = (node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const line = lineOf(sf, node)
+      const tag = node.tagName.getText(sf)
+
+      if (tag === 'section') failures.push(`${file}:${line}  ${RAW_SECTION_MSG}`)
+      if (headings && (tag === 'h1' || tag === 'h2'))
+        failures.push(`${file}:${line}  ${HEADING_MSG}`)
+
+      for (const attr of node.attributes.properties) {
+        if (!ts.isJsxAttribute(attr)) continue
+        const name = attr.name.getText(sf)
+
+        if (name === 'style') {
+          failures.push(`${file}:${lineOf(sf, attr)}  ${INLINE_STYLE_MSG}`)
+          continue
+        }
+        if (name !== 'className' && name !== 'class') continue
+
+        const attrLine = lineOf(sf, attr)
+        const expr =
+          attr.initializer && ts.isJsxExpression(attr.initializer)
+            ? attr.initializer.expression
+            : attr.initializer
+        const strings = classStrings(expr, sf, consts)
+
+        if (strings === null) {
+          const shown = expr ? expr.getText(sf) : String(attr.initializer?.getText(sf))
+          failures.push(
+            `${file}:${attrLine}  className={${shown}} cannot verify — inline the classes or use a literal`,
+          )
+          continue
+        }
+        for (const { text, via } of strings) {
+          for (const rule of CLASS_RULES) {
+            if (rule.re.test(text)) {
+              const suffix = via ? ` (via const ${via} = '${text}')` : ''
+              failures.push(`${file}:${attrLine}  ${rule.msg}${suffix}`)
+            }
+          }
+        }
       }
     }
-  })
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+}
+
+function walk(dir, opts, isExempt = () => false) {
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry)
+    if (statSync(p).isDirectory()) walk(p, opts, isExempt)
+    else if (p.endsWith('.tsx') && !isExempt(p)) checkFile(p, opts)
+  }
 }
 
 // The two files that DEFINE the layout primitives are the only legitimate authors of the
@@ -219,9 +263,9 @@ const LAYOUT_PRIMITIVES = new Set([
 ])
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
-walk('src/blocks', [...LAYOUT_RULES, ...BLOCK_ONLY_RULES])
-walk('src/routes', LAYOUT_RULES)
-walk('src/shell', LAYOUT_RULES, isLayoutPrimitive)
+walk('src/blocks', { headings: true })
+walk('src/routes', { headings: false })
+walk('src/shell', { headings: false }, isLayoutPrimitive)
 
 // --- no client-side <Link> anywhere ------------------------------------------------------------
 // Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
@@ -242,8 +286,11 @@ walk('src/shell', LAYOUT_RULES, isLayoutPrimitive)
 // Routes are where a global nav would actually be written, so exempting them exempted the one
 // file the trap is most likely to be sprung in. `src/router.tsx`'s `defaultPreload: 'intent'` is
 // dead config that exists only for `<Link>`, which makes the invitation more tempting still.
-const LINK_IMPORT_RE = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*(['"])@tanstack\/react-router\2/g
-
+//
+// Read off the AST for the same reason the layout rules are: the regex this replaced matched a
+// COMMENTED-OUT import (`// import { Link } from '@tanstack/react-router'`) and failed correct
+// code — a false failure in the only machine gate, the same defect class as the prose problem.
+// An `ImportDeclaration` node exists only for a real import.
 function walkFiles(dir, visit) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
@@ -253,10 +300,18 @@ function walkFiles(dir, visit) {
 }
 
 function checkNoRouterLink(file) {
-  const text = readFileSync(file, 'utf8')
-  for (const match of text.matchAll(LINK_IMPORT_RE)) {
-    if (!/\bLink\b/.test(match[1])) continue
-    const line = text.slice(0, match.index).split('\n').length
+  const sf = parseTsx(file)
+  for (const stmt of sf.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue
+    if (stmt.moduleSpecifier.text !== '@tanstack/react-router') continue
+    const bindings = stmt.importClause?.namedBindings
+    if (!bindings || !ts.isNamedImports(bindings)) continue
+    // The imported name as it exists in this module: `Link` or `Link as X` both count, since both
+    // put the component in scope.
+    const importsLink = bindings.elements.some((el) => (el.propertyName ?? el.name).text === 'Link')
+    if (!importsLink) continue
+    const line = lineOf(sf, stmt)
     failures.push(
       `${file}:${line}  imports Link from '@tanstack/react-router' — block modules are ` +
         `resolved once, pre-hydration, off the initial URL only (src/client.tsx); a client-side ` +
@@ -307,6 +362,16 @@ if (!existsSync(DOCS_ROUTE)) {
 const THEME_CSS = 'src/styles/theme.css'
 const PRESETS_DIR = 'src/styles/presets'
 
+/**
+ * Strip CSS comments, preserving newlines so nothing downstream shifts.
+ *
+ * Same reason the TSX rules moved to the AST: a commented-out declaration inside `:root` — say a
+ * `--c-legacy-accent` kept for reference — was read as a real one and reported as dead weight,
+ * failing correct code. CSS is trivially safe to do textually where TSX was not: there are no line
+ * comments and no quoting rules that interact with `/* … *\/`.
+ */
+const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+
 /** Balanced-brace extraction, so a nested `calc(…)` or a rule inside the block cannot truncate it. */
 function extractBlock(src, marker) {
   const start = src.indexOf(marker)
@@ -326,7 +391,10 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
     `${THEME_CSS} / ${PRESETS_DIR}  missing — the preset token-surface check needs both`,
   )
 } else {
-  const themeInline = extractBlock(readFileSync(THEME_CSS, 'utf8'), '@theme inline')
+  const themeInline = extractBlock(
+    stripCssComments(readFileSync(THEME_CSS, 'utf8')),
+    '@theme inline',
+  )
   if (!themeInline) {
     failures.push(`${THEME_CSS}  could not locate the \`@theme inline { … }\` block`)
   } else {
@@ -341,7 +409,7 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
       .filter((f) => f.endsWith('.css'))
       .sort()) {
       const path = `${PRESETS_DIR}/${file}`
-      const css = readFileSync(path, 'utf8')
+      const css = stripCssComments(readFileSync(path, 'utf8'))
       const root = extractBlock(css, ':root')
       if (!root) {
         failures.push(`${path}  no \`:root { … }\` block — a preset must declare its tokens there`)
@@ -390,21 +458,47 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
 // force every future README section into the /docs list.
 const CONFIG_REFERENCE = 'src/shell/docs/config-reference.tsx'
 const README = 'README.md'
+
+/** The `const RECIPES = [...] as const` array literal, through the optional `as const`. */
+function findRecipesArray(sf) {
+  let found = null
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'RECIPES' &&
+      node.initializer
+    ) {
+      let init = node.initializer
+      while (ts.isAsExpression(init) || ts.isParenthesizedExpression(init)) init = init.expression
+      if (ts.isArrayLiteralExpression(init)) found = init
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+  return found
+}
 if (!existsSync(CONFIG_REFERENCE) || !existsSync(README)) {
   failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
 } else {
-  const refSrc = readFileSync(CONFIG_REFERENCE, 'utf8')
-  const recipesBlock = refSrc.match(/const RECIPES\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1]
-  if (!recipesBlock) {
+  // Read off the AST, not with a regex over the source text. The regex collected every quoted
+  // string between `const RECIPES = [` and `] as const`, which includes one written inside a
+  // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
+  // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
+  // failure in the only machine gate. Array elements are array elements; comments are trivia.
+  const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
+  if (!recipesArray) {
     // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
     // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
-    // something this regex misses is exactly when the coupling stops being watched.
+    // something this lookup misses is exactly when the coupling stops being watched.
     failures.push(
       `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
         `verifies every entry names a real README '## ' heading and cannot run without it`,
     )
   } else {
-    const recipes = [...recipesBlock.matchAll(/(['"])((?:(?!\1)[^\\]|\\.)*)\1/g)].map((m) => m[2])
+    const recipes = recipesArray.elements
+      .filter((el) => ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el))
+      .map((el) => el.text)
     if (recipes.length === 0) {
       failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
     }
