@@ -89,6 +89,24 @@ it safe could stop being true — which already happened three times during this
   line gains an inline object value.**
 - `EXPECTED_HREFLANG` is a hardcoded `Set(['mn', 'en', 'x-default'])`. Adding a third locale means
   updating it, and it will not remind you.
+- **A manifest reaching one of its own components collapses that block's split, and only the
+  `contact` instance is machine-detected.** `manifest.ts` files must import no components: they are
+  imported eagerly by `registry.ts` (the head, JSON-LD and nav need `copy`/`nav`/`schema`
+  synchronously), so a component reachable from one lands in the main chunk along with everything
+  it shares. The `bundle-split` assertion detects this only when the offending manifest is
+  `contact`'s, because it works by watching for `react-hook-form` markers in the entry chunk.
+
+  Measured, making `hero`'s manifest reach `HeroCentered`: main chunk **334,593 → 459,705 B**, the
+  123,303 B `motion` chunk absorbed into it, `contact`'s chunk unchanged at ~96 KB with
+  `react-hook-form` still outside the entry — and `pnpm verify`, `pnpm conventions`, `tsc` and
+  `verify-build.mjs` **all pass**. A 125 KB regression to the chunk every page downloads, fully
+  green.
+
+  A general check would need one of: comparing the entry chunk's size against a recorded baseline
+  (simple, but needs a tolerance and a place to store the number), or asserting from
+  `dist/client/.vite/manifest.json` that each block's component modules resolve only into that
+  block's own `variants-*` chunk and never into the entry. Not built this round — recorded so the
+  next person does not rediscover it by measuring a slow page.
 - **The block-chunk filename convention is load-bearing and undeclared.** The preload assertion
   matches `/\/variants-[^/]+\.js$/`, which holds only because every block's component module is
   named `variants.ts` and Vite derives the chunk name from it. A future `chunkFileNames` or

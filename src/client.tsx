@@ -47,7 +47,9 @@ async function hydrate() {
   // blocks were never fetched, throwing from `getVariants` with no build-time signal). This is a
   // deliberate design property of the kit, not an oversight — and it's enforced, not just
   // documented: `scripts/check-conventions.mjs` fails the build on a `Link` import from
-  // `@tanstack/react-router` anywhere in `src/blocks` or `src/shell`.
+  // `@tanstack/react-router` anywhere in `src/blocks`, `src/shell` or `src/routes`. `src/routes`
+  // matters most of the three — `__root.tsx` is where a global nav or skip-link would naturally
+  // go, and it was the one directory the rule used to exempt.
   const ids = blocksForCurrentUrl()
   const results = await Promise.allSettled(ids.map((id) => blockModules[id]?.()))
 

@@ -40,12 +40,12 @@ pnpm dev
 | `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
 | `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
 | `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
-| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Comments are blanked before matching, so prose describing a utility is not a violation. |
+| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Rules are matched against parsed `className` contents and JSX element names, never raw source text, so prose describing a utility cannot be a violation and cannot hide one. |
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
-| `pnpm lighthouse` | `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a hard `error` at `minScore: 0.85`. |
-| `pnpm lighthouse:desktop` | Same, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error` at `minScore: 0.95`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
+| `pnpm lighthouse` | **Rebuilds the default config**, then `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. The rebuild is not optional: `lhci` measures whatever is already in `dist/client`, and the smoke scripts leave a *different* config's output there — run in gate order, this used to measure the one-page, light-only, unanimated build while asserting the default config's budget. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a hard `error` at `minScore: 0.85`. |
+| `pnpm lighthouse:desktop` | Same, rebuild included, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error` at `minScore: 0.95`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
 
 `node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
 `.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
@@ -67,9 +67,13 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 
   The split is what makes per-block code-splitting possible, and it is load-bearing rather than
   stylistic. `registry.ts` imports every manifest **eagerly**, because the `<head>`, the JSON-LD
-  graph and the nav all need `copy`/`nav`/`schema` synchronously — so a single component import
-  inside a `manifest.ts` puts every block's components back on that same eager chain and collapses
-  the split, silently and with no build error. Components are reached only through
+  graph and the nav all need `copy`/`nav`/`schema` synchronously — so a component reachable from a
+  `manifest.ts` joins that eager chain and lands in the main chunk. It pulls **that block's own
+  components, plus anything they share**, not every block's: a `hero` manifest reaching
+  `HeroCentered` moves hero's components *and* the 123 KB `motion` chunk they import, while
+  `contact` keeps its own chunk. That is worse than it sounds, because it is silent — no build
+  error, and the machine gate stays green (see [Adding a block](#adding-a-block)). Components are
+  reached only through
   `src/blocks/block-modules.ts` (dynamic `import()`, client) and `src/blocks/variants.all.ts`
   (static, server). See
   [Known limitations](docs/superpowers/known-limitations.md#resolved-pre-hydration-block-imports)
@@ -97,8 +101,9 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 
 ## Adding a block
 
-Seven edits: four files inside the block's own folder, three registration points outside it.
-Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
+Eight steps: five inside the block's own folder (two copy files, the manifest, the variants map,
+and the component `.tsx` files themselves), three registration points outside it, plus the page
+reference. Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
 
 1. **Copy a block folder**, e.g. `src/blocks/cta/` → `src/blocks/testimonials/`, and rename the
    component files (`cta-banner.tsx` → `testimonials-grid.tsx`, …).
@@ -195,17 +200,26 @@ worth knowing precisely, because the obvious mistakes are all caught and the rem
 A bare re-export in a `manifest.ts` (`export { X } from './x'`) is harmless — Rollup tree-shakes
 it, measured at **zero** change to the main chunk. What is not harmless is a manifest export that
 *uses* a component value and is itself reachable from `registry.ts`'s eager import chain. That
-compiles cleanly, passes `pnpm conventions`, builds, and passes `verify-build.mjs` — while moving
-every block's components back into the main chunk. Measured on a five-block tree:
+compiles cleanly, passes `pnpm conventions`, builds, and passes `verify-build.mjs`.
 
-| | main chunk |
-|---|---|
-| split intact | 334 KB raw / 108 KB gzip |
-| one manifest reaching a component from an eager export | **459 KB raw / 149 KB gzip** |
+What moves is **that block's own components and the chunks they share with others** — not every
+block's. Measured, making `hero`'s manifest reach `HeroCentered`:
 
-The per-block `variants-*.js` chunks stay in the build, so nothing looks obviously wrong — they
-are just no longer where the weight is. Keep `manifest.ts` free of component imports entirely;
-that is the rule, and it is the rule *because* nothing below it will tell you.
+| | main chunk | `motion` chunk | `contact` chunk |
+|---|---|---|---|
+| split intact | 334,593 B | 123,303 B | 96,395 B |
+| `hero` manifest reaches a component | **459,705 B** | **absorbed into main** | 96,323 B (unaffected) |
+
+So one careless manifest costs the main chunk that block's components plus their shared
+dependencies — here 125 KB, most of it the `motion` library that hero, features and cta all use.
+Every other block keeps its own chunk, which is exactly why the gate does not notice: the
+`bundle-split` assertion in `verify-build.mjs` watches for `react-hook-form` reaching the entry
+chunk, and `contact` is untouched by a `hero` mistake. **`pnpm verify`, `pnpm conventions` and
+`tsc` all pass on the 459 KB build.** Keep `manifest.ts` free of component imports; that is the
+rule, and it is the rule *because* nothing below it will tell you.
+
+The per-block `variants-*.js` chunks all stay in the build, including the affected block's — they
+are just no longer where its weight is. Nothing looks obviously wrong.
 
 ## Adding a variant to an existing block
 
