@@ -1,9 +1,29 @@
-@import "tailwindcss";
+/* `source(none)` + an explicit `@source`, rather than Tailwind v4's automatic detection.
+   Automatic detection scans the whole repository, and its scanner is deliberately naive: it looks
+   for anything that could be a class name, in any file type, with no notion of comments or prose.
+   That meant a MARKDOWN PLAN DOCUMENT in `docs/` kept 13 dead utilities alive in the shipped
+   stylesheet — a stock red, a stock green and a stock shadow among them — long after the code
+   stopped using any of them, and rewording the code comments that also named them did not help,
+   because the scanner was never reading only the code. The static HTML and CSS in `dist/client`
+   are the product, so prose must not be able to add bytes to it. Restricting the scan to the
+   source trees makes that structural instead of a rule nobody can enforce: 26,424 -> 24,595 bytes,
+   with 13 selectors removed and none added.
+
+   Both source trees are listed. `configs/` holds no components today (only `pages.config.ts` and
+   `site.config.ts`, by design), but `KIT_CONFIG=onepage` is a supported build and a config that
+   ever did render a class must not silently lose its styles. */
+@import "tailwindcss" source(none);
 
 @import "@fontsource-variable/inter/wght.css";
 @import "@fontsource-variable/manrope/wght.css";
 
 @import "./presets/editorial.css";
+
+/* After every `@import`, not between them: CSS requires `@import` to precede all other at-rules,
+   and Biome's `noInvalidPositionAtImportRule` fails the build otherwise. Tailwind reads `@source`
+   from anywhere in the file. */
+@source "../**/*.{ts,tsx}";
+@source "../../configs/**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

@@ -31,9 +31,11 @@
   --c-primary-foreground: oklch(99.2% 0.002 260);
   --c-ring: oklch(52% 0.17 258);
 
-  /* Status. Part of the preset surface, not a hardcoded `text-red-600`/`text-green-700`: a
-     Tailwind palette colour does not move when the preset swaps, and both read poorly against
-     either preset's dark background. Lighthouse never sees these — the live region is `sr-only`
+  /* Status. Part of the preset surface, not a hardcoded stock palette colour: a fixed palette
+     colour does not move when the preset swaps, and the red/green pair this replaced read poorly
+     against either preset's dark background. (The old class names are not written out here —
+     Tailwind v4's scanner is comment-blind, so naming them would keep the dead utilities in the
+     built stylesheet.) Lighthouse never sees these — the live region is `sr-only`
      until a submission resolves — so they are chosen by measurement rather than by eye.
      Measured against every surface this text can land on (background/muted/accent), worst case:
      destructive 5.33:1, success 5.42:1, both over the 4.5:1 AA floor for normal-weight text. */
