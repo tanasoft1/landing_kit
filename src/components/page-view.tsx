@@ -10,10 +10,8 @@ import type { ResolvedPage } from '@/lib/pages/resolve-request'
 export function PageView({ resolved }: { resolved: ResolvedPage<BlockId> }) {
   const resolve = createResolver(resolved, pages, site)
 
-  // No hidden page-title <h1> fallback here: `RenderBlocks` assigns `headingLevel={1}` to the
-  // page's first block, so whichever block opens the page renders the page's single, real,
-  // visible <h1> itself. A hidden fallback would either double up (first block already has one)
-  // or paper over a real gap (a first block with no heading at all — see that block's own file).
+  // No hidden page-title <h1> fallback: `RenderBlocks` gives the first block `headingLevel={1}`,
+  // so it renders the page's one real, visible <h1> itself.
   return (
     <>
       <Header site={site} locale={resolved.locale} path={resolved.path} resolve={resolve} />

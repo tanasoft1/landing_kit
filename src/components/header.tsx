@@ -83,11 +83,10 @@ export function Header({
           </summary>
           <nav
             aria-label={navLabel}
-            // `shadow-card`, not one of Tailwind's stock shadow utilities: `shadow-card` maps to
-            // the preset's own `--elevation-card`, so the mobile menu's elevation moves with a
-            // preset swap the way every other surface does. A stock shadow is a fixed value that
-            // would not. (The stock utility's name is deliberately not written here — Tailwind
-            // v4's scanner is comment-blind, so naming it would keep it in the built stylesheet.)
+            // `shadow-card`, not a stock Tailwind shadow: it maps to the preset's own
+            // `--elevation-card`, so it moves with a preset swap; a stock shadow is fixed and
+            // wouldn't. (The stock utility's name isn't written here — Tailwind's scanner is
+            // comment-blind, and naming it would keep it in the built CSS.)
             className="border-border bg-background rounded-base shadow-card absolute right-0 z-50 mt-2 flex w-56 flex-col border p-3 text-sm"
           >
             {pageLinks}

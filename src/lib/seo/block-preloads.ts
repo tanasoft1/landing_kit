@@ -1,10 +1,6 @@
-// Namespace import, not named (`import { existsSync, readFileSync } from 'node:fs'`): Vite's
-// client-build externalization of node builtins produces a stub module with NO named exports at
-// all, so a named import fails Rollup's static binding check at parse time — before the
-// `import.meta.env.SSR` dead-branch elimination below ever gets a chance to remove the usage. A
-// namespace import defers the property lookup (`nodeFs.existsSync`) to a plain runtime member
-// access, which Rollup does not statically validate, so the client build resolves cleanly; the
-// access itself is still never reached there once the dead branch is stripped.
+// Namespace import, not named: Vite's client-build stub for node builtins has no named exports,
+// so a named import fails Rollup's static check before dead-branch elimination (below) can
+// remove the usage. A namespace import defers the lookup to a runtime member access instead.
 import * as nodeFs from 'node:fs'
 import type { BlockId } from '@/blocks/registry'
 import { OUT_DIR } from './out-dir'
@@ -23,13 +19,11 @@ let manifestCache: ViteManifest | null | undefined
 
 function loadManifest(): ViteManifest | null {
   if (manifestCache !== undefined) return manifestCache
-  // Derived from the shared `OUT_DIR` rather than restating `'dist/client'` here: a changed output
-  // directory would otherwise leave this looking in the old place, and a missing manifest is
-  // indistinguishable from the normal `pnpm dev` case below — the preloads would just stop.
+  // Derived from shared `OUT_DIR`, not restated, so a changed output dir can't leave this
+  // looking in the old place (a missing manifest looks identical to the `pnpm dev` case below).
   const manifestPath = `${OUT_DIR}/.vite/manifest.json`
   if (!nodeFs.existsSync(manifestPath)) {
-    // `pnpm dev` runs this same server code path with no client build on disk at all — a
-    // missing manifest is the normal case there, not an error.
+    // `pnpm dev` has no client build on disk — a missing manifest is normal there, not an error.
     manifestCache = null
     return manifestCache
   }
@@ -42,21 +36,14 @@ function loadManifest(): ViteManifest | null {
 }
 
 /**
- * Server-only. Root-relative hrefs for the `<link rel="modulepreload">` entries a page needs, so
- * its block chunks — and anything THEY statically import, e.g. the shared `motion` chunk that
- * hero/features/cta variants all pull in — fetch in parallel with the main chunk instead of being
- * discovered only after it has downloaded *and executed*. Each undiscovered hop is a full round
- * trip under Lighthouse's throttled-mobile network model, which is what `src/client.tsx`'s
- * pre-hydration `await` was paying for without this.
+ * Server-only. Root-relative hrefs for `<link rel="modulepreload">`, so a page's block chunks
+ * (and what they statically import, e.g. the shared `motion` chunk) fetch in parallel with the
+ * main chunk instead of being discovered only after it downloads and executes.
  *
- * Guarded by `import.meta.env.SSR`, NOT a `.server.ts` filename: this module is reachable from
- * `build-head.ts`, which is shared route code (TanStack Router re-evaluates a route's `head()` on
- * client-side navigation too, not just on the server), so it cannot use the harder
- * import-protection guard without failing the client build outright. On the client this returns
- * `[]` before touching `node:fs` — Vite replaces `import.meta.env.SSR` with the literal `false`
- * there, so the whole branch (`node:fs` included) is dead code and gets stripped; confirmed
- * empirically (see task report) that neither `node:fs` nor this function's body survives in the
- * client bundle.
+ * Guarded by `import.meta.env.SSR`, not a `.server.ts` filename: this is reachable from
+ * `build-head.ts`, shared route code the client also runs, so the stricter import-protection
+ * guard would fail the client build. Vite replaces `import.meta.env.SSR` with `false` on the
+ * client, so the branch (and `node:fs`) is dead code and gets stripped — confirmed empirically.
  */
 export function blockPreloadHrefs(blockIds: readonly BlockId[]): string[] {
   if (!import.meta.env.SSR) return []
@@ -72,10 +59,9 @@ export function blockPreloadHrefs(blockIds: readonly BlockId[]): string[] {
     visited.add(key)
     const chunk = manifest?.[key]
     if (!chunk) return
-    // The client entry is already loaded via the page's own <script> tag — preloading it again
-    // is redundant. Its manifest record has no `imports` (only `dynamicImports`, which this never
-    // follows — that field lists EVERY block's chunk, and following it would undo the split by
-    // preloading blocks the page doesn't use), so recursion stops there on its own regardless.
+    // The client entry is already loaded via the page's <script> tag, so preloading it again is
+    // redundant. Never follows `dynamicImports` either — that lists EVERY block's chunk, and
+    // following it would preload blocks the page doesn't use.
     if (!chunk.isEntry) files.add(chunk.file)
     for (const importee of chunk.imports ?? []) visit(importee)
   }

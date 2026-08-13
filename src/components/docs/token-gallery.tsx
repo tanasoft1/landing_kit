@@ -16,12 +16,10 @@ const COLOR_TOKENS = [
 
 const TYPE_TOKENS = ['display', 'h2', 'h3', 'lead'] as const
 
-// Tailwind's source scanner only generates a utility for a class name it can see written out
-// literally somewhere in the source text — a template literal like `bg-${t}` is invisible to it,
-// so the utility never ships and the swatch renders blank. These two lookups exist so every class
-// this component uses appears as a literal string, once, right here. The `Record<(typeof
-// TOKENS)[number], string>` type (not `Record<string, string>`) means adding a token to the array
-// above without adding its class here is a compile error, not a blank swatch discovered by eye.
+// Tailwind's scanner needs a class name written literally — `bg-${t}` is invisible to it and
+// ships nothing. These lookups make every class appear as a literal string once, here. Typed as
+// `Record<(typeof TOKENS)[number], string>`, not `Record<string, string>`, so a token added
+// above without its class here is a compile error, not a blank swatch found by eye.
 const COLOR_SWATCH_CLASS: Record<(typeof COLOR_TOKENS)[number], string> = {
   background: 'bg-background',
   foreground: 'bg-foreground',
@@ -49,15 +47,9 @@ export function TokenGallery() {
       <div>
         <h3 className="text-h3 font-semibold">Colour</h3>
         {/*
-          The instruction used to say "Toggle the theme to see the dark palette" on a page that
-          rendered no toggle — `DocsPage` renders no `<Header>`, which is where the site's toggle
-          lives. Rather than reword it into an instruction to go and find one somewhere else, the
-          toggle is rendered here, next to the swatches it changes.
-
-          In a single-mode build (`site.theme.mode` is not `'both'`) `@/theme` resolves to
-          `theme.single.tsx`, whose `ThemeToggle` renders `null` and imports no implementation —
-          so this adds no theme-switching code to a build that has none, and the sentence below
-          adjusts with it rather than promising a control that cannot exist.
+          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the
+          swatches it changes. In a single-mode build `@/theme` resolves to `theme.single.tsx`,
+          whose `ThemeToggle` renders `null` — so this adds no theme-switching code where there is none.
         */}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground text-sm">

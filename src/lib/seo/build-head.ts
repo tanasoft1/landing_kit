@@ -9,16 +9,10 @@ import type { Locale, PageConfig, SiteConfig } from '@/lib/types'
 import { blockPreloadHrefs } from './block-preloads'
 import { buildJsonLd } from './json-ld'
 
-// `h1`/`h2`/`h3` render in the display face and everything else in the body face (see
-// `theme.css`), so the above-the-fold hero — heading AND lead paragraph, both candidates for
-// FCP/LCP — can't paint until its two font subsets arrive. Discovery through the `@font-face`
-// rule alone happens only after the render-blocking stylesheet is fetched *and* parsed, a
-// sequential round trip that Lighthouse's throttled-mobile preset counts as most of the
-// hero's "Render Delay" (confirmed against `pnpm lighthouse` while chasing the performance
-// budget in Task 9). Preloading the locale-appropriate subsets lets the browser fetch them in
-// parallel with the stylesheet instead of waiting for it. Mongolian needs the cyrillic
-// subset (it uses Cyrillic-range letters like `ө`/`ү` outside Latin), English the latin one;
-// this only covers the two locales this boilerplate ships with.
+// The above-the-fold hero can't paint until its fonts arrive, and `@font-face` discovery alone
+// waits for the render-blocking stylesheet to fetch AND parse first — most of Lighthouse's
+// "Render Delay" on throttled mobile. Preloading the locale's subset fetches it in parallel
+// instead. Mongolian needs cyrillic (`ө`/`ү` are outside Latin), English needs latin.
 const CRITICAL_FONTS_BY_LOCALE: Partial<Record<Locale, string[]>> = {
   mn: [manropeCyrillic, interCyrillic],
   en: [manropeLatin, interLatin],
@@ -36,19 +30,11 @@ export function buildHead(
   // One separator for every page, so titles stay visually consistent across the site.
   const title = `${seo.title} · ${site.name}`
 
-  // `hreflang`, not the JSX-conventional `hrefLang`: TanStack's <link> asset spreads these
-  // attrs straight onto a React element, and React does not remap `hrefLang` to the real
-  // HTML attribute name the way it does e.g. `htmlFor` or `crossOrigin` — it passes an
-  // unrecognized-cased key through verbatim, so `hrefLang` would ship literally as
-  // `hrefLang="..."` in the markup instead of `hreflang="..."`.
-  //
-  // Because of that same lack of remapping, React's dev-only DOM validator doesn't
-  // recognize this key either, and logs `Invalid DOM property 'hreflang'. Did you mean
-  // 'hrefLang'?` on every render in `pnpm dev`. That warning is expected and dev-only —
-  // do not "fix" it by renaming this key to `hrefLang`; doing so would silently reintroduce
-  // the wrong-case markup this comment exists to prevent. `scripts/verify-build.mjs`
-  // asserts the built HTML contains the lowercase `hreflang` attribute, so a regression
-  // here (in either direction) fails the build, not just the dev console.
+  // `hreflang`, not the JSX-conventional `hrefLang`: TanStack's <link> spreads these attrs
+  // straight onto a React element, which does not remap this one the way it does `htmlFor` —
+  // `hrefLang` here would ship literally as wrong-case markup. This also triggers React's
+  // dev-only "Invalid DOM property" warning on every render; that's expected, don't rename to
+  // "fix" it. `verify-build.mjs` asserts the built HTML has lowercase `hreflang`.
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
     hreflang: l,
