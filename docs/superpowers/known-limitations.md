@@ -135,7 +135,7 @@ it safe could stop being true — which already happened three times during this
 - **The `<Link>` ban scans `.tsx` files only.** `walkFiles` filters on `p.endsWith('.tsx')`, so a
   `.ts` module that re-exports `Link` — `export { Link } from '@tanstack/react-router'` in a
   barrel file, say — is invisible to it, and every `.tsx` consumer then imports `Link` from a path
-  the check does not recognise. The rule now covers `src/blocks`, `src/shell` **and** `src/routes`
+  the check does not recognise. The rule now covers `src/blocks`, `src/components` **and** `src/routes`
   (that last gap closed this round), but the file-extension gap is still open.
 - **The layout rules also scan `.tsx` only**, with the same consequence for a class string defined
   in a `.ts` file and imported.
@@ -148,15 +148,15 @@ it safe could stop being true — which already happened three times during this
 
 Each is low-risk and was judged not worth churn during the build.
 
-- `src/shell/chrome/header.tsx` — three hardcoded `locale === 'mn'` ternaries for aria-labels,
+- `src/components/header.tsx` — three hardcoded `locale === 'mn'` ternaries for aria-labels,
   rather than a config-owned label map. Fine while the system is bilingual-only.
-- `src/shell/pages/resolve-link.ts` — `createResolver` imports `registry` at module scope instead
-  of receiving it as a parameter. This is a shell→blocks dependency, inverting the layering every
-  other shell file respects. Worth a parameter if this file is touched again.
-- `src/shell/seo/json-ld.ts` — `BreadcrumbList`'s home crumb assumes `pages[0]` is the home page by
+- `src/lib/pages/resolve-link.ts` — `createResolver` imports `registry` at module scope instead
+  of receiving it as a parameter. This is a `src/lib`→`src/blocks` dependency, inverting the
+  layering every other file in `src/lib` respects. Worth a parameter if this file is touched again.
+- `src/lib/seo/json-ld.ts` — `BreadcrumbList`'s home crumb assumes `pages[0]` is the home page by
   array position rather than matching `path === '/'`. True in both current configs; silent under a
   future reorder.
-- `src/shell/theme/theme-script.tsx` — the no-flash script's `|| defaultMode` fallback is
+- `src/components/theme-script.tsx` — the no-flash script's `|| defaultMode` fallback is
   unreachable, because the preceding `matchMedia` ternary always returns a truthy string. If
   `theme.default` is meant to override the OS preference as the initial state, it currently does
   not.
