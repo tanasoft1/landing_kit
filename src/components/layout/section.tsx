@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Surface } from '@/shell/types'
+import type { Surface } from '@/lib/types'
 
 const SURFACE_CLASS: Record<Surface, string> = {
   default: 'bg-background text-foreground',

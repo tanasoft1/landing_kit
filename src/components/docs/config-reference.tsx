@@ -1,6 +1,6 @@
 import { pages } from '@/config/pages.config'
 import { site } from '@/config/site.config'
-import { enumerateUrls } from '@/shell/pages/enumerate'
+import { enumerateUrls } from '@/lib/pages/enumerate'
 
 // Prose describing how to do these tasks lives in exactly one place: the README. Restating it
 // here would be a second copy that drifts the moment the first one changes — this section names

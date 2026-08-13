@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { BlockProps } from '@/shell/types'
+import type { BlockProps } from '@/lib/types'
 import { ContactForm } from './contact-form'
 import type { ContactCopy } from './copy.mn'
 import type { ContactVariant } from './manifest'

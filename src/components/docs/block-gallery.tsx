@@ -1,9 +1,9 @@
 import type { BlockId } from '@/blocks/registry'
 import { registry } from '@/blocks/registry'
 import { getVariants } from '@/blocks/variant-registry'
+import { Container } from '@/components/layout/container'
+import { Section } from '@/components/layout/section'
 import { site } from '@/config/site.config'
-import { Container } from '@/shell/layout/container'
-import { Section } from '@/shell/layout/section'
 
 // A stub, deliberately: this page is a gallery, not a real page, and nothing in it should
 // navigate. A real `resolve()` throws for any target not present on the current page — every

@@ -1,4 +1,4 @@
-import type { SiteConfig } from '@/shell/types'
+import type { SiteConfig } from '@/lib/types'
 
 // Annotated, not `satisfies` — see the note in src/config/site.config.ts. This file is the
 // reason: with `satisfies`, `mode: 'light'` narrows to a literal and every

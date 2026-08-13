@@ -1,7 +1,7 @@
 import { type BlockId, registry } from '@/blocks/registry'
-import { localePath } from '@/shell/pages/enumerate'
-import type { ResolvedPage } from '@/shell/pages/resolve-request'
-import type { JsonLdNode, PageConfig, SiteConfig } from '@/shell/types'
+import { localePath } from '@/lib/pages/enumerate'
+import type { ResolvedPage } from '@/lib/pages/resolve-request'
+import type { JsonLdNode, PageConfig, SiteConfig } from '@/lib/types'
 
 function organizationNode(site: SiteConfig): JsonLdNode {
   const { organization: org } = site

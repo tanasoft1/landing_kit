@@ -1,4 +1,4 @@
-import type { BlockManifest } from '@/shell/types'
+import type { BlockManifest } from '@/lib/types'
 import { contact } from './contact/manifest'
 import { cta } from './cta/manifest'
 import { features } from './features/manifest'
@@ -19,7 +19,7 @@ const manifests = {
   // a manifest's `BlockSchema<HeroCopy>` would not be assignable to the `BlockSchema<unknown>`
   // that `BlockManifest<unknown, unknown>` demands, so every concrete manifest would fail this
   // `satisfies` check. (Components moved off this type entirely — see `variantNames` on
-  // `BlockManifest` in `@/shell/types` and `@/blocks/block-modules.ts` — but `schema` keeps the
+  // `BlockManifest` in `@/lib/types` and `@/blocks/block-modules.ts` — but `schema` keeps the
   // same problem alive.)
   // biome-ignore lint/suspicious/noExplicitAny: unknown breaks assignability here (see above); any stays bivariant.
 } satisfies Record<string, BlockManifest<any, any>>

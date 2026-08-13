@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { BlockProps } from '@/shell/types'
+import type { BlockProps } from '@/lib/types'
 import type { BlockId } from './registry'
 
 // biome-ignore lint/suspicious/noExplicitAny: one map holds every block's differently-typed copy.
