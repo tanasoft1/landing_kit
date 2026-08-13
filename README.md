@@ -40,7 +40,7 @@ pnpm dev
 | `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
 | `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
 | `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
-| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Rules are matched against parsed `className` contents and JSX element names, never raw source text, so prose describing a utility cannot be a violation and cannot hide one. |
+| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
@@ -101,9 +101,10 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 
 ## Adding a block
 
-Eight steps: five inside the block's own folder (two copy files, the manifest, the variants map,
-and the component `.tsx` files themselves), three registration points outside it, plus the page
-reference. Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
+Eight steps: **four** inside the block's own folder (steps 1-4 — the component `.tsx` files
+themselves are renamed and rewritten in step 1, then the copy files, the manifest and the
+variants map), **three** registration points outside it (steps 5-7), and **one** page reference
+(step 8). Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
 
 1. **Copy a block folder**, e.g. `src/blocks/cta/` → `src/blocks/testimonials/`, and rename the
    component files (`cta-banner.tsx` → `testimonials-grid.tsx`, …).

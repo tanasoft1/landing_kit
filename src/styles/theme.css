@@ -5,9 +5,18 @@
    stylesheet — a stock red, a stock green and a stock shadow among them — long after the code
    stopped using any of them, and rewording the code comments that also named them did not help,
    because the scanner was never reading only the code. The static HTML and CSS in `dist/client`
-   are the product, so prose must not be able to add bytes to it. Restricting the scan to the
-   source trees makes that structural instead of a rule nobody can enforce: 26,424 -> 24,595 bytes,
-   with 13 selectors removed and none added.
+   are the product, so prose must not be able to add bytes to it: 26,424 -> 24,595 bytes, with 13
+   selectors removed and none added.
+
+   What this does and does not buy, precisely — it is a narrowing, not a guarantee. `docs/`,
+   `README.md`, plans, reports and `.css` files can no longer contribute anything. A comment inside
+   a scanned source file (any `.ts` or `.tsx` under the globs below) still can: appending
+   `// … text-red-600 shadow-lg` to a component and rebuilding puts both classes straight back
+   into the stylesheet (measured). That is exactly why
+   the comments in `contact-form.tsx`, `header.tsx` and `editorial.css` were reworded not to name
+   the utilities they replaced, and why the next person writing about a class in a component
+   comment should do the same. (Naming them here is safe: `.css` is outside the globs below, which
+   is itself the demonstration.)
 
    Both source trees are listed. `configs/` holds no components today (only `pages.config.ts` and
    `site.config.ts`, by design), but `KIT_CONFIG=onepage` is a supported build and a config that

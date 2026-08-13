@@ -4,8 +4,16 @@ import { type HeroCopy, mn } from './copy.mn'
 
 // No component import here — deliberately. See `./variants.ts` for the component map and
 // `~/blocks/block-modules.ts` for why: this manifest is imported eagerly by `registry.ts` because
-// the SEO layer needs `copy`/`nav`/`schema` synchronously, but a component import here would put
-// every block's component right back on that same eager chain, undoing the split.
+// the SEO layer needs `copy`/`nav`/`schema` synchronously, so a component reachable from here
+// joins that eager chain and lands in the main chunk.
+//
+// What that costs is THIS block's components plus whatever they share — not every block's.
+// Measured, making this manifest reach `HeroCentered`: main chunk 334,593 -> 459,705 B, because
+// hero's components drag in the 123,303 B `motion` chunk that features and cta also use. `contact`
+// keeps its own chunk either way. Nothing catches it: `pnpm verify`, `pnpm conventions`, `tsc` and
+// `verify-build.mjs` are all green on the 459 KB build, because the `bundle-split` assertion looks
+// for `react-hook-form` in the entry chunk and only `contact`'s manifest could put it there.
+// See docs/superpowers/known-limitations.md.
 //
 // The variant union is DERIVED from this array (`(typeof variantNames)[number]` below), not
 // hand-written as `'centered' | 'split'` alongside it. `variantNames: readonly V[]` doesn't force
