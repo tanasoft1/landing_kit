@@ -565,7 +565,10 @@ git commit -m "docs: shorten comments to one or two lines each"
 - [ ] `pnpm verify`, `pnpm smoke:full`, `pnpm smoke:onepage` all exit 0
 - [ ] `pnpm lighthouse` and `pnpm lighthouse:desktop` both pass, no threshold moved
 - [ ] Built CSS hash matches the Task 1 Step 1 baseline
-- [ ] `git diff --stat src/styles/theme.css` is empty
+- [ ] ~~`git diff --stat src/styles/theme.css` is empty~~ — **struck during execution.** This was
+  written for Task 2, where the file must not move. Task 3 Step 3 explicitly authorises shortening
+  the comments in it, so the two cannot both hold. The constraint that actually matters for
+  `theme.css` is the line above it: the built CSS hash. That one held throughout.
 - [ ] Each convention rule was watched failing after its path moved, with output pasted in the report
 - [ ] The Biome `noRestrictedImports` rule was watched failing under its new `@/` names
 - [ ] `README.md` names the new paths and the new alias

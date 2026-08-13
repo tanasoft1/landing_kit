@@ -135,8 +135,8 @@ it safe could stop being true — which already happened three times during this
 - **The `<Link>` ban scans `.tsx` files only.** `walkFiles` filters on `p.endsWith('.tsx')`, so a
   `.ts` module that re-exports `Link` — `export { Link } from '@tanstack/react-router'` in a
   barrel file, say — is invisible to it, and every `.tsx` consumer then imports `Link` from a path
-  the check does not recognise. The rule now covers `src/blocks`, `src/components` **and** `src/routes`
-  (that last gap closed this round), but the file-extension gap is still open.
+  the check does not recognise. The rule covers `src/blocks`, `src/components` **and** `src/routes`
+  (the `src/routes` gap was closed during Plan 2), but the file-extension gap is still open.
 - **The layout rules also scan `.tsx` only**, with the same consequence for a class string defined
   in a `.ts` file and imported.
 - **`font-size: 0` is not in the hidden-content scan** (`verify-build.mjs`). `transform: scale(0)`
@@ -160,11 +160,17 @@ single comment and from no `className` anywhere in the tree:
 | `src/components/layout/container.tsx:8` | `ml-0` | `margin-left:0` |
 | `src/blocks/features/features-grid.tsx:18` | `inline` (inside `@theme inline`) | `display:inline` |
 
-About 74 bytes of dead CSS. The cost is not the bytes — it is that **editing a comment silently
-changes build output**, discoverable only by rebuilding and hashing. Nothing in `pnpm verify`,
-`check-conventions.mjs` or `verify-build.mjs` detects it. This was found the hard way during the
-Plan 3a comment-shortening pass, where three shortened comments dropped their tokens and the CSS
-came out 74 bytes smaller with every gate still green.
+Exactly 74 bytes of dead CSS: `.-left-\[9999px\]{left:-9999px}` (31 B), `.ml-0{margin-left:0}`
+(20 B), `.inline{display:inline}` (23 B).
+
+**All three predate Plan 3a.** They are on `b77f0ed` with the same `@source` globs, so those bytes
+were already shipping. The Plan 3a comment-shortening pass is what *exposed* them: three shortened
+comments dropped their tokens, the CSS came out 74 bytes smaller, and every gate stayed green. Read
+that as the byte-identity constraint working, not failing.
+
+The cost is not the bytes — it is that **editing a comment silently changes build output**,
+discoverable only by rebuilding and hashing. Nothing in `pnpm verify`, `check-conventions.mjs` or
+`verify-build.mjs` detects it.
 
 `theme.css` itself is outside the globs — `.css` matches neither pattern — which is why the rule
 written at its head can safely name classes while component comments cannot.
