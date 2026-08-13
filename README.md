@@ -96,7 +96,7 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
     per-block-reference in `pages.config.ts`), and the block hands it straight to its own
     `<Section surface={surface}>`.
 - **Three swappable boundaries**, each an import alias resolved in `vite.config.ts` based on an
-  env flag, never on an `if` inside a component: `~/motion`, `~/theme`, `~/submit`. See
+  env flag, never on an `if` inside a component: `@/motion`, `@/theme`, `@/submit`. See
   [The three env flags](#the-three-env-flags).
 
 ## Adding a block
@@ -124,7 +124,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    a compile error, not a script's job.
 3. **`manifest.ts`** — metadata only, **no component imports**:
    ```ts
-   import type { BlockManifest } from '~/shell/types'
+   import type { BlockManifest } from '@/shell/types'
    import { en } from './copy.en'
    import { type TestimonialsCopy, mn } from './copy.mn'
 
@@ -147,7 +147,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    imported:
    ```ts
    import type { ComponentType } from 'react'
-   import type { BlockProps } from '~/shell/types'
+   import type { BlockProps } from '@/shell/types'
    import type { TestimonialsCopy } from './copy.mn'
    import type { TestimonialsVariant } from './manifest'
    import { TestimonialsGrid } from './testimonials-grid'
@@ -341,17 +341,17 @@ bytes, not a bug. `src/shell/seo/build-head.ts` preloads the current locale's cr
 
 ## The three env flags
 
-Set as environment variables at build/dev time; each swaps a `~/motion`, `~/theme`, or `~/submit`
+Set as environment variables at build/dev time; each swaps a `@/motion`, `@/theme`, or `@/submit`
 import alias in `vite.config.ts` — never branched on inside a component.
 
 | Flag | Values | Effect |
 |---|---|---|
-| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `~/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
-| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `~/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
-| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `~/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
+| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `@/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
+| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `@/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
+| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `@/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
 
 `site.theme.mode` (`'light' \| 'dark' \| 'both'`, set in `site.config.ts`, not an env flag) works
-the same way: `'both'` aliases `~/theme` to `src/theme.both.tsx` (toggle + no-flash script
+the same way: `'both'` aliases `@/theme` to `src/theme.both.tsx` (toggle + no-flash script
 included), anything else aliases it to `src/theme.single.tsx` — a single-mode build ships **no**
 theme-switching code at all, not merely a hidden toggle.
 
@@ -372,7 +372,7 @@ in-page anchor) instead of `/contact` (a page link) — same components, same co
 config.
 
 If you add a real second scaffolded config, remember: **`vite.config.ts` itself must branch on
-`KIT_CONFIG` too**, not just the `~/config` alias. The alias only affects app code that Vite
+`KIT_CONFIG` too**, not just the `@/config` alias. The alias only affects app code that Vite
 bundles; `vite.config.ts`'s own `pages`/`site` (used to build the TanStack Start `prerender.pages`
 list and to drive `emitSeoFiles`) are read directly by the config file at build-config-eval time,
 before any aliasing applies.
@@ -380,7 +380,7 @@ before any aliasing applies.
 ## The contact form
 
 `src/blocks/contact/contact-form.tsx` uses `react-hook-form` + `zod` (`submissionSchema` in
-`src/submit-schema.ts`), shared by both `~/submit` variants.
+`src/submit-schema.ts`), shared by both `@/submit` variants.
 
 ## Gotchas that cost real debugging time
 

@@ -1,4 +1,4 @@
-import { ThemeToggle } from '~/theme'
+import { ThemeToggle } from '@/theme'
 
 const COLOR_TOKENS = [
   'background',

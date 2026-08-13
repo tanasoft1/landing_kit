@@ -14,10 +14,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "~/motion": ["./src/motion.animated.tsx"],
-      "~/theme": ["./src/theme.both.tsx"],
-      "~/submit": ["./src/submit.endpoint.ts"],
-      "~/*": ["./src/*"]
+      "@/motion": ["./src/motion.animated.tsx"],
+      "@/theme": ["./src/theme.both.tsx"],
+      "@/submit": ["./src/submit.endpoint.ts"],
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "scripts", "configs", "vite.config.ts"]

@@ -1,9 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BlockGallery } from '~/shell/docs/block-gallery'
-import { ConfigReference } from '~/shell/docs/config-reference'
-import { TokenGallery } from '~/shell/docs/token-gallery'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
+import { BlockGallery } from '@/shell/docs/block-gallery'
+import { ConfigReference } from '@/shell/docs/config-reference'
+import { TokenGallery } from '@/shell/docs/token-gallery'
+import { Container } from '@/shell/layout/container'
+import { Section } from '@/shell/layout/section'
 
 // Deliberately absent from pages.config.ts, which is what excludes it from prerendering (the
 // `tanstackStart` plugin only prerenders `enumerateUrls(pages, site)`, and both

@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
-import type { MotionModule } from '~/motion.types'
+import type { MotionModule } from '@/motion.types'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 

@@ -1,11 +1,11 @@
 import { StartClient } from '@tanstack/react-start/client'
 import { StrictMode, startTransition } from 'react'
 import { hydrateRoot } from 'react-dom/client'
-import { blockModules } from '~/blocks/block-modules'
-import type { BlockId } from '~/blocks/registry'
-import { pages } from '~/config/pages.config'
-import { site } from '~/config/site.config'
-import { normalizePath, resolveRequest } from '~/shell/pages/resolve-request'
+import { blockModules } from '@/blocks/block-modules'
+import type { BlockId } from '@/blocks/registry'
+import { pages } from '@/config/pages.config'
+import { site } from '@/config/site.config'
+import { normalizePath, resolveRequest } from '@/shell/pages/resolve-request'
 
 // Overrides `@tanstack/react-start`'s generated client entry — a supported override, resolved by
 // filename convention (see `resolveEntry` in `@tanstack/start-plugin-core`). The installed

@@ -1,11 +1,11 @@
-import type { BlockId } from '~/blocks/registry'
-import { pages } from '~/config/pages.config'
-import { site } from '~/config/site.config'
-import { RenderBlocks } from '~/shell/blocks/render-blocks'
-import { Footer } from '~/shell/chrome/footer'
-import { Header } from '~/shell/chrome/header'
-import { createResolver } from '~/shell/pages/resolve-link'
-import type { ResolvedPage } from '~/shell/pages/resolve-request'
+import type { BlockId } from '@/blocks/registry'
+import { pages } from '@/config/pages.config'
+import { site } from '@/config/site.config'
+import { RenderBlocks } from '@/shell/blocks/render-blocks'
+import { Footer } from '@/shell/chrome/footer'
+import { Header } from '@/shell/chrome/header'
+import { createResolver } from '@/shell/pages/resolve-link'
+import type { ResolvedPage } from '@/shell/pages/resolve-request'
 
 export function PageView({ resolved }: { resolved: ResolvedPage<BlockId> }) {
   const resolve = createResolver(resolved, pages, site)

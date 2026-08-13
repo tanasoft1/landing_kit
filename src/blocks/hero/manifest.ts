@@ -1,4 +1,4 @@
-import type { BlockManifest } from '~/shell/types'
+import type { BlockManifest } from '@/shell/types'
 import { en } from './copy.en'
 import { type HeroCopy, mn } from './copy.mn'
 

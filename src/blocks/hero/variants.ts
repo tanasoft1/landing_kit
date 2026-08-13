@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { BlockProps } from '~/shell/types'
+import type { BlockProps } from '@/shell/types'
 import type { HeroCopy } from './copy.mn'
 import { HeroCentered } from './hero-centered'
 import { HeroSplit } from './hero-split'

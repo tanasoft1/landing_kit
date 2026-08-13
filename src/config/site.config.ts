@@ -1,4 +1,4 @@
-import type { SiteConfig } from '~/shell/types'
+import type { SiteConfig } from '@/shell/types'
 
 export const site: SiteConfig = {
   name: 'Landing Kit',
