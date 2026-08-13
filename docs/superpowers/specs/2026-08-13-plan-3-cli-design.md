@@ -50,6 +50,7 @@ monorepo/
 | C7 | `/docs` reference page is copied, with removal instructions | It is the fastest way for a developer to see every block and token. It is `noindex`, absent from the sitemap, and never prerendered, so it costs visitors nothing. |
 | C8 | The CLI runs no `pnpm install` and no `git init` | Those are the developer's to run, and running them silently is surprising. |
 | C9 | Comments across the kit get shortened | Current comments are long and dense. They should be short, plain, and only where the code is surprising. |
+| C10 | `src/shell/` is dissolved into `src/components/` + `src/lib/`, and the import alias changes `~/` → `@/` | Coworkers know React + Vite, not TanStack Start. This is the layout they already know, and it is what `components.json` is already configured for. Must land *before* the CLI, which hardcodes paths. |
 
 ## 4. What the CLI asks
 
@@ -73,7 +74,8 @@ Defaults: multi-page, light + dark, `editorial`, all four blocks, each block's
 
 **Copied unchanged from the kit:**
 
-- `src/shell/` — layout, chrome, SEO, theme, page renderer
+- `src/components/` — layout primitives, header, footer, theme toggle, page and block renderers
+- `src/lib/` — SEO, page resolution, shared types
 - `src/styles/` — including only the chosen preset
 - `src/blocks/` — only the selected block folders, plus `variant-registry.ts`
 - `src/routes/`, `src/client.tsx`, `src/server.ts`, `src/router.tsx`, `src/routeTree.gen.ts`
@@ -129,6 +131,41 @@ and every generated site inherits it.
 
 ## 7. Changes needed in this repo
 
+**This one comes first, before any CLI work** (C10):
+
+0. **Make the project look like a normal React + Vite project.**
+
+   ```
+   src/shell/chrome/header.tsx      → src/components/header.tsx
+   src/shell/chrome/footer.tsx      → src/components/footer.tsx
+   src/shell/layout/*               → src/components/layout/*
+   src/shell/theme/*                → src/components/theme-*.tsx
+   src/shell/blocks/render-blocks   → src/components/render-blocks.tsx
+   src/shell/pages/page-view.tsx    → src/components/page-view.tsx
+   src/shell/docs/*                 → src/components/docs/*
+   src/shell/seo/*                  → src/lib/seo/*
+   src/shell/pages/{enumerate,resolve-link,resolve-request} → src/lib/pages/*
+   src/shell/types.ts               → src/lib/types.ts
+   ```
+
+   Rule for the split: if it renders JSX it goes in `components/`, otherwise `lib/`.
+   Both folders are what `components.json` already points shadcn at, so `shadcn add button`
+   lands in the right place instead of creating a second home for components.
+
+   Then change the import alias from `~/` to `@/` — in `tsconfig.json` `paths` (including the
+   three boundary aliases `~/motion`, `~/theme`, `~/submit`), `vite.config.ts`,
+   `components.json`, and every import in `src/`.
+
+   Also update the paths hardcoded in `scripts/check-conventions.mjs` (it exempts
+   `src/shell/layout/section.tsx` and `container.tsx` from the layout rules), in
+   `scripts/verify-build.mjs`, in the `@source` globs in `src/styles/theme.css`, in the Biome
+   `noRestrictedImports` boundary rule, and in `README.md`.
+
+   Nothing about behaviour changes. `pnpm verify`, both smoke builds and Lighthouse must all
+   produce the same results as before, and the built CSS should be byte-identical.
+
+Then the CLI work:
+
 1. **Add `cli/`** — plain `.mjs`, matching `scripts/`. No build step, no TypeScript compile.
 2. **Add `"bin": { "tana-landing-kit": "./cli/index.mjs" }`** to `package.json`.
 3. **Remove `"private": true`** and add a LICENSE, so npm accepts the package.
@@ -146,7 +183,7 @@ and every generated site inherits it.
    `src/routes/docs.tsx` exists it must carry the tag; if the developer deleted it, pass.
    Today the check demands the file, so a fresh scaffold with `/docs` removed fails.
 9. **Add a README section: removing the `/docs` page.** Delete `src/routes/docs.tsx` and
-   `src/shell/docs/`. Nothing else — item 8 makes that sufficient.
+   `src/components/docs/`. Nothing else — item 8 makes that sufficient.
 10. **Shorten comments across the kit** (C9). Developers read this code, and so does an AI
     assistant helping them. Rules: say it in one or two lines; only comment where the code is
     surprising; delete anything that repeats what the code already says. Worst offenders
@@ -188,9 +225,11 @@ and looking at the result.
    `site.config.ts`, and pass once the domain is filled in. This assertion must be watched
    failing before it is trusted — a standing rule on this project, which has caught real
    defects.
-7. **The real command, on a second machine.** `pnpm dlx tana-landing-kit@latest frontend`
-   from a published version, not a local path. Local testing cannot prove the published
-   package contains the right files.
+7. **The real command, on a second machine — Tengis does this after publishing.** `pnpm dlx
+   tana-landing-kit@latest frontend` from a published version, not a local path. Local
+   testing cannot prove the published package contains the right files. This is the one
+   check that catches a wrong `files` list, and it cannot be done before publishing, so it
+   sits outside the build.
 8. **Lighthouse, once, in this repo** before publishing. Thresholds unchanged: mobile ≥ 0.85,
    desktop ≥ 0.95, both hard failures.
 
