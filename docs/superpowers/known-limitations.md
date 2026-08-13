@@ -144,6 +144,43 @@ it safe could stop being true — which already happened three times during this
   because it is a legitimate technique for controlling whitespace between inline-block children,
   so a blanket ban would have a real false-positive rate. It does hide text.
 
+**Neither script — a comment can change the build output, and nothing checks it**
+
+Unlike everything else in this section, this one is live today rather than latent.
+
+Tailwind v4 scans *files*, and the scanner is comment-blind. `src/styles/theme.css` sets
+`source(none)` and then declares the scan set explicitly as `src/**/*.{ts,tsx}` and
+`configs/**/*.{ts,tsx}`, so **writing a utility class name in a comment in any of those files ships
+that utility**, whether or not real code uses it. Three such rules ship right now, each from a
+single comment and from no `className` anywhere in the tree:
+
+| Comment | Token | Rule in the stylesheet |
+|---|---|---|
+| `src/blocks/contact/contact-form.tsx:74` | `-left-[9999px]` | `left:-9999px` |
+| `src/components/layout/container.tsx:8` | `ml-0` | `margin-left:0` |
+| `src/blocks/features/features-grid.tsx:18` | `inline` (inside `@theme inline`) | `display:inline` |
+
+About 74 bytes of dead CSS. The cost is not the bytes — it is that **editing a comment silently
+changes build output**, discoverable only by rebuilding and hashing. Nothing in `pnpm verify`,
+`check-conventions.mjs` or `verify-build.mjs` detects it. This was found the hard way during the
+Plan 3a comment-shortening pass, where three shortened comments dropped their tokens and the CSS
+came out 74 bytes smaller with every gate still green.
+
+`theme.css` itself is outside the globs — `.css` matches neither pattern — which is why the rule
+written at its head can safely name classes while component comments cannot.
+
+Two of the three tokens are decoration rather than content and could be dropped at no cost to the
+comment's meaning: `contact-form.tsx` is arguing that arbitrary bracket values are banned, and
+*which* value carries nothing; `container.tsx` is arguing that margin precedence follows Tailwind's
+internal order, and it already names `mx-auto` and `mr-auto`, which are real code and do the actual
+work. `inline` is different — `@theme inline` is the directive's real name, so that sentence should
+not be contorted to avoid it.
+
+A real gate would be a `check-conventions.mjs` rule flagging utility-shaped or bracket-arbitrary
+tokens inside comments in the scanned set. That script already parses these files with the
+TypeScript AST, so comment ranges are available to it. Comparing CSS byte counts across a change is
+not a gate — it is a manual step that expires with the plan that mandated it.
+
 ## Small deferred items
 
 Each is low-risk and was judged not worth churn during the build.
