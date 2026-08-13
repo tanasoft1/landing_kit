@@ -40,7 +40,7 @@ pnpm dev
 | `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
 | `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
 | `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
-| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
+| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/components`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/components/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
@@ -124,7 +124,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    a compile error, not a script's job.
 3. **`manifest.ts`** — metadata only, **no component imports**:
    ```ts
-   import type { BlockManifest } from '@/shell/types'
+   import type { BlockManifest } from '@/lib/types'
    import { en } from './copy.en'
    import { type TestimonialsCopy, mn } from './copy.mn'
 
@@ -147,7 +147,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    imported:
    ```ts
    import type { ComponentType } from 'react'
-   import type { BlockProps } from '@/shell/types'
+   import type { BlockProps } from '@/lib/types'
    import type { TestimonialsCopy } from './copy.mn'
    import type { TestimonialsVariant } from './manifest'
    import { TestimonialsGrid } from './testimonials-grid'
@@ -336,7 +336,7 @@ mismatched system font, which is easy to miss if you only proofread the English 
 
 This also means a Mongolian page genuinely ships more font-subset weight than the English one
 (extra network requests for `cyrillic`/`cyrillic-ext` files on top of `latin`) — real, unavoidable
-bytes, not a bug. `src/shell/seo/build-head.ts` preloads the current locale's critical
+bytes, not a bug. `src/lib/seo/build-head.ts` preloads the current locale's critical
 (above-the-fold) font subset for this reason; see [Lighthouse budget](#lighthouse-budget) for why.
 
 ## The three env flags
@@ -360,7 +360,7 @@ theme-switching code at all, not merely a hidden toggle.
 `configs/smoke-onepage/` is a complete second config — `pages.config.ts` (one page holding every
 existing block) and `site.config.ts` (light-only) — used only to prove the config-swapping
 premise end to end. It contains **no components and no overrides**, only config, and requires
-zero edits under `src/blocks/` or `src/shell/` to work.
+zero edits under `src/blocks/`, `src/components/`, or `src/lib/` to work.
 
 ```bash
 pnpm smoke:onepage   # KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint
@@ -408,7 +408,7 @@ before any aliasing applies.
   filename** rather than rewriting `/` to `index.html` while keeping the browser's address bar at
   `/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without
   care, that leaves `window.location.pathname` as `/index.html` on hydration, which the router
-  won't match to any page — `src/shell/pages/resolve-request.ts`'s `normalizePath` collapses a
+  won't match to any page — `src/lib/pages/resolve-request.ts`'s `normalizePath` collapses a
   trailing `/index.html` to `/` for exactly this reason. If you see a page flash to a "Not Found"
   state right after hydrating, check this first.
 

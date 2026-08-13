@@ -1,6 +1,6 @@
 import { type BlockId, registry } from '@/blocks/registry'
 import { getVariants } from '@/blocks/variant-registry'
-import type { BlockRef, Locale, SiteConfig, Surface } from '@/shell/types'
+import type { BlockRef, Locale, SiteConfig, Surface } from '@/lib/types'
 
 const ALTERNATION: Surface[] = ['default', 'muted']
 

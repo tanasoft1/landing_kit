@@ -1,9 +1,9 @@
 import { registry } from '@/blocks/registry'
+import { Container } from '@/components/layout/container'
 import { pages } from '@/config/pages.config'
-import { Container } from '@/shell/layout/container'
-import { localePath } from '@/shell/pages/enumerate'
-import { normalizePath } from '@/shell/pages/resolve-request'
-import type { Locale, SiteConfig } from '@/shell/types'
+import { localePath } from '@/lib/pages/enumerate'
+import { normalizePath } from '@/lib/pages/resolve-request'
+import type { Locale, SiteConfig } from '@/lib/types'
 import { ThemeToggle } from '@/theme'
 
 function labelFor(target: string, locale: Locale): string {

@@ -3,9 +3,9 @@ import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal
 import manropeCyrillic from '@fontsource-variable/manrope/files/manrope-cyrillic-wght-normal.woff2'
 import manropeLatin from '@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2'
 import type { BlockId } from '@/blocks/registry'
-import { localePath } from '@/shell/pages/enumerate'
-import type { ResolvedPage } from '@/shell/pages/resolve-request'
-import type { Locale, PageConfig, SiteConfig } from '@/shell/types'
+import { localePath } from '@/lib/pages/enumerate'
+import type { ResolvedPage } from '@/lib/pages/resolve-request'
+import type { Locale, PageConfig, SiteConfig } from '@/lib/types'
 import { blockPreloadHrefs } from './block-preloads'
 import { buildJsonLd } from './json-ld'
 

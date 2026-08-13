@@ -1,5 +1,5 @@
 import type { BlockId } from '@/blocks/registry'
-import type { PageConfig } from '@/shell/types'
+import type { PageConfig } from '@/lib/types'
 
 export const pages: PageConfig<BlockId>[] = [
   {

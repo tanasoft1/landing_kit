@@ -7,9 +7,9 @@ import { pages as onepagePages } from './configs/smoke-onepage/pages.config'
 import { site as onepageSite } from './configs/smoke-onepage/site.config'
 import { pages as defaultPages } from './src/config/pages.config'
 import { site as defaultSite } from './src/config/site.config'
-import { enumerateUrls } from './src/shell/pages/enumerate'
-import { emitSeoFiles } from './src/shell/seo/emit-plugin'
-import { OUT_DIR } from './src/shell/seo/out-dir'
+import { enumerateUrls } from './src/lib/pages/enumerate'
+import { emitSeoFiles } from './src/lib/seo/emit-plugin'
+import { OUT_DIR } from './src/lib/seo/out-dir'
 
 const animation = process.env.KIT_ANIMATION ?? 'on'
 const submit = process.env.KIT_SUBMIT ?? 'endpoint'
@@ -25,7 +25,7 @@ const site = config === 'onepage' ? onepageSite : defaultSite
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 export default defineConfig({
-  // Read by `src/shell/seo/block-preloads.ts` at prerender time: `dist/client/.vite/manifest.json`
+  // Read by `src/lib/seo/block-preloads.ts` at prerender time: `dist/client/.vite/manifest.json`
   // maps each block's `variants.ts` source module to its built chunk (and that chunk's own
   // static `imports`, which is how the shared `motion` chunk gets discovered too), so the
   // prerendered <head> can `modulepreload` exactly the chunks a given page's blocks need.

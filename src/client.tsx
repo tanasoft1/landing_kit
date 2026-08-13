@@ -5,7 +5,7 @@ import { blockModules } from '@/blocks/block-modules'
 import type { BlockId } from '@/blocks/registry'
 import { pages } from '@/config/pages.config'
 import { site } from '@/config/site.config'
-import { normalizePath, resolveRequest } from '@/shell/pages/resolve-request'
+import { normalizePath, resolveRequest } from '@/lib/pages/resolve-request'
 
 // Overrides `@tanstack/react-start`'s generated client entry — a supported override, resolved by
 // filename convention (see `resolveEntry` in `@tanstack/start-plugin-core`). The installed
@@ -47,7 +47,7 @@ async function hydrate() {
   // blocks were never fetched, throwing from `getVariants` with no build-time signal). This is a
   // deliberate design property of the kit, not an oversight — and it's enforced, not just
   // documented: `scripts/check-conventions.mjs` fails the build on a `Link` import from
-  // `@tanstack/react-router` anywhere in `src/blocks`, `src/shell` or `src/routes`. `src/routes`
+  // `@tanstack/react-router` anywhere in `src/blocks`, `src/components` or `src/routes`. `src/routes`
   // matters most of the three — `__root.tsx` is where a global nav or skip-link would naturally
   // go, and it was the one directory the rule used to exempt.
   const ids = blocksForCurrentUrl()

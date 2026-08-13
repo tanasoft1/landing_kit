@@ -57,7 +57,7 @@ export function emitSeoFiles({
       order: 'post',
       async handler() {
         // `dist/client/.vite/manifest.json` (from `build.manifest: true` in vite.config.ts) is
-        // read by `src/shell/seo/block-preloads.ts` during prerendering, above — by the time this
+        // read by `src/lib/seo/block-preloads.ts` during prerendering, above — by the time this
         // hook runs, prerendering (and therefore every read of it) has already finished, so it's
         // safe to remove. Nothing in the shipped client bundle references it; leaving it in
         // `dist/client` would publish source paths and chunk metadata to the public static root

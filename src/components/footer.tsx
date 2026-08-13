@@ -1,5 +1,5 @@
-import { Container } from '@/shell/layout/container'
-import type { SiteConfig } from '@/shell/types'
+import { Container } from '@/components/layout/container'
+import type { SiteConfig } from '@/lib/types'
 
 export function Footer({ site }: { site: SiteConfig }) {
   const { organization: org } = site
