@@ -1,4 +1,5 @@
 import { type BlockId, registry } from '~/blocks/registry'
+import { getVariants } from '~/blocks/variant-registry'
 import type { BlockRef, Locale, SiteConfig, Surface } from '~/shell/types'
 
 const ALTERNATION: Surface[] = ['default', 'muted']
@@ -36,11 +37,14 @@ export function RenderBlocks({
         }
 
         const variantName = variant ?? manifest.defaultVariant
-        // The cast is paired with the throw below — do not remove one without the other.
-        const Component = manifest.variants[variantName as keyof typeof manifest.variants]
+        // `getVariants` throws its own error if this block's module was never loaded/registered
+        // — a different failure mode than the one below (unknown variant name on a block that
+        // *is* loaded). Both are wiring bugs, not user-facing conditions.
+        const variants = getVariants(id)
+        const Component = variants[variantName]
         if (!Component) {
           throw new Error(
-            `Block '${id}' has no variant '${variantName}'. Available: ${Object.keys(manifest.variants).join(', ')}`,
+            `Block '${id}' has no variant '${variantName}'. Available: ${Object.keys(variants).join(', ')}`,
           )
         }
 

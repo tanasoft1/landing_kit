@@ -1,6 +1,30 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+// --- build freshness, before anything else ------------------------------------
+// Every check in this file is an assertion about the CONTENT of `dist/`, and a failed build does
+// not empty `dist/` — it leaves the previous successful output in place. So "build failed, verify
+// passed" is a real combination, observed once when a corrupted `vite.config.ts` broke the build
+// and this script still printed `✓ 4 pages` about artifacts nobody had just produced. Two of the
+// checks below (the block-chunk preload assertion, and the `/docs` prerender-exclusion check) are
+// pure statements about `dist/` state with no cross-check against source at all, so a stale
+// `dist/` false-greens them by construction.
+//
+// The stamp is written by `src/shell/seo/emit-plugin.ts` as the last act of a build that ran to
+// completion, and deleted at that build's start — so its absence means exactly one thing, and
+// nothing this script could report afterwards would be meaningful.
+const STAMP_PATH = '.kit/build-stamp.json'
+if (!existsSync(STAMP_PATH)) {
+  console.error(
+    `\n✗ verify-build: no build stamp at ${STAMP_PATH}.\n\n` +
+      '  The last build did not run to completion (or no build has run at all).\n' +
+      '  A failed build leaves the PREVIOUS successful output in dist/, so anything this\n' +
+      '  script reported about it would describe stale artifacts, not the current source.\n\n' +
+      '  Run `pnpm build` and fix the build first; verify-build cannot grade what it has.\n',
+  )
+  process.exit(1)
+}
+
 const manifest = JSON.parse(readFileSync('.kit/urls.json', 'utf8'))
 const { site, outDir, urls } = manifest
 const failures = []
@@ -30,7 +54,7 @@ for (const entry of readdirSync(blocksDir)) {
 // never prerendered, never in the sitemap, and never checked by anything below.
 // No `routeTree.gen.ts` here: the generated file lives at `src/routeTree.gen.ts`, a sibling of
 // this directory, so listing it would be dead weight that reads as though it were expected here.
-const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'debug.tsx'])
+const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'docs.tsx'])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {
     fail(
@@ -130,12 +154,24 @@ for (const u of urls) {
   // Nothing in the static HTML may be invisible. An entrance animation that ships
   // `opacity:0` leaves a JS-less visitor staring at a blank hero, and defers LCP until the
   // bundle hydrates and animates. See the FadeIn docstring.
+  //
+  // `transform: scale(0)` and `clip-path: inset(100%)` are checked alongside the original three
+  // because this scan is the only thing standing between a motion preset and invisible prerendered
+  // content, and it was matching by property name rather than by effect. `FadeIn`/`Reveal` already
+  // ship a legitimate `transform: translateY(12px)`, so `transform` is an expected property here —
+  // which means a future `initial={{ scale: 0 }}` would have shipped genuinely invisible content
+  // through a check that was looking right at it. The `(?!\.\d*[1-9])` guard mirrors the opacity
+  // rule so a real `scale(0.98)` entrance is not flagged.
+  const HIDDEN_PATTERNS = [
+    /opacity:\s*0(?!\.\d*[1-9])/,
+    /visibility:\s*hidden/,
+    /display:\s*none/,
+    /transform:[^;]*\bscale(?:3d)?\(\s*0(?!\.\d*[1-9])/,
+    /clip-path:\s*inset\(\s*100%/,
+  ]
   for (const m of html.matchAll(/style="([^"]*)"/g)) {
     const decl = m[1] ?? ''
-    if (/opacity:\s*0(?!\.\d*[1-9])/.test(decl)) {
-      fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
-    }
-    if (/visibility:\s*hidden|display:\s*none/.test(decl)) {
+    if (HIDDEN_PATTERNS.some((re) => re.test(decl))) {
       fail(u.path, `prerendered HTML contains hidden content: style="${decl}"`)
     }
   }
@@ -265,6 +301,89 @@ for (const u of urls) {
       }
     }
   }
+
+  // Every page must preload the chunks for the blocks it renders. This is a fragile ordering
+  // dependency (see emit-plugin.ts) and its failure mode is silent: the build succeeds, the page
+  // works, and only a Lighthouse run weeks later shows the waterfall came back.
+  const preloaded = [...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g)].map(
+    (m) => m[1] ?? '',
+  )
+  const blockChunks = preloaded.filter((h) => /\/variants-[^/]+\.js$/.test(h))
+  if (blockChunks.length === 0) {
+    fail(u.path, 'no block chunks preloaded — check plugin ordering in vite.config.ts')
+  }
+}
+
+// --- the split actually held --------------------------------------------------
+// The preload check above is zero-vs-nonzero, and it is the only thing between a plugin reorder
+// and a silent waterfall regression — a build preloading 1 of the home page's 3 block chunks
+// passes it. An exact count is the wrong strengthening, because Vite may legitimately merge small
+// chunks. This asserts the property that actually matters instead: the contact form's form library
+// is NOT in the main entry chunk. That is the whole point of the split (99 KB raw / 30 KB gzip of
+// react-hook-form and zod, previously downloaded by every page including ones with no form), and
+// it is true or false regardless of how Vite chose to group anything else.
+//
+// Markers are react-hook-form's own public option names, not the string 'react-hook-form' — that
+// string legitimately appears in the entry chunk already, inside the contact manifest's
+// `requires: { npm: [...] }` metadata, which registry.ts imports eagerly on purpose. A check keyed
+// on the package name would have failed a correct build on day one.
+//
+// Self-validating, deliberately: the markers must be found SOMEWHERE outside the entry chunk as
+// well as being absent from it. Absence alone would quietly become a no-op the day react-hook-form
+// renames its internals or the block stops shipping — this project has already shipped assertions
+// that could never fire, and an assertion whose subject has vanished is exactly that.
+const RHF_MARKERS = ['shouldUnregister', 'criteriaMode', 'reValidateMode', 'shouldFocusError']
+if (existsSync(join(blocksDir, 'contact'))) {
+  const assetsDir = join(outDir, 'assets')
+  const entryHrefs = new Set()
+  for (const u of urls) {
+    const file = join(outDir, u.outputPath)
+    if (!existsSync(file)) continue
+    const html = readFileSync(file, 'utf8')
+    for (const m of html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)) {
+      entryHrefs.add((m[1] ?? '').replace(/^\/+/, ''))
+    }
+  }
+  if (entryHrefs.size === 0) {
+    fail(
+      'bundle-split',
+      'found no <script type="module"> entry in any page — cannot locate the entry chunk',
+    )
+  }
+  const entryFiles = [...entryHrefs].map((h) => join(outDir, h)).filter((p) => existsSync(p))
+  const allChunks = existsSync(assetsDir)
+    ? readdirSync(assetsDir)
+        .filter((f) => f.endsWith('.js'))
+        .map((f) => join(assetsDir, f))
+    : []
+  const nonEntryChunks = allChunks.filter((p) => !entryFiles.includes(p))
+
+  const foundOutside = RHF_MARKERS.filter((marker) =>
+    nonEntryChunks.some((p) => readFileSync(p, 'utf8').includes(marker)),
+  )
+  if (foundOutside.length === 0) {
+    fail(
+      'bundle-split',
+      `none of the react-hook-form markers (${RHF_MARKERS.join(', ')}) appear in any non-entry ` +
+        `chunk. Either the library no longer uses these names — in which case this assertion has ` +
+        `silently stopped testing anything and the markers must be updated — or the contact block ` +
+        `is no longer built. Do not delete this check to make it pass.`,
+    )
+  }
+  for (const entryFile of entryFiles) {
+    const code = readFileSync(entryFile, 'utf8')
+    const leaked = RHF_MARKERS.filter((marker) => code.includes(marker))
+    if (leaked.length > 0) {
+      fail(
+        'bundle-split',
+        `the main entry chunk (${entryFile}) contains react-hook-form (${leaked.join(', ')}). ` +
+          `The contact form's dependencies are back in the chunk every page downloads, so pages ` +
+          `with no form pay for it — the exact regression the block split exists to prevent. ` +
+          `Check that manifest.ts files import no components and that block-modules.ts is still ` +
+          `the only path to them.`,
+      )
+    }
+  }
 }
 
 // --- generated files ----------------------------------------------------------
@@ -274,6 +393,34 @@ else {
   const xml = readFileSync(sitemapPath, 'utf8')
   for (const u of urls) {
     if (!xml.includes(`<loc>${site}${u.path}</loc>`)) fail('sitemap.xml', `missing ${u.path}`)
+  }
+
+  // Exclusion, not just inclusion. The loop above proves every EXPECTED url is present and would
+  // pass just as happily with a `/docs` entry sitting alongside them — and a sitemap entry is an
+  // explicit request to index a URL, which is the opposite of what `/docs` is for. `/docs` is a
+  // developer surface with no localized copy, no `pages.config.ts` entry and no prerendered file;
+  // advertising it here would ask Google to index a URL that 404s on a static deploy.
+  //
+  // Compared as PARSED PATHS, not with a `/\/docs\b/` regex over the raw XML. That regex matched
+  // the `//docs` inside any `site.url` on a host beginning `docs.` — `<loc>https://docs.example.mn/
+  // </loc>` tested true and failed a completely correct build — and it also matched legitimate
+  // paths like `/docs-guide` (`\b` sits between `s` and `-`). A false failure in the project's only
+  // machine gate is the failure mode this file's `decodeEntities` docstring warns about at length:
+  // it teaches people to distrust the gate, which is worse than the gap it was closing.
+  const forbiddenDocsPaths = new Set(['/docs', ...new Set(urls.map((u) => `/${u.locale}/docs`))])
+  const locPaths = [...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => {
+    const loc = decodeEntities(m[1] ?? '').trim()
+    const path = loc.startsWith(site) ? loc.slice(site.length) : loc
+    // Normalise a trailing slash so `/docs/` is not a way around this.
+    return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
+  })
+  for (const path of locPaths) {
+    if (forbiddenDocsPaths.has(path)) {
+      fail(
+        'sitemap.xml',
+        `lists '${path}' — the developer docs route must never be advertised for indexing`,
+      )
+    }
   }
 
   // The sitemap's alternate set must match what the <head> declares, x-default included.
@@ -312,11 +459,25 @@ if (!existsSync(robotsPath)) {
   fail('robots.txt', 'not emitted')
 } else {
   const robots = readFileSync(robotsPath, 'utf8')
-  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /debug` — deindexes the
+  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /private` — deindexes the
   // entire site. Existence-only checking would pass that silently.
   if (!/^Allow: \/[ \t]*$/m.test(robots)) fail('robots.txt', "missing 'Allow: /'")
   if (/^Disallow: \/[ \t]*$/m.test(robots)) {
     fail('robots.txt', "bare 'Disallow: /' would deindex the entire site")
+  }
+
+  // `/docs` must stay CRAWLABLE. This looks backwards and is not: `Disallow` and the
+  // `noindex, nofollow` meta on `src/routes/docs.tsx` do not layer, they cancel. A crawler that
+  // obeys a `Disallow` never fetches /docs, so it never reads the `noindex` — and a URL linked
+  // from anywhere else is then indexed URL-only, which is the exact outcome the `noindex` exists
+  // to prevent. This assertion turns a future well-meaning "let's block /docs too" edit into a
+  // build failure that explains itself, instead of a silent SEO regression.
+  const docsDisallow = robots.split('\n').find((line) => /^[ \t]*Disallow:[ \t]*\/docs/i.test(line))
+  if (docsDisallow) {
+    fail(
+      'robots.txt',
+      `'${docsDisallow.trim()}' stops crawlers FETCHING /docs, so they never read its 'noindex, nofollow' meta — a URL linked from elsewhere then gets indexed URL-only, the exact outcome the noindex prevents. /docs must stay fetchable; see the header comment in src/routes/docs.tsx`,
+    )
   }
   const wantSitemapLine = `Sitemap: ${site}/sitemap.xml`
   if (!robots.includes(wantSitemapLine)) {
@@ -324,9 +485,9 @@ if (!existsSync(robotsPath)) {
   }
 }
 
-// --- debug route must not ship ------------------------------------------------
-if (existsSync(join(outDir, 'debug/index.html'))) {
-  fail('/debug', 'debug route was prerendered; it must be excluded')
+// --- docs route must not ship ---------------------------------------------------
+if (existsSync(join(outDir, 'docs/index.html'))) {
+  fail('/docs', 'docs route was prerendered; it must be excluded')
 }
 
 if (failures.length) {

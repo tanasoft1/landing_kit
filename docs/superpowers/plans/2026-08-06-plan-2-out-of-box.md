@@ -20,7 +20,7 @@ Every task's requirements implicitly include this section. These are carried for
 - **Blocks never hardcode a heading tag.** `const H = headingLevel === 1 ? 'h1' : 'h2'`, then `<H>`. `check-conventions.mjs` rejects any literal `<h1>`/`<h2>` in `src/blocks/`, no exceptions.
 - **Blocks never write** `py-section`, `px-gutter`, `max-w-*`, `container`, `min-h-screen`, a raw `<section>`, an arbitrary-value escape (`w-[123px]`), or an inline `style`. They compose `<Section>` and `<Container>`. Ordinary component padding (`py-3`) is fine; `min-h-11` is the 44px tap-target floor.
 - **Blocks never import `motion` directly** — only `~/motion`. Enforced by Biome, which also blocks the variant files of all three boundaries.
-- **`FadeIn` animates transform only** (above the fold, wraps the LCP element). `Reveal` may animate opacity but is for below-the-fold content only.
+- **No motion preset animates opacity — `FadeIn` and `Reveal` are both transform-only.** `FadeIn` runs on load above the fold; `Reveal` is scroll-triggered for content below it. An `initial={{ opacity: 0 }}` ships `style="opacity:0"` in the prerendered HTML regardless of where the element sits on the page, and `verify-build.mjs` fails the build on it. This kit never ships hidden content, with no exceptions.
 - **Prerendered HTML must never hide content** — no `opacity:0`, `visibility:hidden`, `display:none`. `verify-build.mjs` fails the build on any of them.
 - **Every `~/x` alias variant pair needs a shared contract type** with a conformance assertion in *both* variants.
 - **`BlockSchema` is reserved for markup a block's own content earns** — `FAQPage`, `Product`, `Offer`, `Review`. Page-identity types (`WebPage`, `WebPageElement`, `ContactPage`) are forbidden; the shell already emits exactly one `WebPage`. A block with nothing to say omits `schema` entirely.
@@ -51,7 +51,12 @@ The kit's entire value proposition is technical SEO plus measurable performance.
 | `src/blocks/cta/` | The closer block: `banner` + `split` variants | 3 |
 | `src/blocks/registry.ts` | One line per block | 2, 3 |
 | `src/config/pages.config.ts` | Page composition | 3 |
-| `src/blocks/block-modules.ts` | Block id → dynamic component import. The split point | 4 |
+| `src/blocks/<id>/variants.ts` | Component map per block — the code behind the split point | 4 |
+| `src/blocks/variant-registry.ts` | Synchronous component lookup, populated by whichever entry ran | 4 |
+| `src/blocks/variants.all.ts` | Static registration for the server/prerender path only | 4 |
+| `src/blocks/block-modules.ts` | Block id → dynamic import of that block's `variants.ts` | 4 |
+| `src/shell/types.ts` | `BlockManifest.variants` becomes `variantNames` | 4 |
+| `src/shell/blocks/render-blocks.tsx` | Resolves components via `getVariants()` | 4 |
 | `src/client.tsx` | Custom client entry: resolve chunks, *then* hydrate | 4 |
 | `src/routes/docs.tsx` | The developer surface | 5 |
 | `src/routes/debug.tsx` | **Deleted** — folded into `/docs` | 5 |
@@ -82,13 +87,39 @@ The scale is *system*, not skin, so it lives in `theme.css` and both presets sha
 ```css
 @theme {
   --text-display: clamp(2.75rem, 7.5vw, 5.5rem);
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.035em;
+
   --text-h2: clamp(2rem, 4vw, 3rem);
+  --text-h2--line-height: 1.12;
+  --text-h2--letter-spacing: -0.025em;
+
   --text-h3: clamp(1.25rem, 2vw, 1.5rem);
+  --text-h3--line-height: 1.3;
+  --text-h3--letter-spacing: -0.015em;
+
   --text-lead: clamp(1.125rem, 1.6vw, 1.375rem);
+  --text-lead--line-height: 1.55;
 }
 ```
 
 The display size grows most, the body least — that widening ratio is what reads as editorial rather than merely large.
+
+**The `--line-height` companions are not optional polish.** A font-size token without one inherits Tailwind preflight's ambient `1.5`, which at a 5.5rem display size produces an 8.25rem line box — the hero heading then breaks into two lines separated by nearly a blank line and reads as two disconnected fragments rather than one statement. Leading has to tighten as size grows, which is exactly what a paired scale expresses and a bare font-size cannot.
+
+Letter-spacing moves here too, per step, because display type wants tighter tracking than a subhead does. Tracking Mongolian Cyrillic tighter than about `-0.04em` starts to crowd, so `-0.035em` on display is the floor.
+
+- [ ] **Step 1b: Remove the now-duplicate letter-spacing from the base layer**
+
+`theme.css`'s `@layer base` currently sets `letter-spacing: -0.02em` on `h1, h2, h3`. With the token companions above, that is a second source for the same property — the kind of split this project has repeatedly been bitten by. Delete the `letter-spacing` declaration from that rule, keeping the `font-family`:
+
+```css
+  h1, h2, h3 {
+    font-family: var(--face-display);
+  }
+```
+
+Tracking now comes from the scale step alone, which is also more correct: it varies with size instead of applying one value to three very different sizes.
 
 - [ ] **Step 2: Add the shadow token to the `@theme inline` block**
 
@@ -116,6 +147,8 @@ Create `src/styles/presets/editorial.css`. Note `--elevation-card: none` — edi
   --gutter: clamp(1.25rem, 5vw, 2.5rem);
   --width-page: 68rem;
   --width-narrow: 34rem;
+  /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
+     differ between themes is declared once here rather than repeated below. */
   --elevation-card: none;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
@@ -339,7 +372,51 @@ export function FeaturesGrid({ copy, surface, anchorId, headingLevel }: BlockPro
 }
 ```
 
-`max-w-2xl` on the intro column will be rejected by `check-conventions.mjs` — that rule forbids `max-w-*` in blocks. Use `<Container width="narrow">` for the intro instead, nested inside the outer `<Container>`, or drop the constraint. Resolve this in Step 6 when the checker tells you; do not pre-emptively weaken the rule.
+**Do not use `max-w-2xl`** — `check-conventions.mjs` rejects `max-w-*` in blocks, because page measure belongs to `<Container>`. And do not nest one `<Container>` inside another: each applies `px-gutter`, so nesting indents the inner content by a second gutter.
+
+Instead, `<Container>` gains an alignment prop, and the intro becomes a **sibling** of the grid rather than a child:
+
+```tsx
+// src/shell/layout/container.tsx
+const WIDTH = { page: 'max-w-page', narrow: 'max-w-narrow' } as const
+const ALIGN = { center: 'mx-auto', start: 'mr-auto' } as const
+
+export function Container({
+  width = 'page',
+  align = 'center',
+  className = '',
+  children,
+}: {
+  width?: keyof typeof WIDTH
+  align?: keyof typeof ALIGN
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className={`w-full px-gutter ${ALIGN[align]} ${WIDTH[width]} ${className}`}>
+      {children}
+    </div>
+  )
+}
+```
+
+`align` is a prop rather than a `className` override because `mx-auto` and `ml-0` are both margin utilities whose precedence depends on Tailwind's internal ordering, not on the order you write them — a coin-flip that would work until it silently didn't.
+
+The block then uses two sibling containers, so both share a left edge:
+
+```tsx
+<Section id={anchorId} surface={surface}>
+  <Container width="narrow" align="start">
+    <H className="text-h2 font-semibold text-balance">{copy.heading}</H>
+    <p className="text-muted-foreground text-lead mt-4 text-pretty">{copy.lead}</p>
+  </Container>
+  <Container className="mt-14">
+    {/* the grid */}
+  </Container>
+</Section>
+```
+
+A narrow intro is worth keeping rather than letting the lead run the full 68rem — that would be roughly 110 characters a line, well past comfortable reading. The point is a narrow *measure*, not a centred box.
 
 - [ ] **Step 5: Write the `alternating` variant**
 
@@ -777,11 +854,80 @@ void hydrate()
 
 If the installed version's client-entry contract differs — a different export shape, or `hydrateRoot` targeting an element rather than `document` — adapt to it, but keep the `await` before hydration. That ordering is the entire point. Report what shape the installed version required.
 
-- [ ] **Step 3: Make the registry import components dynamically**
+- [ ] **Step 3: Break the static chain from the registry to the components**
 
-For Vite to actually split, the eager import chain from `registry.ts` to the component files must be broken. Change each block's `manifest.ts` so `variants` reference components that Vite can code-split, while the manifest itself stays eagerly importable for its copy and schema.
+**This is the crux of the task, and doing it wrong produces a passing build with an unchanged bundle.**
 
-The mechanism that works without reintroducing Suspense: keep `variants` as direct component references, but ensure the *manifest module* is what `blockModules` imports — so the component lands in the manifest's chunk rather than the main one.
+Today `manifest.ts` statically imports its components, and `registry.ts` statically imports every manifest. So `registry → manifests → components` is an unbroken static chain, and every component is reachable from the entry. Dynamic imports of the *same* modules split nothing: Vite sees them already reachable and keeps them in the main chunk. The chain has to actually be cut.
+
+Split each block's manifest in two — metadata stays eager because the SEO layer needs it synchronously; components move behind the split point.
+
+**a.** Create `src/blocks/<id>/variants.ts` per block, holding only the component map:
+
+```ts
+// src/blocks/hero/variants.ts
+import { HeroCentered } from './hero-centered'
+import { HeroSplit } from './hero-split'
+
+export const variants = { centered: HeroCentered, split: HeroSplit }
+```
+
+**b.** Change each `manifest.ts` to drop its component imports and declare variant *names* instead:
+
+```ts
+// src/blocks/hero/manifest.ts — no component import anywhere
+export const hero = {
+  id: 'hero',
+  variantNames: ['centered', 'split'] as const,
+  defaultVariant: 'centered',
+  copy: { mn, en },
+  nav: { labelKey: 'navLabel' },
+  requires: { npm: [], ui: [] },
+} satisfies BlockManifest<HeroCopy, 'centered' | 'split'>
+```
+
+Update `BlockManifest` in `src/shell/types.ts` accordingly: `variants` becomes `variantNames: readonly V[]`. Keep `defaultVariant: V` — with `as const` on the names array, a `defaultVariant` not in the list stays a compile error.
+
+**c.** Create `src/blocks/variant-registry.ts`, the synchronous lookup `RenderBlocks` reads:
+
+```ts
+import type { ComponentType } from 'react'
+import type { BlockProps } from '~/shell/types'
+import type { BlockId } from './registry'
+
+// biome-ignore lint/suspicious/noExplicitAny: one map holds every block's differently-typed copy.
+type VariantMap = Record<string, ComponentType<BlockProps<any>>>
+
+const loaded = new Map<BlockId, VariantMap>()
+
+export function registerVariants(id: BlockId, variants: VariantMap) {
+  loaded.set(id, variants)
+}
+
+export function getVariants(id: BlockId): VariantMap {
+  const v = loaded.get(id)
+  if (!v) {
+    // Reaching here means a block rendered before its module was loaded — a wiring bug, not a
+    // user-facing condition. Failing loudly beats rendering an empty section.
+    throw new Error(
+      `Variants for block '${id}' were never registered. The entry point must load and register a block's module before rendering it.`,
+    )
+  }
+  return v
+}
+```
+
+**d.** `src/blocks/block-modules.ts` points at the new `variants.ts` files, and registers on load:
+
+```ts
+hero: () => import('./hero/variants').then((m) => registerVariants('hero', m.variants)),
+```
+
+**e.** `RenderBlocks` resolves the component via `getVariants(id)[variantName]` instead of `manifest.variants[...]`, keeping its existing unknown-variant error.
+
+**f.** The server still needs every component synchronously at prerender. Create `src/blocks/variants.all.ts` that statically imports and registers all four, and import it from the **server** side only — the module must be unreachable from `src/client.tsx`, or the split is undone.
+
+TanStack Start's server entry override is `src/server.ts`; verify the installed version's contract before relying on it. **If the server entry cannot be hooked**, the fallback is to have `block-modules.ts` do `if (import.meta.env.SSR) { … }` with a static registration path, since Vite eliminates the false branch from the client build. Report which mechanism the installed version required.
 
 Verify the split actually happened before proceeding:
 
@@ -1099,6 +1245,29 @@ In `scripts/verify-build.mjs`:
 - `ALLOWED_ROUTE_FILES` — replace `'debug.tsx'` with `'docs.tsx'`.
 - The prerender-exclusion check — change `debug/index.html` to `docs/index.html`, and the message accordingly.
 
+- [ ] **Step 5b: Assert every page preloads its block chunks**
+
+Task 4 made the per-page `modulepreload` list depend on a build-hook ordering — specifically on `tanstackStart()` being registered before `emitSeoFiles()` in `vite.config.ts`, so the manifest still exists when preloads are computed and is deleted only afterwards. That ordering is currently correct and deliberate, but nothing asserts it. A plugin reorder, or an upstream change to TanStack Start's hook `enforce`/`order`, would produce a build that **succeeds with empty preload lists** — reintroducing the request waterfall that cost 0.90 → 0.88, with no signal at all.
+
+Add to the per-page loop, after the existing head assertions:
+
+```js
+  // Every page must preload the chunks for the blocks it renders. This is a fragile ordering
+  // dependency (see emit-plugin.ts) and its failure mode is silent: the build succeeds, the page
+  // works, and only a Lighthouse run weeks later shows the waterfall came back.
+  const preloaded = [
+    ...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g),
+  ].map((m) => m[1] ?? '')
+  const blockChunks = preloaded.filter((h) => /\/variants-[^/]+\.js$/.test(h))
+  if (blockChunks.length === 0) {
+    fail(u.path, 'no block chunks preloaded — check plugin ordering in vite.config.ts')
+  }
+```
+
+Then prove it bites: temporarily move `emitSeoFiles(...)` **before** `tanstackStart(...)` in `vite.config.ts`'s plugin array, rebuild, and confirm `verify-build` fails naming the pages. Restore the order and confirm it passes.
+
+A count rather than an exact set, deliberately: the chunk filenames are content-hashed and the block-to-chunk mapping is Vite's business, so asserting specific names would break on every unrelated edit. Zero-versus-nonzero is the signal that actually distinguishes working from broken.
+
 In `src/shell/seo/emit-plugin.ts`, change the `robots.txt` line from `Disallow: /debug` to `Disallow: /docs`.
 
 Confirm nothing still references the old route:
@@ -1131,6 +1300,14 @@ cat dist/client/robots.txt
 ```
 
 Expected: 4 pages pass; `dist/client/docs` does not exist; `0` occurrences in the sitemap; `robots.txt` contains `Disallow: /docs`. All four matter — the route must be invisible to crawlers by three independent mechanisms.
+
+> **Superseded (Task 5 fix round 1).** The `Disallow: /docs` line was removed and must not come
+> back. A `Disallow` and a `noindex` do not layer, they cancel: a crawler obeying the `Disallow`
+> never fetches `/docs`, so it never reads the `noindex`, and a URL linked from elsewhere is
+> indexed URL-only — the outcome the `noindex` exists to prevent. `/docs` is excluded **three**
+> ways, not four: never prerendered, absent from the sitemap, and `noindex` on any SSR deploy.
+> `scripts/verify-build.mjs` now fails the build if `robots.txt` disallows `/docs`, and
+> `scripts/check-conventions.mjs` fails if the `noindex` meta leaves `src/routes/docs.tsx`.
 
 - [ ] **Step 8: Commit**
 

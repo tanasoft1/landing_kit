@@ -1,0 +1,60 @@
+:root {
+  /* Skin: font pairing. Both families must have Cyrillic coverage. */
+  --face-display: "Manrope Variable", system-ui, sans-serif;
+  --face-body: "Inter Variable", system-ui, sans-serif;
+
+  /* Rounder, tighter, softer than editorial. */
+  --radius: 1rem;
+  --section-y: clamp(3.5rem, 8vw, 6.5rem);
+  --gutter: clamp(1rem, 4vw, 2rem);
+  --width-page: 74rem;
+  --width-narrow: 36rem;
+  /* Unlike editorial's `none` (same in both themes, so declared once — see its own comment),
+     warm's shadow is real and must get darker AND more opaque in `.dark`, not just carry the
+     same value forward: a shadow colour lighter than the surface it falls on reads as a glow,
+     not elevation. This light-mode value is tuned against warm's 99%-lightness background;
+     `.dark` below redefines it against warm's 19%-lightness background. */
+  --elevation-card: 0 1px 2px oklch(30% 0.02 70 / 0.06), 0 8px 24px oklch(30% 0.02 70 / 0.08);
+
+  /* Warm neutrals — hue pulled toward amber, chroma raised. */
+  --c-background: oklch(99% 0.006 85);
+  --c-foreground: oklch(24% 0.02 60);
+  --c-muted: oklch(96.5% 0.012 80);
+  --c-muted-foreground: oklch(50% 0.022 60);
+  --c-accent: oklch(94% 0.02 75);
+  --c-border: oklch(89% 0.016 75);
+  /* L lowered from the brief's 60% to 55%: at 60% `--c-primary-foreground` on `--c-primary`
+     (the CTA buttons' bg-primary/text-primary-foreground pairing) and `--c-primary` as text on
+     `--c-background` (hero eyebrow labels) both measure ~4.11:1 — under the 4.5:1 AA floor for
+     normal-weight text. 55% clears both at ~5.06:1 while keeping the same hue/chroma. */
+  --c-primary: oklch(55% 0.16 40);
+  --c-primary-foreground: oklch(99% 0.006 85);
+  --c-ring: oklch(55% 0.16 40);
+
+  /* Status, hue-nudged toward warm's amber/terracotta family rather than reusing editorial's
+     values — a preset swap should move these like everything else. Measured against every surface
+     this text can land on (background/muted/accent), worst case: destructive 5.08:1,
+     success 5.18:1, both over the 4.5:1 AA floor. */
+  --c-destructive: oklch(52% 0.19 30);
+  --c-success: oklch(48% 0.12 150);
+}
+
+.dark {
+  /* Darker AND more opaque than the light-mode value above, not the same value carried forward —
+     against a 19%-lightness background, a shadow at the light-mode's oklch(30% … / 0.06-0.08)
+     is LIGHTER than its surface and reads as a faint glow, not elevation. Tuned by eye. */
+  --elevation-card: 0 1px 2px oklch(0% 0 0 / 0.35), 0 10px 28px oklch(0% 0 0 / 0.5);
+  --c-background: oklch(19% 0.014 55);
+  --c-foreground: oklch(96% 0.008 80);
+  --c-muted: oklch(23.5% 0.016 55);
+  --c-muted-foreground: oklch(74% 0.016 70);
+  --c-accent: oklch(28% 0.02 55);
+  --c-border: oklch(32% 0.02 55);
+  --c-primary: oklch(76% 0.13 45);
+  --c-primary-foreground: oklch(19% 0.014 55);
+  --c-ring: oklch(76% 0.13 45);
+  /* Re-authored for warm's 19%-lightness dark background, same as editorial's.
+     Worst case: destructive 5.53:1, success 6.43:1. */
+  --c-destructive: oklch(72% 0.16 32);
+  --c-success: oklch(73% 0.12 150);
+}

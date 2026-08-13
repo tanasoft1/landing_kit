@@ -6,6 +6,7 @@ import type { BlockId } from '~/blocks/registry'
 import { localePath } from '~/shell/pages/enumerate'
 import type { ResolvedPage } from '~/shell/pages/resolve-request'
 import type { Locale, PageConfig, SiteConfig } from '~/shell/types'
+import { blockPreloadHrefs } from './block-preloads'
 import { buildJsonLd } from './json-ld'
 
 // `h1`/`h2`/`h3` render in the display face and everything else in the body face (see
@@ -62,6 +63,15 @@ export function buildHead(
     crossOrigin: '',
   }))
 
+  // This page's own block ids, exactly as `src/client.tsx`'s `blocksForCurrentUrl` derives them —
+  // knowable statically from `pages.config.ts`. Preloading lets the browser fetch these chunks in
+  // parallel with the main chunk instead of discovering them only after it has executed.
+  const blockIds = page.blocks.map((b) => (typeof b === 'string' ? b : b.id))
+  const modulePreloads = blockPreloadHrefs(blockIds).map((href) => ({
+    rel: 'modulepreload',
+    href,
+  }))
+
   return {
     meta: [
       { title },
@@ -80,6 +90,7 @@ export function buildHead(
     ],
     links: [
       ...criticalFontPreloads,
+      ...modulePreloads,
       { rel: 'canonical', href: canonical },
       ...alternates,
       {

@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-
 export type Locale = 'mn' | 'en'
 export type Surface = 'default' | 'muted' | 'accent'
 
@@ -76,7 +74,12 @@ export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig
 // biome-ignore lint/suspicious/noExplicitAny: any is the only default that keeps keyof C usable unparameterized.
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  variants: Record<V, (props: BlockProps<C>) => ReactNode>
+  // Names only, not components: components live behind `src/blocks/block-modules.ts`'s dynamic
+  // import so Vite can split them out of the main chunk. A manifest importing its own components
+  // would put them right back on the static chain from `registry.ts` — see that file's header
+  // comment. Declare this with `as const` on the array literal so a `defaultVariant` not in the
+  // list stays a compile error.
+  variantNames: readonly V[]
   defaultVariant: V
   copy: Record<Locale, C>
   nav?: { labelKey: keyof C & string }

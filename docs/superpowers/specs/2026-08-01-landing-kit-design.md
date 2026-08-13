@@ -181,6 +181,15 @@ Blocks read no context and no hooks for data. Everything arrives as props. Conse
   router, no theme provider.
 - The CLI can compose blocks freely, because there is no hidden wiring to reproduce.
 
+**Internal navigation is a full page load, deliberately.** The client entry resolves the current
+URL's block modules before hydrating, so no component suspends during the hydration pass. It does
+*not* re-resolve them on a client-side route change — so introducing TanStack Router's `<Link>` for
+internal navigation would render a page whose block modules were never loaded, throwing from
+`getVariants`. Every page here is prerendered static HTML, so a full load is cheap and is the
+model the kit is built on; `<a href>` is the correct element, not a missing optimisation.
+`scripts/check-conventions.mjs` enforces this, because the failure would otherwise appear only at
+runtime on whichever page someone linked to.
+
 **Anchor ids belong to the renderer, not the block.** A page may carry the same block twice —
 two CTAs, or a hero above and below a feature list — and a block hardcoding
 `<Section id="cta">` would then emit duplicate ids: invalid HTML, plus anchor links that always
@@ -508,15 +517,25 @@ the difference between passing and failing a Performance budget.
 
 So the two presets have different licences:
 
-- **`FadeIn`** runs on load, above the fold, and wraps the LCP element. It may animate
-  **`transform` only**. Content is fully opaque in the static HTML, merely offset a few pixels,
-  and settles to its final position after hydration. Nothing is ever invisible, LCP fires at
-  first paint, and `transform` cannot cause CLS.
-- **`Reveal`** is scroll-triggered and used below the fold, where content is off-screen at load
-  and is never the LCP element. It may animate opacity as well as transform.
+**No preset may animate opacity. All of them animate `transform` only.** Content is fully opaque
+in the static HTML, merely offset a few pixels, and settles after hydration. Nothing is ever
+invisible, LCP fires at first paint, and `transform` cannot cause CLS.
 
-A genuine opacity fade on above-the-fold content is therefore a deliberate LCP trade-off, not a
-default. If a client project wants one, it opts in knowingly.
+- **`FadeIn`** runs on load, above the fold, and wraps the LCP element.
+- **`Reveal`** is scroll-triggered, for content below the fold.
+
+An earlier version of this spec exempted `Reveal`, reasoning that its content is off-screen at
+load so hiding it costs nothing. **That was wrong, and the first block to actually use `Reveal`
+failed the build.** Off-screen is not the same as absent from the document: a scroll-triggered
+`initial={{ opacity: 0 }}` still ships `style="opacity:0"` in the prerendered HTML, so a visitor
+whose JavaScript fails sees blank sections, and a crawler reads content the page has marked
+invisible. Below-the-fold content is a smaller LCP problem than the hero, but it is the same
+robustness and indexing problem.
+
+`verify-build.mjs` already enforces this — it fails on any `opacity:0`, `visibility:hidden` or
+`display:none` in prerendered output. The rule and the exemption could not both hold, and the
+assertion was the one that was right. The mental model is now one rule with no exceptions: **this
+kit never ships hidden content.**
 
 A Biome `noRestrictedImports` rule forbids importing `motion` anywhere except
 `src/shell/motion.ts`, so the boundary cannot erode. Presets also mean
