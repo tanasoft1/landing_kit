@@ -1,7 +1,7 @@
-import { Reveal } from '~/motion'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
-import type { BlockProps } from '~/shell/types'
+import { Reveal } from '@/motion'
+import { Container } from '@/shell/layout/container'
+import { Section } from '@/shell/layout/section'
+import type { BlockProps } from '@/shell/types'
 import type { CtaCopy } from './copy.mn'
 
 export function CtaSplit({ copy, resolve, surface, anchorId, headingLevel }: BlockProps<CtaCopy>) {

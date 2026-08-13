@@ -6,7 +6,7 @@
 // access, which Rollup does not statically validate, so the client build resolves cleanly; the
 // access itself is still never reached there once the dead branch is stripped.
 import * as nodeFs from 'node:fs'
-import type { BlockId } from '~/blocks/registry'
+import type { BlockId } from '@/blocks/registry'
 import { OUT_DIR } from './out-dir'
 
 type ManifestChunk = {

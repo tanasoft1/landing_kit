@@ -1,4 +1,4 @@
-import type { BlockManifest } from '~/shell/types'
+import type { BlockManifest } from '@/shell/types'
 import { contact } from './contact/manifest'
 import { cta } from './cta/manifest'
 import { features } from './features/manifest'

@@ -1,5 +1,5 @@
-import { registry } from '~/blocks/registry'
-import type { PageConfig, SiteConfig } from '~/shell/types'
+import { registry } from '@/blocks/registry'
+import type { PageConfig, SiteConfig } from '@/shell/types'
 import { localePath } from './enumerate'
 import type { ResolvedPage } from './resolve-request'
 

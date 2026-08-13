@@ -3,7 +3,7 @@ import {
   type SubmitModule,
   type SubmitResult,
   submissionSchema,
-} from '~/submit-schema'
+} from '@/submit-schema'
 
 export async function submitContact(input: SubmissionInput): Promise<SubmitResult> {
   // Same schema the RPC variant validates, so neither mode is the weaker one.

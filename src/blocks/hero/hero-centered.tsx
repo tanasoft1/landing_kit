@@ -1,7 +1,7 @@
-import { FadeIn } from '~/motion'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
-import type { BlockProps } from '~/shell/types'
+import { FadeIn } from '@/motion'
+import { Container } from '@/shell/layout/container'
+import { Section } from '@/shell/layout/section'
+import type { BlockProps } from '@/shell/types'
 import type { HeroCopy } from './copy.mn'
 
 export function HeroCentered({
