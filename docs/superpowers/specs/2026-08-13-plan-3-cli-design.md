@@ -11,7 +11,7 @@
 A developer has a project repo. It already has `backend/` in it. They run:
 
 ```bash
-pnpm dlx tana-landing-kit@latest frontend
+pnpm dlx @tanasoft/landingkit@latest frontend
 ```
 
 They now have `frontend/` — a complete bilingual landing site. Routing, SEO, dark mode,
@@ -43,7 +43,7 @@ monorepo/
 |---|---|---|
 | C1 | Generator only — generated code has no `@tanasoft/*` dependency | Agency sites get redesigned per client. A shared package would be forked or escape-hatched constantly. |
 | C2 | Output is a folder inside an existing repo, beside `backend/` | This is how Tanasoft client projects are laid out. |
-| C3 | Published to public npm as `tana-landing-kit` | Zero setup for developers. Source becomes readable — accepted knowingly. |
+| C3 | Published to public npm as `@tanasoft/landingkit` | Zero setup for developers. Source becomes readable — accepted knowingly. The scope is free and unused as of 2026-08-13. |
 | C4 | CLI lives in this repo, not a separate one or a workspace split | What gets published is the same tree `pnpm verify` proves. No template copy can drift. |
 | C5 | Locales are never asked. Every site is `mn` + `en`, `mn` unprefixed | Bilingual routing is the kit's point and the hardest thing to retrofit. A choice here invites a regret. |
 | C6 | Client details are left as placeholders, not prompted | Faster scaffold. The one dangerous placeholder is guarded by a build check (see §7). |
@@ -167,8 +167,10 @@ and every generated site inherits it.
 Then the CLI work:
 
 1. **Add `cli/`** — plain `.mjs`, matching `scripts/`. No build step, no TypeScript compile.
-2. **Add `"bin": { "tana-landing-kit": "./cli/index.mjs" }`** to `package.json`.
-3. **Remove `"private": true`** and add a LICENSE, so npm accepts the package.
+2. **Add `"bin": { "landingkit": "./cli/index.mjs" }`** to `package.json`.
+3. **Remove `"private": true`** and add a LICENSE, so npm accepts the package. Also add
+   `"publishConfig": { "access": "public" }` — scoped packages publish as private by
+   default, and the first `npm publish` fails with a payment error without it.
 4. **Move `react`, `react-dom`, `vite`, `tailwindcss` and the rest of the app packages into
    `devDependencies`.** They are what this repo needs to build and verify the kit, not what
    someone needs to run the generator. Anything left in `dependencies` gets downloaded by
@@ -194,7 +196,9 @@ Then the CLI work:
 
 ## 8. Publishing
 
-Manual, to start:
+One-time setup: create the `tanasoft` organization on npmjs.com (free for public packages).
+
+Then, manually to start:
 
 ```bash
 # bump "version" in package.json
@@ -226,7 +230,7 @@ and looking at the result.
    failing before it is trusted — a standing rule on this project, which has caught real
    defects.
 7. **The real command, on a second machine — Tengis does this after publishing.** `pnpm dlx
-   tana-landing-kit@latest frontend` from a published version, not a local path. Local
+   @tanasoft/landingkit@latest frontend` from a published version, not a local path. Local
    testing cannot prove the published package contains the right files. This is the one
    check that catches a wrong `files` list, and it cannot be done before publishing, so it
    sits outside the build.
