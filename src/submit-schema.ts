@@ -1,10 +1,9 @@
 import { z } from 'zod'
 
 /**
- * Field validation only. Timing is checked separately and deliberately NOT folded in here:
- * a single schema covering both means a genuinely fast human — someone using autofill or a
- * password manager — is told "please complete every field correctly" when every field is in
- * fact correct. Misattributing the cause on a lead-capture form loses the lead.
+ * Field validation only. Timing is checked separately, deliberately: folding both into one
+ * schema would tell a genuinely fast human (autofill, password manager) their correct fields
+ * are wrong — misattributing the cause loses the lead.
  */
 export const contactSchema = z.object({
   name: z.string().min(2).max(120),
@@ -22,17 +21,11 @@ export const contactSchema = z.object({
 export const MIN_ELAPSED_MS = 2000
 
 /**
- * What actually goes over the wire, and what BOTH submit variants validate.
+ * What goes over the wire, validated by both submit variants.
  *
- * `elapsedMs` is required here, deliberately. Splitting it out of `contactSchema` above fixed a
- * real bug — a fast human was told their correct fields were wrong — but dropping it from
- * validation altogether would have left the timing guard purely client-side, where a bot never
- * runs it. A naive script POSTing `{name, email, message}` straight at the endpoint would then
- * sail through with only the honeypot standing in its way.
- *
- * Keeping it required restores that: the client computes `elapsedMs` *after* waiting out any
- * remainder, so a genuine fast submission passes, while a request that never ran the form is
- * rejected for a missing field.
+ * `elapsedMs` required, deliberately: without it the timing guard would be client-only, and a
+ * bot script POSTing straight at the endpoint would sail through with only the honeypot in its
+ * way. The client computes it after waiting out any remainder, so a real fast submission still passes.
  */
 export const submissionSchema = contactSchema.extend({
   elapsedMs: z.number().int().min(MIN_ELAPSED_MS),

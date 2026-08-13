@@ -68,17 +68,14 @@ export type BlockProps<C> = {
 
 export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig }) => JsonLdNode[]
 
-// `unknown` as C's default would make `keyof C` resolve to `never` for a bare `BlockManifest`
-// reference, so `nav?: { labelKey: keyof C & string }` below could never be satisfied without
-// the caller re-parameterizing C explicitly every time.
+// `unknown` as C's default would make `keyof C` resolve to `never` for a bare `BlockManifest`,
+// breaking `nav?: { labelKey: keyof C & string }` below unless every caller re-parameterizes C.
 // biome-ignore lint/suspicious/noExplicitAny: any is the only default that keeps keyof C usable unparameterized.
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  // Names only, not components: components live behind `src/blocks/block-modules.ts`'s dynamic
-  // import so Vite can split them out of the main chunk. A manifest importing its own components
-  // would put them right back on the static chain from `registry.ts` — see that file's header
-  // comment. Declare this with `as const` on the array literal so a `defaultVariant` not in the
-  // list stays a compile error.
+  // Names only, not components: components live behind block-modules.ts's dynamic import, so
+  // Vite can split them from the main chunk. Use `as const` on the array so a `defaultVariant`
+  // not in the list stays a compile error.
   variantNames: readonly V[]
   defaultVariant: V
   copy: Record<Locale, C>

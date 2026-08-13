@@ -26,17 +26,16 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
 
     setState('sending')
 
-    // Timing guard, handled separately from field validation. If the fields are valid but the
-    // submission arrived too fast, wait out the remainder rather than rejecting: a bot does not
-    // stay to see the promise resolve, and a fast human should never be told their correct
-    // fields are wrong. The user sees the normal "sending" state throughout.
+    // Timing guard, separate from field validation. If valid but too fast, wait out the
+    // remainder rather than rejecting: a bot won't stay for the promise to resolve, and a fast
+    // human should never be told their correct fields are wrong.
     const elapsed = Date.now() - mountedAt.current
     if (elapsed < MIN_ELAPSED_MS) {
       await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
     }
 
-    // Recomputed AFTER the wait, so it reflects real time on screen and satisfies the
-    // server-side minimum that `submissionSchema` enforces.
+    // Recomputed after the wait, so it reflects real time on screen and passes the
+    // server-side minimum `submissionSchema` enforces.
     const payload = { ...parsed.data, elapsedMs: Date.now() - mountedAt.current }
     const result = await submitContact(payload)
     if (result.ok) {
@@ -72,15 +71,11 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
           </label>
 
           {/*
-            Honeypot. Three things matter here:
-            - `-left-96` is a scale value, not an arbitrary `-left-[9999px]` bracket escape —
-              blocks may not use arbitrary values, and the convention checker now catches them.
-            - It must NOT be `display:none`: verify-build rejects hidden content, and bots
-              detect it.
-            - The field is named `honeypot_url`, not something like `company`, because browsers
-              and password managers autofill recognised field names even with
-              `autoComplete="off"` — and an autofilled honeypot silently discards a real lead,
-              the one failure a client never reports and never forgives.
+            Honeypot. `-left-96` is a scale value, not an arbitrary `-left-[9999px]` bracket
+            escape (blocks may not use those). Not `display:none`: verify-build rejects hidden
+            content, and bots detect it. Named `honeypot_url`, not e.g. `company`: autofill
+            matches recognised field names even with `autoComplete="off"`, and an autofilled
+            honeypot loses a real lead.
           */}
           <div aria-hidden="true" className="absolute -left-96">
             <input
@@ -100,24 +95,17 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
           </button>
 
           {/*
-            The live region is ALWAYS mounted and only its text changes. A `role="status"`
-            node inserted fresh on state change is announced inconsistently across
-            screen-reader and browser combinations — so on a form whose entire purpose is
-            lead capture, the failure message can go unheard by exactly the users who most
-            need it.
+            The live region is always mounted; only its text changes. A `role="status"` node
+            inserted fresh on state change is announced inconsistently across screen readers.
           */}
           <p
             role="status"
             aria-live="polite"
-            // Preset tokens, not stock Tailwind palette colours: a fixed palette colour does not
-            // move when the preset swaps, and the red/green pair this replaced read poorly on
-            // either preset's dark background. Lighthouse never audits these — the region is
-            // `sr-only` until a submission resolves — so the contrast was measured rather than
-            // eyeballed; see the notes beside `--c-destructive`/`--c-success` in each preset.
-            //
-            // The class names this replaced are deliberately not written out anywhere: Tailwind
-            // v4's source scanner is comment-blind, so naming them in prose is enough to keep the
-            // dead utilities in the shipped stylesheet.
+            // Preset tokens, not stock Tailwind colours: a fixed colour wouldn't move with a
+            // preset swap, and Lighthouse never audits this (sr-only until resolved), so contrast
+            // was measured, not eyeballed — see `--c-destructive`/`--c-success` in each preset.
+            // The replaced class names aren't written out here: Tailwind's scanner is
+            // comment-blind, and naming them would keep the dead utilities in the built CSS.
             className={
               !message
                 ? 'sr-only'

@@ -26,9 +26,8 @@ export function RenderBlocks({
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
 
-        // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export (see
-        // registry.ts), so `registry[id]` already resolves to `BlockManifest<any, any>` here —
-        // no per-call-site widening needed.
+        // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export, so no
+        // per-call-site widening is needed here.
         const manifest = registry[id]
         if (!manifest) {
           throw new Error(
