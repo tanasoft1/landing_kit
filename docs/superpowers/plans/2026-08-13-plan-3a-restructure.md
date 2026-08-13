@@ -62,7 +62,9 @@ pnpm lighthouse:desktop  # desktop, >= 0.95 performance, hard error
 
 `src/shell/` is then empty and gone.
 
-**Modified, not moved:** `tsconfig.json`, `vite.config.ts`, `biome.json`, `components.json`, `scripts/check-conventions.mjs`, `scripts/verify-build.mjs` (comments only), `README.md`, and every file in `src/` that imports with `~/` (44 files).
+**Modified, not moved:** `tsconfig.json`, `vite.config.ts`, `biome.json`, `components.json`, `scripts/check-conventions.mjs`, `scripts/verify-build.mjs` (comments only), `README.md`, every file in `src/` that imports with `~/` (44 files), and `configs/smoke-onepage/site.config.ts` + `configs/smoke-onepage/pages.config.ts`.
+
+**Watch `configs/` and `vite.config.ts`.** Both sit outside `src/` and both reference the moved files — `configs/` through the `~/shell/types` alias, `vite.config.ts` through relative `./src/shell/...` paths. Every find-and-replace in this plan scopes to `src/`, `configs/` and `scripts/`; `vite.config.ts` is edited by hand only.
 
 **Not changed, and confirm it stays that way:** `src/styles/theme.css`. Its globs are `@source "../**/*.{ts,tsx}"` and `@source "../../configs/**/*.{ts,tsx}"` — relative to `src/styles/`, so they already cover all of `src/`. The moves stay inside `src/`. If you find yourself editing this file, stop and re-read why.
 
@@ -78,6 +80,7 @@ No files move. Pure find-and-replace plus four config files. Done first because 
 - Modify: `biome.json:22-29` (the `noRestrictedImports` paths)
 - Modify: `components.json` (the `aliases` block)
 - Modify: every file under `src/` with a `~/` import (44 files)
+- Modify: `configs/smoke-onepage/site.config.ts` and `configs/smoke-onepage/pages.config.ts` (3 `~/` imports) — easy to miss, they sit outside `src/`
 - Modify: `README.md`
 
 **Interfaces:**
@@ -134,6 +137,9 @@ In the `resolve.alias` block, rename the five keys. Do not change the values or 
 Only the five keys change. Every value stays exactly as it is, and the order stays as it is —
 the `'@'` catch-all must remain last or it will shadow the four specific aliases.
 
+One more spot in the same file, also by hand: the comment at `vite.config.ts:18` opens with
+"The `~/config` alias below" — change that to `@/config`.
+
 The `submit` comment above is already shortened per Task 3's rule (it was six lines); that is
 intentional, apply it as written.
 
@@ -166,20 +172,24 @@ Six of the eight `noRestrictedImports` keys start with `~/`. Rename the keys and
   }
 ```
 
-- [ ] **Step 7: Rewrite the imports in `src/`**
+- [ ] **Step 7: Rewrite the imports in `src/` and `configs/`**
+
+`configs/` is easy to forget — it is outside `src/`, but `configs/smoke-onepage/` imports `~/shell/types` and `~/blocks/registry`. Miss it and `pnpm smoke:onepage` fails at Step 9.
 
 Only import specifiers. Match the quote so a stray `~/` in prose is not touched:
 
 ```bash
-grep -rl "from '~/\|import('~/" src/ | xargs perl -pi -e "s{(from |import\()'~/}{\$1'\@/}g"
+grep -rl "from '~/\|import('~/" src/ configs/ | xargs perl -pi -e "s{(from |import\()'~/}{\$1'\@/}g"
 ```
 
 Then confirm nothing was missed and nothing else changed:
 
 ```bash
-grep -rn "'~/" src/ || echo "clean: no ~/ import specifiers left in src/"
+grep -rn "'~/" src/ configs/ || echo "clean: no ~/ import specifiers left"
 git diff --stat
 ```
+
+Expect 3 changed lines in `configs/`, across two files.
 
 - [ ] **Step 8: Verify the boundary aliases still resolve**
 
@@ -243,8 +253,9 @@ git commit -m "refactor: use the @/ import alias, matching React and Vite conven
 
 **Files:**
 - Move: the 20 files in the File Structure table above
-- Modify: every file importing from `@/shell/...` (73 import sites)
-- Modify: `scripts/check-conventions.mjs:261-262`, `:268`, `:325`, `:497`
+- Modify: every file importing from `@/shell/...` (73 import sites), including `configs/smoke-onepage/`
+- Modify: `vite.config.ts:10-12` and `:28` — **by hand**. These are relative paths (`./src/shell/...`), not `@/shell/`, so no find-and-replace will catch them.
+- Modify: `scripts/check-conventions.mjs:258`, `:261-262`, `:268`, `:325`, `:485`, `:497`, `:567`
 - Modify: `scripts/verify-build.mjs:13`, `:74` (comments only)
 - Modify: `README.md`
 
@@ -293,7 +304,7 @@ ls src/shell 2>&1 | head -1   # expect: No such file or directory
 Longest patterns first, so a shorter one cannot shadow a longer one:
 
 ```bash
-grep -rl "@/shell/" src/ scripts/ | xargs perl -pi -e "
+grep -rl "@/shell/" src/ configs/ scripts/ | xargs perl -pi -e "
   s{\@/shell/blocks/render-blocks}{\@/components/render-blocks}g;
   s{\@/shell/chrome/}{\@/components/}g;
   s{\@/shell/layout/}{\@/components/layout/}g;
@@ -304,8 +315,30 @@ grep -rl "@/shell/" src/ scripts/ | xargs perl -pi -e "
   s{\@/shell/seo/}{\@/lib/seo/}g;
   s{\@/shell/types}{\@/lib/types}g;
 "
-grep -rn "@/shell" src/ scripts/ || echo "clean: no @/shell references left"
+grep -rn "@/shell" src/ configs/ scripts/ || echo "clean: no @/shell references left"
 ```
+
+`configs/smoke-onepage/` imports `@/shell/types` in both its files. It is outside `src/`, so it is the one most likely to be skipped.
+
+- [ ] **Step 2b: Update `vite.config.ts` by hand**
+
+This file imports three of the moved files by **relative path**, so the find-and-replace above cannot see them. It is also the file the global constraints forbid scripting. Use the Edit tool.
+
+Lines 10-12 become:
+
+```ts
+import { enumerateUrls } from './src/lib/pages/enumerate'
+import { emitSeoFiles } from './src/lib/seo/emit-plugin'
+import { OUT_DIR } from './src/lib/seo/out-dir'
+```
+
+Line 28's comment becomes:
+
+```ts
+  // Read by `src/lib/seo/block-preloads.ts` at prerender time: `dist/client/.vite/manifest.json`
+```
+
+Import order matters to Biome's `organizeImports`: `./src/lib/...` sorts after `./src/config/...`, which is where these three already sit, so the existing order still holds. Run `pnpm lint` after the edit to confirm.
 
 - [ ] **Step 3: Typecheck**
 
@@ -313,9 +346,11 @@ Run: `pnpm typecheck`
 
 Expected: PASS. Any failure names the exact file and specifier that was missed.
 
-- [ ] **Step 4: Update the four path literals in `scripts/check-conventions.mjs`**
+- [ ] **Step 4: Update the paths in `scripts/check-conventions.mjs`**
 
-These are the layout-rule exemptions and the directories that get walked. Getting this wrong silently stops enforcing a rule, so change them deliberately rather than with a blanket replace.
+Four are live path literals; three are comments and a summary line. Getting a literal wrong silently stops enforcing a rule, so change them deliberately rather than with a blanket replace.
+
+**The four that change behaviour:**
 
 At `:261-262`, the primitive exemption list:
 
@@ -340,6 +375,18 @@ At `:497`, the RECIPES source:
 
 ```js
 const CONFIG_REFERENCE = 'src/components/docs/config-reference.tsx'
+```
+
+**The three that are text only, but must not be left pointing at a folder that no longer exists:**
+
+At `:258`, inside the comment above `LAYOUT_PRIMITIVES`: `src/shell/layout/` → `src/components/layout/`.
+
+At `:485`, above the RECIPES guard: `src/shell/docs/config-reference.tsx` → `src/components/docs/config-reference.tsx`.
+
+At `:567`, the success summary line, which names the walked directories:
+
+```js
+  '✓ check-conventions: layout primitives in blocks/routes/components, no literal <h1>/<h2> in blocks, ' +
 ```
 
 **`src/lib` is deliberately not walked.** The layout rules are about JSX — raw `<section>`, `py-section`, literal headings — and `src/lib` holds no JSX at all. Adding it would scan files that cannot violate the rules. If a `.tsx` file ever appears under `src/lib`, it is in the wrong folder.
@@ -513,7 +560,8 @@ git commit -m "docs: shorten comments to one or two lines each"
 ## Definition of done
 
 - [ ] `src/shell/` no longer exists
-- [ ] No `~/` import specifiers anywhere in `src/` or `scripts/`
+- [ ] `grep -rn "~/" src/ configs/ scripts/ vite.config.ts tsconfig.json biome.json components.json README.md` returns nothing that is an import alias
+- [ ] `grep -rn "shell" src/ configs/ scripts/ vite.config.ts README.md` returns nothing
 - [ ] `pnpm verify`, `pnpm smoke:full`, `pnpm smoke:onepage` all exit 0
 - [ ] `pnpm lighthouse` and `pnpm lighthouse:desktop` both pass, no threshold moved
 - [ ] Built CSS hash matches the Task 1 Step 1 baseline
