@@ -1,0 +1,62 @@
+:root {
+  /* Skin: font pairing. Both families must have Cyrillic coverage. */
+  --face-display: "Manrope Variable", system-ui, sans-serif;
+  --face-body: "Inter Variable", system-ui, sans-serif;
+
+  /* Skin: shape and rhythm. Generous vertical air is most of the look. */
+  --radius: 0.5rem;
+  --section-y: clamp(5rem, 11vw, 9.5rem);
+  --gutter: clamp(1.25rem, 5vw, 2.5rem);
+  --width-page: 68rem;
+  --width-narrow: 34rem;
+  /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
+     differ between themes is declared once here rather than repeated below.
+     Deliberately `0 0 #0000`, not `none`: the generated `.shadow-card` utility substitutes this
+     token into a comma-separated `box-shadow` list alongside Tailwind's other shadow layers
+     (`box-shadow: var(--tw-inset-shadow), …, var(--tw-shadow)`), and `none` is not a legal item
+     inside a comma-separated shadow list — a value of `none` there makes the whole declaration
+     invalid at computed-value time, which happens to also fall back to initial (`none`), so it
+     renders correctly by accident. `0 0 #0000` is a legal, fully transparent shadow: same visible
+     result (nothing), reached for the right reason. Do not "tidy" this back to `none`. */
+  --elevation-card: 0 0 #0000;
+
+  /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
+  --c-background: oklch(99.2% 0.002 260);
+  --c-foreground: oklch(18% 0.008 260);
+  --c-muted: oklch(97% 0.003 260);
+  --c-muted-foreground: oklch(46% 0.008 260);
+  --c-accent: oklch(95.5% 0.004 260);
+  --c-border: oklch(90% 0.004 260);
+  --c-primary: oklch(52% 0.17 258);
+  --c-primary-foreground: oklch(99.2% 0.002 260);
+  --c-ring: oklch(52% 0.17 258);
+
+  /* Status. Part of the preset surface, not a hardcoded stock palette colour: a fixed palette
+     colour does not move when the preset swaps, and the red/green pair this replaced read poorly
+     against either preset's dark background. (The old class names are not written out here —
+     Tailwind v4's scanner is comment-blind, so naming them would keep the dead utilities in the
+     built stylesheet.) Lighthouse never sees these — the live region is `sr-only`
+     until a submission resolves — so they are chosen by measurement rather than by eye.
+     Measured against every surface this text can land on (background/muted/accent), worst case:
+     destructive 5.33:1, success 5.42:1, both over the 4.5:1 AA floor for normal-weight text. */
+  --c-destructive: oklch(52% 0.19 27);
+  --c-success: oklch(48% 0.12 152);
+}
+
+.dark {
+  /* Authored, not inverted: dark surfaces step up in lightness, chroma stays low. */
+  --c-background: oklch(15.5% 0.008 265);
+  --c-foreground: oklch(97% 0.003 260);
+  --c-muted: oklch(19.5% 0.009 265);
+  --c-muted-foreground: oklch(70% 0.01 262);
+  --c-accent: oklch(23% 0.011 265);
+  --c-border: oklch(27% 0.011 265);
+  --c-primary: oklch(74% 0.14 258);
+  --c-primary-foreground: oklch(15.5% 0.008 265);
+  --c-ring: oklch(74% 0.14 258);
+  /* Re-authored for the dark surfaces, not carried forward: the light-mode values are far too
+     dark to read on a 15.5%-lightness background. Worst case here: destructive 5.90:1,
+     success 7.18:1. */
+  --c-destructive: oklch(70% 0.16 27);
+  --c-success: oklch(72% 0.13 152);
+}

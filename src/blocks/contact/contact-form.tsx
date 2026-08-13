@@ -109,12 +109,21 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
           <p
             role="status"
             aria-live="polite"
+            // Preset tokens, not stock Tailwind palette colours: a fixed palette colour does not
+            // move when the preset swaps, and the red/green pair this replaced read poorly on
+            // either preset's dark background. Lighthouse never audits these — the region is
+            // `sr-only` until a submission resolves — so the contrast was measured rather than
+            // eyeballed; see the notes beside `--c-destructive`/`--c-success` in each preset.
+            //
+            // The class names this replaced are deliberately not written out anywhere: Tailwind
+            // v4's source scanner is comment-blind, so naming them in prose is enough to keep the
+            // dead utilities in the shipped stylesheet.
             className={
               !message
                 ? 'sr-only'
                 : state === 'error'
-                  ? 'text-sm text-red-600'
-                  : 'text-sm text-green-700'
+                  ? 'text-destructive text-sm'
+                  : 'text-success text-sm'
             }
           >
             {message}
