@@ -44,9 +44,9 @@ export type ContactInput = z.infer<typeof contactSchema>
 export type SubmitResult = { ok: true } | { ok: false; error: string }
 
 /**
- * Every `~/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one
+ * Every `@/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one
  * variant, so without this the other is never type-checked and the swapped configuration
- * becomes the one nobody verifies. Same rule as `~/motion` and `~/theme`.
+ * becomes the one nobody verifies. Same rule as `@/motion` and `@/theme`.
  */
 export type SubmitModule = {
   submitContact: (input: SubmissionInput) => Promise<SubmitResult>

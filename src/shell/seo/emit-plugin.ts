@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Plugin } from 'vite'
-// Relative, NOT `~/` — this module is imported by vite.config.ts, and the `~/` alias is
+// Relative, NOT `@/` — this module is imported by vite.config.ts, and the `@/` alias is
 // defined inside that config, so it does not exist yet while the config is being loaded.
 import { enumerateUrls } from '../pages/enumerate'
 import type { PageConfig, SiteConfig } from '../types'
