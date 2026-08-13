@@ -29,8 +29,8 @@ export async function submitContact(input: SubmissionInput): Promise<SubmitResul
   }
 }
 
-// Drift between the two `~/submit` variants is a type error here, not a runtime surprise —
-// tsconfig's `paths` only ever type-checks `~/submit` against one variant, so the other
+// Drift between the two `@/submit` variants is a type error here, not a runtime surprise —
+// tsconfig's `paths` only ever type-checks `@/submit` against one variant, so the other
 // (KIT_SUBMIT=server) would otherwise be the one configuration nothing type-checks.
 const _contract: SubmitModule = { submitContact }
 void _contract

@@ -15,8 +15,8 @@ export function Stagger({ children, className }: { children: ReactNode; classNam
   return <div className={className}>{children}</div>
 }
 
-// Drift between the two `~/motion` variants is a type error here, not a runtime surprise —
-// tsconfig's `paths` only ever type-checks `~/motion` against motion.animated.tsx, so this
+// Drift between the two `@/motion` variants is a type error here, not a runtime surprise —
+// tsconfig's `paths` only ever type-checks `@/motion` against motion.animated.tsx, so this
 // file (KIT_ANIMATION=off) would otherwise be the one configuration nothing type-checks.
 const _contract: MotionModule = { FadeIn, Reveal, Stagger }
 void _contract

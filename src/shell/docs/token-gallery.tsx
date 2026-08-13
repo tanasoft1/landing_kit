@@ -54,7 +54,7 @@ export function TokenGallery() {
           lives. Rather than reword it into an instruction to go and find one somewhere else, the
           toggle is rendered here, next to the swatches it changes.
 
-          In a single-mode build (`site.theme.mode` is not `'both'`) `~/theme` resolves to
+          In a single-mode build (`site.theme.mode` is not `'both'`) `@/theme` resolves to
           `theme.single.tsx`, whose `ThemeToggle` renders `null` and imports no implementation —
           so this adds no theme-switching code to a build that has none, and the sentence below
           adjusts with it rather than promising a control that cannot exist.

@@ -6,7 +6,7 @@ import {
   submissionSchema,
 } from '@/submit-schema'
 
-// Deliberately named `.rpc.ts`, not `.server.ts` — see the `~/submit` alias comment in
+// Deliberately named `.rpc.ts`, not `.server.ts` — see the `@/submit` alias comment in
 // vite.config.ts for why. Do NOT rename this back to `submit.server.ts` and do NOT re-add an
 // `importProtection.client.excludeFiles` entry: that would silently disable the guard for every
 // other file too. If real server-only secrets or logic land here, split them into a separate
@@ -29,8 +29,8 @@ export async function submitContact(input: SubmissionInput): Promise<SubmitResul
   }
 }
 
-// Drift between the two `~/submit` variants is a type error here, not a runtime surprise —
-// tsconfig's `paths` only ever type-checks `~/submit` against one variant, so the other
+// Drift between the two `@/submit` variants is a type error here, not a runtime surprise —
+// tsconfig's `paths` only ever type-checks `@/submit` against one variant, so the other
 // (KIT_SUBMIT=server) would otherwise be the one configuration nothing type-checks.
 const _contract: SubmitModule = { submitContact }
 void _contract

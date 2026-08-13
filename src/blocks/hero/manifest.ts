@@ -3,7 +3,7 @@ import { en } from './copy.en'
 import { type HeroCopy, mn } from './copy.mn'
 
 // No component import here — deliberately. See `./variants.ts` for the component map and
-// `~/blocks/block-modules.ts` for why: this manifest is imported eagerly by `registry.ts` because
+// `@/blocks/block-modules.ts` for why: this manifest is imported eagerly by `registry.ts` because
 // the SEO layer needs `copy`/`nav`/`schema` synchronously, so a component reachable from here
 // joins that eager chain and lands in the main chunk.
 //
