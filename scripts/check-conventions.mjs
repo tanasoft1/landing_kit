@@ -335,13 +335,51 @@ walkFiles('src/routes', checkNoRouterLink)
 // `Disallow` would stop the crawler fetching the page and therefore stop it ever reading this
 // tag (see src/routes/docs.tsx's header comment, and the matching assertion in verify-build.mjs).
 // Delete this tag and `/docs` becomes indexable with no other signal saying otherwise.
+//
+// Read off the AST, not with a regex over the source text. The regex this replaced passed GREEN
+// when the meta was commented out — `// { name: 'robots', content: 'noindex, nofollow' },` still
+// matched, because a regex cannot tell code from a comment. That is a silent false negative in the
+// single mechanism keeping `/docs` out of the index on an SSR deploy: precisely the failure this
+// assertion exists to prevent, hidden inside the assertion itself. An object literal in the AST is
+// an object literal; a commented-out one does not exist.
 const DOCS_ROUTE = 'src/routes/docs.tsx'
-const DOCS_ROBOTS_META = /name:\s*(['"])robots\1[\s\S]{0,120}?content:\s*(['"])[^'"]*\bnoindex\b/
+
+/** `{ name: 'robots', content: '… noindex …' }` as a real object literal anywhere in the module. */
+function hasNoindexRobotsMeta(sf) {
+  const literalText = (node) => {
+    if (!node) return null
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text
+    return null
+  }
+  let found = false
+  const visit = (node) => {
+    if (found) return
+    if (ts.isObjectLiteralExpression(node)) {
+      let name = null
+      let content = null
+      for (const prop of node.properties) {
+        if (!ts.isPropertyAssignment(prop)) continue
+        const key =
+          ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) ? prop.name.text : null
+        if (key === 'name') name = literalText(prop.initializer)
+        else if (key === 'content') content = literalText(prop.initializer)
+      }
+      if (name === 'robots' && content !== null && /\bnoindex\b/.test(content)) {
+        found = true
+        return
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+  return found
+}
+
 if (!existsSync(DOCS_ROUTE)) {
   failures.push(
     `${DOCS_ROUTE}  missing — the docs route is allow-listed in verify-build.mjs and expected here`,
   )
-} else if (!DOCS_ROBOTS_META.test(readFileSync(DOCS_ROUTE, 'utf8'))) {
+} else if (!hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
   failures.push(
     `${DOCS_ROUTE}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
       `this tag is the ONLY thing keeping /docs out of the index on an SSR deploy (robots.txt ` +
