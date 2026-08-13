@@ -5,8 +5,9 @@ import { TokenGallery } from '@/components/docs/token-gallery'
 import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 
-// Deliberately absent from pages.config.ts: excludes it from prerendering and the sitemap
-// (both driven by `enumerateUrls`). The `noindex, nofollow` meta below is the third mechanism.
+// Deliberately absent from pages.config.ts: excludes it from the sitemap (`enumerateUrls`) and,
+// together with `autoStaticPathsDiscovery`/`crawlLinks` both false in vite.config.ts, from
+// prerendering. The `noindex, nofollow` meta below is the third mechanism.
 //
 // No `Disallow: /docs` in robots.txt, deliberately: `Disallow` and `noindex` cancel each other —
 // a crawler that obeys `Disallow` never fetches the page, so it never sees the `noindex`, and an

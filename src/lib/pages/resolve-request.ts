@@ -14,9 +14,9 @@ export type ResolvedPage<Id extends string = string> = {
  *
  * Also collapses a trailing `/index.html` to `/`: a host serving prerendered files by literal
  * filename (Lighthouse CI's static server does) leaves `window.location.pathname` as
- * `/index.html` on hydration. Without this the client router finds no route, and the page
- * silently swaps to "Not Found" right after hydrating — invisible on click-through but it
- * tanks LCP, since Lighthouse measures the post-hydration repaint.
+ * `/index.html` on hydration. Without this the client router matches only the `$` splat, and
+ * the page silently swaps to "Not Found" right after hydrating — invisible on click-through but
+ * it tanks LCP, since Lighthouse measures the post-hydration repaint.
  */
 export function normalizePath(pathname: string): string {
   const withoutQuery = pathname.split('?')[0] ?? '/'

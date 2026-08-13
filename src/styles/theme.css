@@ -5,8 +5,10 @@
 
    Narrowing, not a guarantee: `docs/`, `README.md`, plans and `.css` files can no longer
    contribute anything, but a comment inside a scanned `.ts`/`.tsx` file still can (measured) —
-   see why `contact-form.tsx` and `header.tsx` avoid naming the classes they replaced. (Safe to
-   name them here: `.css` is outside the globs below.)
+   naming a class in a component comment keeps it in the build whether or not real code uses it,
+   which is why some comments deliberately avoid naming the class they replaced, and why the next
+   person writing about a class in a component comment should do the same. (Safe to name them
+   here: `.css` is outside the globs below.)
 
    Both source trees are listed: `KIT_CONFIG=onepage` is a supported build and must not lose
    styles from a config that renders a class. */

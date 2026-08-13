@@ -10,8 +10,10 @@ import { site } from '@/config/site.config'
 const resolve = (t: string) => `#${t}`
 
 /**
- * No extra `<Section>`/`<Container>` wrapper here: every block already renders its own, and
- * wrapping again doubled the padding/gutters, showing blocks at geometry no real page produces.
+ * No extra `<Section>`/`<Container>` wrapper around each block preview: every block already
+ * renders its own, and wrapping again doubled the padding/gutters, showing blocks at geometry
+ * no real page produces. The label strip above each preview gets its own `<Container>` instead,
+ * so it lines up with the block's content edge without imposing anything on the block itself.
  */
 export function BlockGallery() {
   const ids = Object.keys(registry) as BlockId[]

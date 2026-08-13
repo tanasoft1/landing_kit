@@ -48,6 +48,8 @@ export default defineConfig({
     tanstackStart({
       prerender: {
         enabled: true,
+        // Both false is what keeps /docs (absent from pages.config.ts) out of prerendering —
+        // flip either and it prerenders into dist/client with no other warning in the source.
         autoStaticPathsDiscovery: false,
         crawlLinks: false,
         failOnError: true,
