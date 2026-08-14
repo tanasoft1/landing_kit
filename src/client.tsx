@@ -56,7 +56,7 @@ async function hydrate() {
     )
     // Deliberately does NOT hydrate: a missing block module makes `getVariants` throw during
     // hydration, and React's retry leaves a blank page. Keeping the prerendered HTML readable
-    // beats that — see docs/superpowers/known-limitations.md for why nothing here may suspend.
+    // beats that — see docs/known-limitations.md for why nothing here may suspend.
     return
   }
 
