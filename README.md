@@ -14,6 +14,7 @@ exists to keep that true.
 - [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
 - [Reskinning: the token surface](#reskinning-the-token-surface)
 - [`/docs`: the living developer reference](#docs-the-living-developer-reference)
+- [Removing the /docs page](#removing-the-docs-page)
 - [The Cyrillic font requirement](#the-cyrillic-font-requirement)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
