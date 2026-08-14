@@ -17,5 +17,9 @@ todos.json
 # SDD execution scratch (ledgers, briefs, review packages)
 .superpowers/
 
-# Planning history (specs and implementation plans) — kept locally, not in the repo
-docs/superpowers/
+# Planning history (specs and plans) — kept locally, not in the repo.
+# The leading slash is load-bearing: a bare `docs` matches ANY directory of that name at any
+# depth, including `src/components/docs/`. Tailwind v4's `@source` honours .gitignore, so that
+# pattern silently drops the /docs gallery's classes from the stylesheet (measured: 24,595 ->
+# 23,275 bytes) and the page renders unstyled with every gate still green.
+/docs/

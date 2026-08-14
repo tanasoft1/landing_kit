@@ -6,7 +6,8 @@ import { type HeroCopy, mn } from './copy.mn'
 // (the SEO layer needs `copy`/`nav`/`schema` synchronously), so a component reachable from here
 // would join that eager chain and land in the main chunk. Measured cost of getting this wrong:
 // main chunk 334,593 -> 459,705 B, because hero's components drag in the shared `motion` chunk.
-// Nothing catches it automatically — see docs/known-limitations.md.
+// Nothing catches it automatically: verify-build.mjs's `bundle-split` assertion only detects this
+// for `contact`'s manifest, because it works by watching for react-hook-form markers in the entry.
 //
 // `variantNames` below is the source of truth; the variant union is derived from it, not
 // hand-written alongside it — a hand-written union can list a variant this array omits and

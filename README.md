@@ -20,9 +20,6 @@ exists to keep that true.
 - [The contact form](#the-contact-form)
 - [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
 - [Lighthouse budget](#lighthouse-budget)
-- [Known limitations](docs/known-limitations.md) — open issues, latent gaps in the
-  verification scripts, and what's deliberately deferred. Read this before changing the block
-  registry, either script, or anything performance-related.
 
 ## Quick start
 
@@ -88,9 +85,8 @@ The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` 
   error, and the machine gate stays green (see [Adding a block](#adding-a-block)). Components are
   reached only through
   `src/blocks/block-modules.ts` (dynamic `import()`, client) and `src/blocks/variants.all.ts`
-  (static, server). See
-  [Known limitations](docs/known-limitations.md#resolved-pre-hydration-block-imports)
-  for the measurements and for the `React.lazy` approach that was tried and reverted.
+  (static, server). `React.lazy` was tried for this and reverted: a lazy component suspends during
+  hydration, so React discards the server-rendered subtree — measured CLS 0.000 → 0.169.
 - **Pages** are declared *only* in `pages.config.ts` (`configs/<name>/pages.config.ts` or
   `src/config/pages.config.ts`) as an ordered list of block references. There is no manual
   routing — `src/routes/$.tsx` is a catch-all that resolves any path against the page list.
@@ -465,9 +461,8 @@ Measured on the default config's build with the **`editorial`** preset — the c
 and the only preset any committed configuration has ever built. Task 6 measured `warm` through a
 temporary local `@import` swap and found the numbers unchanged within run-to-run noise, which is
 expected (a preset swap moves CSS variables and fonts, not the JavaScript the performance score is
-dominated by) but is not reproducible from anything in the repository. See
-[Known limitations](docs/known-limitations.md) before treating the `warm` figures as
-measured.
+dominated by) but is not reproducible from anything in the repository. Treat the `warm` figures as
+inferred, not measured.
 
 Median of 5 runs per URL, all four pages:
 
@@ -490,8 +485,6 @@ The other original cause — blocks eagerly bundled into one 559 KB chunk that e
 including the contact form's `react-hook-form` and `zod` on pages with no form — is fixed: block
 components are now resolved via dynamic `import()` and awaited *before* `hydrateRoot`, so the main
 chunk dropped to 333 KB raw (107 KB gzip) and each page's `<head>` carries a `modulepreload` for
-exactly the chunks it needs. See
-[Known limitations](docs/known-limitations.md#resolved-pre-hydration-block-imports)
-for the full mechanism, the `React.lazy` approach that was tried first and reverted (it halved the
-bundle but regressed CLS to 0.169), and why CLS staying at 0 through this change was the real
-constraint, not raw bundle size.
+exactly the chunks it needs. `React.lazy` was tried first and reverted: it halved the bundle but
+regressed CLS to 0.169. CLS staying at 0 through this change was the real constraint, not raw
+bundle size.
