@@ -334,6 +334,19 @@ It is not part of the site a visitor sees, kept out by three separate mechanisms
    the build if a `/docs` `Disallow` or sitemap entry reappears; `scripts/check-conventions.mjs`
    fails if the `noindex` meta is removed.
 
+## Removing the /docs page
+
+`/docs` costs visitors nothing — it is `noindex`, absent from the sitemap, and never
+prerendered. Delete it when you no longer need the reference:
+
+```bash
+rm src/routes/docs.tsx
+rm -rf src/components/docs
+```
+
+Nothing else. `pnpm verify` passes with the route absent; it only insists on the
+`noindex` meta when the route is there.
+
 ## The Cyrillic font requirement
 
 Both font families (`@fontsource-variable/inter`, `@fontsource-variable/manrope`) **must** have
