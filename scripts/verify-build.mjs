@@ -48,6 +48,22 @@ for (const entry of readdirSync(blocksDir)) {
   }
 }
 
+// --- the scaffold placeholder must be replaced -------------------------------
+// A wrong domain is invisible on the page and poisons every canonical URL, hreflang tag and
+// sitemap entry — the site looks fine and ranks as a duplicate of a domain nobody owns.
+// One exact sentinel, not a fuzzy "looks like a placeholder" test: the kit's own site.config.ts
+// legitimately uses https://example.mn, and a heuristic that caught the sentinel would catch
+// that too and fail this repo's own verify. `.example` is IANA-reserved, so the sentinel can
+// never become a real site.
+const URL_PLACEHOLDER = 'https://your-domain.example'
+if (site === URL_PLACEHOLDER) {
+  fail(
+    'site.config.ts',
+    `site.url is still the scaffold placeholder '${URL_PLACEHOLDER}' — set it to the real domain, ` +
+      'or every canonical URL, hreflang tag and sitemap entry points at a domain you do not own',
+  )
+}
+
 // --- route / config parity ----------------------------------------------------
 // Pages are defined ONLY in pages.config.ts, and prerendering is driven from that list
 // (autoStaticPathsDiscovery is off). So a stray route file is a page that is served but

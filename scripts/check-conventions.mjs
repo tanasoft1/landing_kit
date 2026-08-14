@@ -398,11 +398,9 @@ function hasNoindexRobotsMeta(sf) {
   return found
 }
 
-if (!existsSync(DOCS_ROUTE)) {
-  failures.push(
-    `${DOCS_ROUTE}  missing — the docs route is allow-listed in verify-build.mjs and expected here`,
-  )
-} else if (!hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
+// Absence is fine: a scaffolded project may delete /docs (README: "Removing the /docs page").
+// Presence is not negotiable — if the route is here it must carry the noindex meta.
+if (existsSync(DOCS_ROUTE) && !hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
   failures.push(
     `${DOCS_ROUTE}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
       `this tag is the ONLY thing keeping /docs out of the index on an SSR deploy (robots.txt ` +
@@ -539,43 +537,49 @@ function findRecipesArray(sf) {
   ts.forEachChild(sf, visit)
   return found
 }
-if (!existsSync(CONFIG_REFERENCE) || !existsSync(README)) {
-  failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
-} else {
-  // Read off the AST, not with a regex over the source text. The regex collected every quoted
-  // string between `const RECIPES = [` and `] as const`, which includes one written inside a
-  // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
-  // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
-  // failure in the only machine gate. Array elements are array elements; comments are trivia.
-  const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
-  if (!recipesArray) {
-    // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
-    // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
-    // something this lookup misses is exactly when the coupling stops being watched.
-    failures.push(
-      `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
-        `verifies every entry names a real README '## ' heading and cannot run without it`,
-    )
+// Absence is fine: a scaffolded project may delete /docs entirely (README: "Removing the /docs
+// page"), and config-reference.tsx goes with it — there is no RECIPES list left to check.
+// Presence is not negotiable — if the file is here, README.md must be too, and every entry must
+// still name a real heading.
+if (existsSync(CONFIG_REFERENCE)) {
+  if (!existsSync(README)) {
+    failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
   } else {
-    const recipes = recipesArray.elements
-      .filter((el) => ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el))
-      .map((el) => el.text)
-    if (recipes.length === 0) {
-      failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
-    }
-    const headings = new Set(
-      readFileSync(README, 'utf8')
-        .split('\n')
-        .filter((l) => l.startsWith('## '))
-        .map((l) => l.slice(3).trim()),
-    )
-    for (const r of recipes) {
-      if (!headings.has(r)) {
-        failures.push(
-          `${CONFIG_REFERENCE}  RECIPES entry '${r}' is not a '## ' heading in ${README} — ` +
-            `/docs points developers at a README section that does not exist. Rename the entry ` +
-            `to match the heading, or restore the heading.`,
-        )
+    // Read off the AST, not with a regex over the source text. The regex collected every quoted
+    // string between `const RECIPES = [` and `] as const`, which includes one written inside a
+    // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
+    // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
+    // failure in the only machine gate. Array elements are array elements; comments are trivia.
+    const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
+    if (!recipesArray) {
+      // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
+      // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
+      // something this lookup misses is exactly when the coupling stops being watched.
+      failures.push(
+        `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
+          `verifies every entry names a real README '## ' heading and cannot run without it`,
+      )
+    } else {
+      const recipes = recipesArray.elements
+        .filter((el) => ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el))
+        .map((el) => el.text)
+      if (recipes.length === 0) {
+        failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
+      }
+      const headings = new Set(
+        readFileSync(README, 'utf8')
+          .split('\n')
+          .filter((l) => l.startsWith('## '))
+          .map((l) => l.slice(3).trim()),
+      )
+      for (const r of recipes) {
+        if (!headings.has(r)) {
+          failures.push(
+            `${CONFIG_REFERENCE}  RECIPES entry '${r}' is not a '## ' heading in ${README} — ` +
+              `/docs points developers at a README section that does not exist. Rename the entry ` +
+              `to match the heading, or restore the heading.`,
+          )
+        }
       }
     }
   }
