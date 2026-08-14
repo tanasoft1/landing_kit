@@ -585,6 +585,80 @@ if (existsSync(CONFIG_REFERENCE)) {
   }
 }
 
+// --- README Contents list must mirror the '## ' headings, in both directions -------------------
+// The Contents block (README.md:8-23ish) is hand-maintained prose, not generated, so nothing kept
+// it honest — this file already parses README headings for the RECIPES check above; the same
+// parsing is reused here rather than re-implemented.
+//
+// Bidirectional on purpose, unlike the one-directional RECIPES check: RECIPES legitimately names
+// only a subset of headings (reference sections a task list has no reason to mention), but a table
+// of contents that omits a real section or links to a section that no longer exists is wrong by
+// definition either way. This is also why the CLI in a later task is expected to keep tripping this
+// check: when generated projects have a kit-only README section trimmed (e.g. "The three env
+// flags"), the dangling Contents entry it would otherwise leave behind fails loudly instead of
+// shipping a 404 anchor.
+//
+// Slugs are DERIVED with GitHub's own anchor rule (lowercase; strip anything that isn't a letter,
+// digit, space or hyphen; spaces become hyphens) rather than hand-listed, so a heading like
+// "`/docs`: the living developer reference" — whose backticks, slash and colon all vanish in the
+// real anchor — is handled the same way as every other heading, with no special case to rot.
+const githubSlug = (text) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9 -]+/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+
+if (existsSync(README)) {
+  const readmeLines = readFileSync(README, 'utf8').split('\n')
+  const isH2 = (l) => l.startsWith('## ')
+  // The '## Contents' heading itself is the list, not an entry within it — a table of contents
+  // does not link to itself — so it is excluded from both directions of the comparison below.
+  const trackedHeadings = readmeLines
+    .filter(isH2)
+    .map((l) => l.slice(3).trim())
+    .filter((h) => h !== 'Contents')
+
+  const contentsStart = readmeLines.findIndex((l) => l.trim() === '## Contents')
+  if (contentsStart === -1) {
+    failures.push(`${README}  no '## Contents' heading found — cannot verify the Contents list`)
+  } else {
+    const nextHeading = readmeLines.findIndex((l, i) => i > contentsStart && isH2(l))
+    const contentsBlock = readmeLines.slice(
+      contentsStart + 1,
+      nextHeading === -1 ? readmeLines.length : nextHeading,
+    )
+    const entries = contentsBlock
+      .map((l) => l.match(/^- \[(.+?)\]\(#([^)]+)\)/))
+      .filter((m) => m !== null)
+      .map((m) => ({ text: m[1], slug: m[2] }))
+
+    // Direction 1: every heading must be listed. Named by heading, not a generic "out of sync".
+    const entrySlugs = new Set(entries.map((e) => e.slug))
+    for (const heading of trackedHeadings) {
+      const slug = githubSlug(heading)
+      if (!entrySlugs.has(slug)) {
+        failures.push(
+          `${README}  Contents is missing an entry for '## ${heading}' (expected anchor ` +
+            `#${slug}) — every '## ' heading must be listed in Contents`,
+        )
+      }
+    }
+
+    // Direction 2: every entry must resolve to a real heading. Named by entry, not by slug alone,
+    // so the failure reads as something a person wrote rather than a hash to decode.
+    const headingSlugs = new Set(trackedHeadings.map(githubSlug))
+    for (const entry of entries) {
+      if (!headingSlugs.has(entry.slug)) {
+        failures.push(
+          `${README}  Contents entry '${entry.text}' points at #${entry.slug}, which is not a ` +
+            `'## ' heading — rename the entry to match a real heading, or restore the heading`,
+        )
+      }
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`\n✗ check-conventions: ${failures.length} violation(s)\n`)
   for (const f of failures) console.error(`  - ${f}`)
@@ -593,5 +667,5 @@ if (failures.length) {
 console.log(
   '✓ check-conventions: layout primitives in blocks/routes/components, no literal <h1>/<h2> in ' +
     'blocks, no client-side <Link> anywhere, src/lib is .tsx-free, /docs noindex intact, ' +
-    '/docs RECIPES match README headings',
+    '/docs RECIPES match README headings, README Contents matches headings',
 )
