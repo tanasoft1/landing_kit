@@ -25,15 +25,32 @@ const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset' }
 
 export function parseArgs(argv) {
   const args = argv.slice(2)
-  const flags = {}
+  // Null prototype on purpose: with a plain `{}`, `--toString=x` and `--__proto__=x` are inherited
+  // or special, so an `in` check says they are known flags and the typo is silently accepted.
+  const flags = Object.create(null)
   let dir = null
+  const set = (name, value) => {
+    if (Object.hasOwn(flags, name)) throw new Error(`Flag --${name} was given more than once`)
+    flags[name] = value
+  }
   for (const a of args) {
-    if (a === '--yes' || a === '-y') flags.yes = true
-    else if (a === '--help' || a === '-h') flags.help = true
+    if (a === '--yes' || a === '-y') set('yes', true)
+    else if (a === '--help' || a === '-h') set('help', true)
+    else if (a === '--') throw new Error("'--' is not a flag. Options look like --preset=warm")
     else if (a.startsWith('--')) {
       const eq = a.indexOf('=')
       if (eq === -1) throw new Error(`Flag needs a value: ${a} (use ${a}=value)`)
-      flags[a.slice(2, eq)] = a.slice(eq + 1)
+      const name = a.slice(2, eq)
+      if (name === '') throw new Error(`Missing flag name: ${a} (options look like --preset=warm)`)
+      // `--yes=true` would otherwise leave `yes` as the string 'true', so `yes === true` is false
+      // and the CLI starts prompting — a flag-spelling mistake reported as a stdin problem.
+      if (name === 'yes' || name === 'help') {
+        throw new Error(`Flag --${name} takes no value: ${a} (write --${name} on its own)`)
+      }
+      set(name, a.slice(eq + 1))
+    } else if (a.startsWith('-')) {
+      // Never fall through to the positional: `-Y` would become the target directory name.
+      throw new Error(`Unknown flag ${a}. The only short flags are -y (--yes) and -h (--help)`)
     } else if (dir === null) dir = a
     else throw new Error(`Unexpected argument: ${a}`)
   }
@@ -44,7 +61,8 @@ export function parseArgs(argv) {
 // default and nothing says so. Both are errors.
 function checkFlagNames(flags) {
   for (const name of Object.keys(flags)) {
-    if (name === 'yes' || name === 'help' || name in CHOICES || name === 'blocks') continue
+    if (name === 'yes' || name === 'help' || Object.hasOwn(CHOICES, name) || name === 'blocks')
+      continue
     if (name.startsWith('variant-')) continue
     throw new Error(
       `Unknown flag --${name}. Allowed: --pages, --theme, --preset, --blocks, ` +
@@ -63,17 +81,20 @@ function checkChoice(name, value) {
 // Returns the list re-sorted into BLOCK_ORDER, so no caller downstream has to sort or dedupe.
 // `label` only changes the wording: the same parser serves the flag and the prompt.
 function parseBlocks(raw, label = '--blocks') {
-  const given = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s !== '')
-  if (given.length === 0) {
+  const given = raw.split(',').map((s) => s.trim())
+  if (given.length === 1 && given[0] === '') {
     throw new Error(
       `Invalid ${label} '${raw}'. At least one block is required. ` +
         `Allowed: ${BLOCK_ORDER.join(', ')}`,
     )
   }
   for (const id of given) {
+    // `hero,,contact` is a typo, not a two-block list — dropping the gap hides it.
+    if (id === '') {
+      throw new Error(
+        `Invalid ${label} '${raw}'. It has an empty entry. ` + `Allowed: ${BLOCK_ORDER.join(', ')}`,
+      )
+    }
     if (!BLOCK_ORDER.includes(id)) {
       throw new Error(`Invalid ${label} entry '${id}'. Allowed: ${BLOCK_ORDER.join(', ')}`)
     }
@@ -156,7 +177,9 @@ async function askBlocks(rl) {
 
 export async function resolveAnswers(argv) {
   const { dir, flags, yes } = parseArgs(argv)
-  if (dir === null) {
+  // An unset shell variable makes this `''`, which would scaffold over the repo root instead of
+  // into `frontend/`. Missing and empty are the same mistake and get the same message.
+  if (dir === null || dir.trim() === '') {
     throw new Error('A target directory is required. Usage: landing-kit <dir> [options]')
   }
 
