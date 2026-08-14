@@ -75,7 +75,8 @@ const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf))
  * `className={`${MAP[key]}`}` can be resolved to the class strings they actually produce.
  *
  * Flat and scope-blind, as the previous text-based version was: two `const field = …` in different
- * scopes of one file collide, last one winning. Recorded in known-limitations.
+ * scopes of one file collide, last one winning. The four blocks that copy this pattern should
+ * avoid reusing an identifier name across scopes in one file.
  */
 function collectConsts(sf) {
   const consts = new Map()
