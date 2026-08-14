@@ -23,9 +23,9 @@ export const MIN_ELAPSED_MS = 2000
 /**
  * What goes over the wire, validated by both submit variants.
  *
- * `elapsedMs` required, deliberately: without it the timing guard would be client-only, and a
- * bot script POSTing straight at the endpoint would sail through with only the honeypot in its
- * way. The client computes it after waiting out any remainder, so a real fast submission still passes.
+ * `elapsedMs` required, deliberately: without it the timing guard would be client-only, and a bot
+ * script POSTing straight at the endpoint would sail through with only the honeypot in its way. The
+ * client computes it after waiting out any remainder, so a real fast submission still passes.
  */
 export const submissionSchema = contactSchema.extend({
   elapsedMs: z.number().int().min(MIN_ELAPSED_MS),
