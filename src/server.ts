@@ -1,7 +1,7 @@
 // Registers every block's components synchronously, before any request is handled — see
 // `variants.all.ts`'s header comment. Side-effect import, kept first and deliberately not
 // re-exported: nothing here should give the client entry a path to reach this module.
-import '~/blocks/variants.all'
+import '@/blocks/variants.all'
 import type { Register } from '@tanstack/react-router'
 import type { RequestHandler } from '@tanstack/react-start/server'
 import { createStartHandler, defaultStreamHandler } from '@tanstack/react-start/server'

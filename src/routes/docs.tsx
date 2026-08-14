@@ -1,37 +1,25 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BlockGallery } from '~/shell/docs/block-gallery'
-import { ConfigReference } from '~/shell/docs/config-reference'
-import { TokenGallery } from '~/shell/docs/token-gallery'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
+import { BlockGallery } from '@/components/docs/block-gallery'
+import { ConfigReference } from '@/components/docs/config-reference'
+import { TokenGallery } from '@/components/docs/token-gallery'
+import { Container } from '@/components/layout/container'
+import { Section } from '@/components/layout/section'
 
-// Deliberately absent from pages.config.ts, which is what excludes it from prerendering (the
-// `tanstackStart` plugin only prerenders `enumerateUrls(pages, site)`, and both
-// `autoStaticPathsDiscovery` and `crawlLinks` are off in vite.config.ts) and from the sitemap
-// (emit-plugin.ts builds it from the same `enumerateUrls` call). Three mechanisms in total, the
-// third being the `noindex, nofollow` meta below.
+// Deliberately absent from pages.config.ts: excludes it from the sitemap (`enumerateUrls`) and,
+// together with `autoStaticPathsDiscovery`/`crawlLinks` both false in vite.config.ts, from
+// prerendering. The `noindex, nofollow` meta below is the third mechanism.
 //
-// There is deliberately NO `Disallow: /docs` in robots.txt, and that omission is a decision, not
-// an oversight. `Disallow` and `noindex` do not layer — they cancel: a crawler that obeys a
-// `Disallow` never fetches the page, so it never reads the `noindex`, and a URL linked from
-// anywhere else still gets indexed URL-only, which is precisely what the `noindex` is here to
-// prevent. `/docs` must stay FETCHABLE so the `noindex` is actually seen; a crawler then drops
-// the URL from the index authoritatively. Adding a `Disallow` here would defeat the one
-// mechanism that works on an SSR deploy. `scripts/verify-build.mjs` fails the build if a
-// `Disallow` for `/docs` reappears, and `scripts/check-conventions.mjs` fails if this meta tag
-// is removed.
+// No `Disallow: /docs` in robots.txt, deliberately: `Disallow` and `noindex` cancel each other —
+// a crawler that obeys `Disallow` never fetches the page, so it never sees the `noindex`, and an
+// external link still gets it indexed URL-only. `/docs` must stay fetchable so `noindex` is seen.
+// `verify-build.mjs` fails the build if `Disallow: /docs` reappears; `check-conventions.mjs`
+// fails if this meta tag is removed.
 export const Route = createFileRoute('/docs')({
-  // `<html lang>` comes from `useActiveLocale` in `__root.tsx`, which reads `locale` off the
-  // deepest match's loader data and falls back to `site.defaultLocale` when no match has any.
-  // `/docs` had no loader, so it fell back to `mn` and shipped `<html lang="mn">` for a page whose
-  // own first paragraph says "English only". A wrong `lang` is not cosmetic: it tells a screen
-  // reader to pronounce English prose with Mongolian phonetics, and tells a translation service
-  // the page is already in the user's language.
-  //
-  // A loader rather than a special case in `__root.tsx`: `useActiveLocale`'s contract is "the
-  // deepest match that declares a locale wins", and this route simply had nothing to declare.
-  // Teaching the root about a locale-less match would put knowledge of one specific route into
-  // the one component that is meant to know about none of them.
+  // `<html lang>` comes from `useActiveLocale` in `__root.tsx`, which falls back to
+  // `site.defaultLocale` when no match declares one. Without this loader `/docs` fell back to
+  // `mn` and shipped `<html lang="mn">` for an English-only page — wrong `lang` makes a screen
+  // reader mispronounce the text. A loader here, not a special case in `__root.tsx`, which is
+  // meant to know about no specific route.
   loader: () => ({ locale: 'en' as const }),
   head: () => ({
     meta: [
@@ -44,10 +32,8 @@ export const Route = createFileRoute('/docs')({
 
 function DocsPage() {
   return (
-    // `density="compact"` throughout: `py-section` is tuned for marketing pages (up to 9.5rem top
-    // AND bottom, ~300px of air between sections), which is most of the look and stays put
-    // everywhere else. This is a reference document a developer scans, and that much air works
-    // against reading it quickly.
+    // `density="compact"` throughout: `py-section`'s ~300px between sections is tuned for
+    // marketing pages, and works against quickly scanning a reference doc.
     <main>
       <Section density="compact">
         <Container>

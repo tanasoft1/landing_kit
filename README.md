@@ -40,7 +40,7 @@ pnpm dev
 | `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
 | `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
 | `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
-| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/shell`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/shell/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
+| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/components`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/components/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
 | `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
 | `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
@@ -55,6 +55,19 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 `sitemap.xml` agree on every page's alternates.
 
 ## Architecture in one page
+
+The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` goes in
+`src/lib/`.** Everything else in `src/` follows from what it is, not from that rule:
+
+| Path | Holds |
+|---|---|
+| `src/blocks/` | One folder per block — `manifest.ts`, `variants.ts`, components — registered in `registry.ts`. |
+| `src/components/` | Shared `.tsx`: layout primitives, header/footer, theme toggle, `/docs`-only UI. |
+| `src/lib/` | Shared `.ts`: SEO emission, page enumeration/resolution, shared types. No JSX, ever. |
+| `src/routes/` | TanStack Start file routes — `__root.tsx`, `index.tsx`, `docs.tsx`, and the `$.tsx` catch-all that resolves `pages.config.ts`. |
+| `src/styles/` | `theme.css` (design tokens) and `presets/` (swappable token sets). |
+| `configs/` | Alternate `pages.config.ts`/`site.config.ts` pairs, e.g. `configs/smoke-onepage/`, selected by `KIT_CONFIG`. |
+| flat `src/` files | Alternate implementations behind an alias — `motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, `submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s `resolve.alias`, never a component or a lib, which is why neither half lives in either bucket. |
 
 - **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
   A block is deliberately split across two modules:
@@ -96,7 +109,7 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
     per-block-reference in `pages.config.ts`), and the block hands it straight to its own
     `<Section surface={surface}>`.
 - **Three swappable boundaries**, each an import alias resolved in `vite.config.ts` based on an
-  env flag, never on an `if` inside a component: `~/motion`, `~/theme`, `~/submit`. See
+  env flag, never on an `if` inside a component: `@/motion`, `@/theme`, `@/submit`. See
   [The three env flags](#the-three-env-flags).
 
 ## Adding a block
@@ -124,7 +137,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    a compile error, not a script's job.
 3. **`manifest.ts`** — metadata only, **no component imports**:
    ```ts
-   import type { BlockManifest } from '~/shell/types'
+   import type { BlockManifest } from '@/lib/types'
    import { en } from './copy.en'
    import { type TestimonialsCopy, mn } from './copy.mn'
 
@@ -147,7 +160,7 @@ variants map), **three** registration points outside it (steps 5-7), and **one**
    imported:
    ```ts
    import type { ComponentType } from 'react'
-   import type { BlockProps } from '~/shell/types'
+   import type { BlockProps } from '@/lib/types'
    import type { TestimonialsCopy } from './copy.mn'
    import type { TestimonialsVariant } from './manifest'
    import { TestimonialsGrid } from './testimonials-grid'
@@ -336,22 +349,22 @@ mismatched system font, which is easy to miss if you only proofread the English 
 
 This also means a Mongolian page genuinely ships more font-subset weight than the English one
 (extra network requests for `cyrillic`/`cyrillic-ext` files on top of `latin`) — real, unavoidable
-bytes, not a bug. `src/shell/seo/build-head.ts` preloads the current locale's critical
+bytes, not a bug. `src/lib/seo/build-head.ts` preloads the current locale's critical
 (above-the-fold) font subset for this reason; see [Lighthouse budget](#lighthouse-budget) for why.
 
 ## The three env flags
 
-Set as environment variables at build/dev time; each swaps a `~/motion`, `~/theme`, or `~/submit`
+Set as environment variables at build/dev time; each swaps a `@/motion`, `@/theme`, or `@/submit`
 import alias in `vite.config.ts` — never branched on inside a component.
 
 | Flag | Values | Effect |
 |---|---|---|
-| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `~/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
-| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `~/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
-| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `~/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
+| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `@/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
+| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `@/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
+| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `@/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
 
 `site.theme.mode` (`'light' \| 'dark' \| 'both'`, set in `site.config.ts`, not an env flag) works
-the same way: `'both'` aliases `~/theme` to `src/theme.both.tsx` (toggle + no-flash script
+the same way: `'both'` aliases `@/theme` to `src/theme.both.tsx` (toggle + no-flash script
 included), anything else aliases it to `src/theme.single.tsx` — a single-mode build ships **no**
 theme-switching code at all, not merely a hidden toggle.
 
@@ -360,7 +373,7 @@ theme-switching code at all, not merely a hidden toggle.
 `configs/smoke-onepage/` is a complete second config — `pages.config.ts` (one page holding every
 existing block) and `site.config.ts` (light-only) — used only to prove the config-swapping
 premise end to end. It contains **no components and no overrides**, only config, and requires
-zero edits under `src/blocks/` or `src/shell/` to work.
+zero edits under `src/blocks/`, `src/components/`, or `src/lib/` to work.
 
 ```bash
 pnpm smoke:onepage   # KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint
@@ -372,7 +385,7 @@ in-page anchor) instead of `/contact` (a page link) — same components, same co
 config.
 
 If you add a real second scaffolded config, remember: **`vite.config.ts` itself must branch on
-`KIT_CONFIG` too**, not just the `~/config` alias. The alias only affects app code that Vite
+`KIT_CONFIG` too**, not just the `@/config` alias. The alias only affects app code that Vite
 bundles; `vite.config.ts`'s own `pages`/`site` (used to build the TanStack Start `prerender.pages`
 list and to drive `emitSeoFiles`) are read directly by the config file at build-config-eval time,
 before any aliasing applies.
@@ -380,7 +393,7 @@ before any aliasing applies.
 ## The contact form
 
 `src/blocks/contact/contact-form.tsx` uses `react-hook-form` + `zod` (`submissionSchema` in
-`src/submit-schema.ts`), shared by both `~/submit` variants.
+`src/submit-schema.ts`), shared by both `@/submit` variants.
 
 ## Gotchas that cost real debugging time
 
@@ -408,7 +421,7 @@ before any aliasing applies.
   filename** rather than rewriting `/` to `index.html` while keeping the browser's address bar at
   `/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without
   care, that leaves `window.location.pathname` as `/index.html` on hydration, which the router
-  won't match to any page — `src/shell/pages/resolve-request.ts`'s `normalizePath` collapses a
+  won't match to any page — `src/lib/pages/resolve-request.ts`'s `normalizePath` collapses a
   trailing `/index.html` to `/` for exactly this reason. If you see a page flash to a "Not Found"
   state right after hydrating, check this first.
 

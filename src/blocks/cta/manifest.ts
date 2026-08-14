@@ -1,4 +1,4 @@
-import type { BlockManifest } from '~/shell/types'
+import type { BlockManifest } from '@/lib/types'
 import { en } from './copy.en'
 import { type CtaCopy, mn } from './copy.mn'
 

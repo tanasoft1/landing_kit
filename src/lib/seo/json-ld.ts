@@ -1,7 +1,7 @@
-import { type BlockId, registry } from '~/blocks/registry'
-import { localePath } from '~/shell/pages/enumerate'
-import type { ResolvedPage } from '~/shell/pages/resolve-request'
-import type { JsonLdNode, PageConfig, SiteConfig } from '~/shell/types'
+import { type BlockId, registry } from '@/blocks/registry'
+import { localePath } from '@/lib/pages/enumerate'
+import type { ResolvedPage } from '@/lib/pages/resolve-request'
+import type { JsonLdNode, PageConfig, SiteConfig } from '@/lib/types'
 
 function organizationNode(site: SiteConfig): JsonLdNode {
   const { organization: org } = site
@@ -77,9 +77,8 @@ export function buildJsonLd(
 
   for (const ref of page.blocks) {
     const id = typeof ref === 'string' ? ref : ref.id
-    // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export (see
-    // registry.ts), so `registry[id]` already resolves to `BlockManifest<any, any>` here —
-    // no per-call-site widening needed.
+    // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export, so no
+    // per-call-site widening is needed here.
     const manifest = registry[id]
     if (!manifest.schema) continue
     graph.push(...manifest.schema({ copy: manifest.copy[locale], site, page }))

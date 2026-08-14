@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { BlockProps } from '~/shell/types'
+import type { BlockProps } from '@/lib/types'
 import type { FeaturesCopy } from './copy.mn'
 import { FeaturesAlternating } from './features-alternating'
 import { FeaturesGrid } from './features-grid'

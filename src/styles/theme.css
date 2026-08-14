@@ -1,26 +1,17 @@
 /* `source(none)` + an explicit `@source`, rather than Tailwind v4's automatic detection.
-   Automatic detection scans the whole repository, and its scanner is deliberately naive: it looks
-   for anything that could be a class name, in any file type, with no notion of comments or prose.
-   That meant a MARKDOWN PLAN DOCUMENT in `docs/` kept 13 dead utilities alive in the shipped
-   stylesheet — a stock red, a stock green and a stock shadow among them — long after the code
-   stopped using any of them, and rewording the code comments that also named them did not help,
-   because the scanner was never reading only the code. The static HTML and CSS in `dist/client`
-   are the product, so prose must not be able to add bytes to it: 26,424 -> 24,595 bytes, with 13
-   selectors removed and none added.
+   Automatic detection scans the whole repo with no notion of comments or prose — a MARKDOWN PLAN
+   DOCUMENT in `docs/` once kept 13 dead utilities alive in the shipped stylesheet: 26,424 ->
+   24,595 bytes after switching to this, 13 selectors removed, none added.
 
-   What this does and does not buy, precisely — it is a narrowing, not a guarantee. `docs/`,
-   `README.md`, plans, reports and `.css` files can no longer contribute anything. A comment inside
-   a scanned source file (any `.ts` or `.tsx` under the globs below) still can: appending
-   `// … text-red-600 shadow-lg` to a component and rebuilding puts both classes straight back
-   into the stylesheet (measured). That is exactly why
-   the comments in `contact-form.tsx`, `header.tsx` and `editorial.css` were reworded not to name
-   the utilities they replaced, and why the next person writing about a class in a component
-   comment should do the same. (Naming them here is safe: `.css` is outside the globs below, which
-   is itself the demonstration.)
+   Narrowing, not a guarantee: `docs/`, `README.md`, plans and `.css` files can no longer
+   contribute anything, but a comment inside a scanned `.ts`/`.tsx` file still can (measured) —
+   naming a class in a component comment keeps it in the build whether or not real code uses it,
+   which is why some comments deliberately avoid naming the class they replaced, and why the next
+   person writing about a class in a component comment should do the same. (Safe to name them
+   here: `.css` is outside the globs below.)
 
-   Both source trees are listed. `configs/` holds no components today (only `pages.config.ts` and
-   `site.config.ts`, by design), but `KIT_CONFIG=onepage` is a supported build and a config that
-   ever did render a class must not silently lose its styles. */
+   Both source trees are listed: `KIT_CONFIG=onepage` is a supported build and must not lose
+   styles from a config that renders a class. */
 @import "tailwindcss" source(none);
 
 @import "@fontsource-variable/inter/wght.css";

@@ -1,13 +1,10 @@
-import type { BlockManifest } from '~/shell/types'
+import type { BlockManifest } from '@/lib/types'
 import { en } from './copy.en'
 import { type ContactCopy, mn } from './copy.mn'
 
-// No component import here — see `./variants.ts` and hero/manifest.ts's header comment. This is
-// the manifest that matters most: without this cut, `ContactForm`'s `react-hook-form`/`zod` stay
-// reachable from `registry.ts` and the split proves nothing.
-//
-// The variant union is derived from `variantNames` (see hero/manifest.ts's comment on why a
-// hand-written union alongside the array is a silent-drift compile hole).
+// No component import here — see hero/manifest.ts's header comment. This is the manifest that
+// matters most: without this cut, `ContactForm`'s `react-hook-form`/`zod` stay reachable from
+// `registry.ts` and the split proves nothing.
 const variantNames = ['default'] as const
 
 /** See hero/manifest.ts: `./variants.ts` constrains its component map to exactly this union. */
@@ -19,10 +16,8 @@ export const contact = {
   defaultVariant: 'default',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },
-  // No `schema`: this block used to emit a `ContactPage` node, but the shell already emits
-  // exactly one `WebPage` node per page (see `src/shell/seo/json-ld.ts`) — a second,
-  // uncoordinated description of the same page is a bug, not extra markup. `schema` is
-  // reserved for markup this block's own content earns (e.g. a future structured contact
-  // method via `ContactPoint` embedded on `Organization`), never for page identity.
+  // No `schema`: `buildJsonLd` (src/lib/seo/json-ld.ts) already emits exactly one `WebPage`
+  // node per page — a second, uncoordinated description of it is a bug, not extra markup.
+  // `schema` is for markup this block's own content earns (e.g. a future `ContactPoint`), never page identity.
   requires: { npm: ['react-hook-form', 'zod'], ui: [] },
 } satisfies BlockManifest<ContactCopy, ContactVariant>
