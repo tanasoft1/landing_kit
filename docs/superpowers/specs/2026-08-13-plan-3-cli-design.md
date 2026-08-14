@@ -11,7 +11,7 @@
 A developer has a project repo. It already has `backend/` in it. They run:
 
 ```bash
-pnpm dlx @tanasoft/landingkit@latest frontend
+pnpm dlx @dewdie/landing-kit@latest frontend
 ```
 
 They now have `frontend/` — a complete bilingual landing site. Routing, SEO, dark mode,
@@ -41,16 +41,16 @@ monorepo/
 
 | # | Decision | Why |
 |---|---|---|
-| C1 | Generator only — generated code has no `@tanasoft/*` dependency | Agency sites get redesigned per client. A shared package would be forked or escape-hatched constantly. |
+| C1 | Generator only — generated code has no `@dewdie/*` dependency | Agency sites get redesigned per client. A shared package would be forked or escape-hatched constantly. |
 | C2 | Output is a folder inside an existing repo, beside `backend/` | This is how Tanasoft client projects are laid out. |
-| C3 | Published to public npm as `@tanasoft/landingkit` | Zero setup for developers. Source becomes readable — accepted knowingly. The scope is free and unused as of 2026-08-13. |
+| C3 | Published to public npm as `@dewdie/landing-kit` | Zero setup for developers. Source becomes readable — accepted knowingly. The `dewdie` org was created on npmjs.com on 2026-08-14, so the scope is owned and any name under it is available. |
 | C4 | CLI lives in this repo, not a separate one or a workspace split | What gets published is the same tree `pnpm verify` proves. No template copy can drift. |
 | C5 | Locales are never asked. Every site is `mn` + `en`, `mn` unprefixed | Bilingual routing is the kit's point and the hardest thing to retrofit. A choice here invites a regret. |
 | C6 | Client details are left as placeholders, not prompted | Faster scaffold. The one dangerous placeholder is guarded by a build check (see §7). |
 | C7 | `/docs` reference page is copied, with removal instructions | It is the fastest way for a developer to see every block and token. It is `noindex`, absent from the sitemap, and never prerendered, so it costs visitors nothing. |
 | C8 | The CLI runs no `pnpm install` and no `git init` | Those are the developer's to run, and running them silently is surprising. |
 | C9 | Comments across the kit get shortened | Current comments are long and dense. They should be short, plain, and only where the code is surprising. |
-| C10 | `src/shell/` is dissolved into `src/components/` + `src/lib/`, and the import alias changes `~/` → `@/` | Coworkers know React + Vite, not TanStack Start. This is the layout they already know, and it is what `components.json` is already configured for. Must land *before* the CLI, which hardcodes paths. |
+| C10 | `src/shell/` is dissolved into `src/components/` + `src/lib/`, and the import alias changes `~/` → `@/` | Coworkers know React + Vite, not TanStack Start. This is the layout they already know, and it is what `components.json` is already configured for. Must land *before* the CLI, which hardcodes paths. **Done — Plan 3a, merged into `main` 2026-08-14.** |
 
 ## 4. What the CLI asks
 
@@ -131,9 +131,13 @@ and every generated site inherits it.
 
 ## 7. Changes needed in this repo
 
-**This one comes first, before any CLI work** (C10):
+**This one came first, before any CLI work** (C10) — **DONE, Plan 3a, merged 2026-08-14.**
+Kept below as the record of what was required. Two things it added that the CLI must respect:
+`src/lib/` is asserted `.tsx`-free by `check-conventions.mjs`, and the Biome
+`noRestrictedImports` guard now covers `src/components/**` and `src/routes/**` as well as
+`src/blocks/**`. Both travel with the copied files, so a generated project inherits them.
 
-0. **Make the project look like a normal React + Vite project.**
+0. ~~**Make the project look like a normal React + Vite project.**~~
 
    ```
    src/shell/chrome/header.tsx      → src/components/header.tsx
@@ -167,7 +171,7 @@ and every generated site inherits it.
 Then the CLI work:
 
 1. **Add `cli/`** — plain `.mjs`, matching `scripts/`. No build step, no TypeScript compile.
-2. **Add `"bin": { "landingkit": "./cli/index.mjs" }`** to `package.json`.
+2. **Add `"bin": { "landing-kit": "./cli/index.mjs" }`** to `package.json`.
 3. **Remove `"private": true`** and add a LICENSE, so npm accepts the package. Also add
    `"publishConfig": { "access": "public" }` — scoped packages publish as private by
    default, and the first `npm publish` fails with a payment error without it.
@@ -186,7 +190,7 @@ Then the CLI work:
    Today the check demands the file, so a fresh scaffold with `/docs` removed fails.
 9. **Add a README section: removing the `/docs` page.** Delete `src/routes/docs.tsx` and
    `src/components/docs/`. Nothing else — item 8 makes that sufficient.
-10. **Shorten comments across the kit** (C9). Developers read this code, and so does an AI
+10. ~~**Shorten comments across the kit**~~ (C9) — **DONE, Plan 3a.** Developers read this code, and so does an AI
     assistant helping them. Rules: say it in one or two lines; only comment where the code is
     surprising; delete anything that repeats what the code already says. Worst offenders
     today are `src/blocks/registry.ts` (a ten-line comment on type contravariance, above a
@@ -196,7 +200,7 @@ Then the CLI work:
 
 ## 8. Publishing
 
-One-time setup: create the `tanasoft` organization on npmjs.com (free for public packages).
+One-time setup: **done** — the `dewdie` organization was created on npmjs.com on 2026-08-14.
 
 Then, manually to start:
 
@@ -230,7 +234,7 @@ and looking at the result.
    failing before it is trusted — a standing rule on this project, which has caught real
    defects.
 7. **The real command, on a second machine — Tengis does this after publishing.** `pnpm dlx
-   @tanasoft/landingkit@latest frontend` from a published version, not a local path. Local
+   @dewdie/landing-kit@latest frontend` from a published version, not a local path. Local
    testing cannot prove the published package contains the right files. This is the one
    check that catches a wrong `files` list, and it cannot be done before publishing, so it
    sits outside the build.
