@@ -16,3 +16,6 @@ todos.json
 
 # SDD execution scratch (ledgers, briefs, review packages)
 .superpowers/
+
+# Planning history (specs and implementation plans) — kept locally, not in the repo
+docs/superpowers/
