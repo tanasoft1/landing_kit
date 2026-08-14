@@ -56,6 +56,19 @@ complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that th
 
 ## Architecture in one page
 
+The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` goes in
+`src/lib/`.** Everything else in `src/` follows from what it is, not from that rule:
+
+| Path | Holds |
+|---|---|
+| `src/blocks/` | One folder per block — `manifest.ts`, `variants.ts`, components — registered in `registry.ts`. |
+| `src/components/` | Shared `.tsx`: layout primitives, header/footer, theme toggle, `/docs`-only UI. |
+| `src/lib/` | Shared `.ts`: SEO emission, page enumeration/resolution, shared types. No JSX, ever. |
+| `src/routes/` | TanStack Start file routes — `__root.tsx`, `index.tsx`, `docs.tsx`, and the `$.tsx` catch-all that resolves `pages.config.ts`. |
+| `src/styles/` | `theme.css` (design tokens) and `presets/` (swappable token sets). |
+| `configs/` | Alternate `pages.config.ts`/`site.config.ts` pairs, e.g. `configs/smoke-onepage/`, selected by `KIT_CONFIG`. |
+| flat `src/` files | Alternate implementations behind an alias — `motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, `submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s `resolve.alias`, never a component or a lib, which is why neither half lives in either bucket. |
+
 - **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
   A block is deliberately split across two modules:
   - `manifest.ts` — metadata only: `variantNames` (a `readonly` array of **names**, not

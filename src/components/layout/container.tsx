@@ -32,11 +32,11 @@ type ContainerProps = { className?: string; children: ReactNode } & (
   | {
       width: Exclude<Width, 'page'>
       /**
-       * `'start'` shares a left edge with a sibling `width="page"` Container. It renders two
-       * nested boxes (outer page-width + inner capped to `width`) instead of one, so
-       * `className` lands on the **inner** box, not the outer: call sites pass content classes
-       * (`grid`, `flex`, `mt-14`), and on the outer box `grid` would lay out the inner box
-       * instead of the content. Put a class meant for the outer box on the enclosing `<Section>` instead.
+       * `'start'` shares a left edge with a sibling `width="page"` Container. It renders two nested
+       * boxes (outer page-width + inner capped to `width`) instead of one, so `className` lands on
+       * the **inner** box, not the outer: call sites pass content classes (`grid`, `flex`,
+       * `mt-14`), and on the outer box `grid` would lay out the inner box instead of the content.
+       * Put a class meant for the outer box on the enclosing `<Section>` instead.
        */
       align?: Align
     }

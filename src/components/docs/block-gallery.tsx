@@ -33,7 +33,8 @@ export function BlockGallery() {
                   `h2`, not `h3`: every preview below renders at `headingLevel={2}`, so an `h3`
                   label would sit subordinate to the content it labels. Styling stays `text-h3` —
                   this is a semantic level, not a size. Literal `<h2>` is fine here:
-                  check-conventions.mjs bans it only in `src/blocks`, where headingLevel is assigned.
+                  check-conventions.mjs bans it only in `src/blocks`, where headingLevel is
+                  assigned.
                 */}
                 <h2 className="text-h3 font-semibold">
                   {id}{' '}

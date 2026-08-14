@@ -33,6 +33,24 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/components/**", "src/routes/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/theme.both": "Import '@/theme' — the alias selects the implementation.",
+                  "@/theme.single": "Import '@/theme' — the alias selects the implementation."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

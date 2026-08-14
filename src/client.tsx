@@ -31,11 +31,11 @@ async function hydrate() {
   // Resolve chunks BEFORE hydrating, not via React.lazy: lazy suspends during hydration and
   // forces React to discard the server-rendered subtree — measured CLS 0.000 -> 0.169.
   //
-  // This resolves only the initial URL's blocks, once — nothing re-runs it on a later
-  // navigation. Safe only because every navigation here is a plain `<a href>` full page load,
-  // never a `@tanstack/react-router` `<Link>` (a client-side transition to a page whose blocks
-  // were never fetched). `check-conventions.mjs` enforces this: it fails the build on a `Link`
-  // import from `@tanstack/react-router` anywhere in `src/blocks`, `src/components` or `src/routes`.
+  // This resolves only the initial URL's blocks, once — nothing re-runs it on a later navigation.
+  // Safe only because every navigation here is a plain `<a href>` full page load, never a
+  // `@tanstack/react-router` `<Link>` (a client-side transition to a page whose blocks were never
+  // fetched). `check-conventions.mjs` enforces this: it fails the build on a `Link` import from
+  // `@tanstack/react-router` anywhere in `src/blocks`, `src/components` or `src/routes`.
   const ids = blocksForCurrentUrl()
   const results = await Promise.allSettled(ids.map((id) => blockModules[id]?.()))
 
