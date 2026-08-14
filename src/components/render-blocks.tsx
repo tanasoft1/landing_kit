@@ -1,6 +1,6 @@
-import { type BlockId, registry } from '~/blocks/registry'
-import { getVariants } from '~/blocks/variant-registry'
-import type { BlockRef, Locale, SiteConfig, Surface } from '~/shell/types'
+import { type BlockId, registry } from '@/blocks/registry'
+import { getVariants } from '@/blocks/variant-registry'
+import type { BlockRef, Locale, SiteConfig, Surface } from '@/lib/types'
 
 const ALTERNATION: Surface[] = ['default', 'muted']
 
@@ -26,9 +26,8 @@ export function RenderBlocks({
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
 
-        // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export (see
-        // registry.ts), so `registry[id]` already resolves to `BlockManifest<any, any>` here —
-        // no per-call-site widening needed.
+        // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export, so no
+        // per-call-site widening is needed here.
         const manifest = registry[id]
         if (!manifest) {
           throw new Error(

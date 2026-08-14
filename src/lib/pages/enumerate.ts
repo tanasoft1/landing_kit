@@ -1,4 +1,4 @@
-import type { Locale, PageConfig, SiteConfig } from '~/shell/types'
+import type { Locale, PageConfig, SiteConfig } from '@/lib/types'
 
 export type PageUrl = {
   pageId: string

@@ -10,7 +10,7 @@ import { join } from 'node:path'
 // pure statements about `dist/` state with no cross-check against source at all, so a stale
 // `dist/` false-greens them by construction.
 //
-// The stamp is written by `src/shell/seo/emit-plugin.ts` as the last act of a build that ran to
+// The stamp is written by `src/lib/seo/emit-plugin.ts` as the last act of a build that ran to
 // completion, and deleted at that build's start — so its absence means exactly one thing, and
 // nothing this script could report afterwards would be meaningful.
 const STAMP_PATH = '.kit/build-stamp.json'
@@ -71,7 +71,7 @@ const descriptions = new Map()
 const EXPECTED_HREFLANG = new Set(['mn', 'en', 'x-default'])
 
 // The site's default locale, inferred from `.kit/urls.json` itself rather than hardcoded:
-// `localePath` (src/shell/pages/enumerate.ts) never prefixes the default locale's own path
+// `localePath` (src/lib/pages/enumerate.ts) never prefixes the default locale's own path
 // with its own locale code, while every other locale's path IS prefixed with its code. So the
 // first url whose own path doesn't start with `/${its locale}` belongs to the default locale.
 const defaultLocale = urls.find((u) => !u.path.startsWith(`/${u.locale}`))?.locale

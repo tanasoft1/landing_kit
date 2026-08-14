@@ -9,15 +9,11 @@
   --gutter: clamp(1.25rem, 5vw, 2.5rem);
   --width-page: 68rem;
   --width-narrow: 34rem;
-  /* `.dark` is applied to <html>, the same element `:root` matches, so a token that does not
-     differ between themes is declared once here rather than repeated below.
-     Deliberately `0 0 #0000`, not `none`: the generated `.shadow-card` utility substitutes this
-     token into a comma-separated `box-shadow` list alongside Tailwind's other shadow layers
-     (`box-shadow: var(--tw-inset-shadow), …, var(--tw-shadow)`), and `none` is not a legal item
-     inside a comma-separated shadow list — a value of `none` there makes the whole declaration
-     invalid at computed-value time, which happens to also fall back to initial (`none`), so it
-     renders correctly by accident. `0 0 #0000` is a legal, fully transparent shadow: same visible
-     result (nothing), reached for the right reason. Do not "tidy" this back to `none`. */
+  /* `.dark` matches the same element as `:root`, so a token that doesn't differ between themes
+     is declared once, here.
+     `0 0 #0000`, not `none`: `.shadow-card` substitutes this into a comma-separated `box-shadow`
+     list, and `none` is not a legal item there — it "works" only by accident (invalid value
+     falls back to initial, which is also `none`). Do not "tidy" this back to `none`. */
   --elevation-card: 0 0 #0000;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
@@ -31,14 +27,11 @@
   --c-primary-foreground: oklch(99.2% 0.002 260);
   --c-ring: oklch(52% 0.17 258);
 
-  /* Status. Part of the preset surface, not a hardcoded stock palette colour: a fixed palette
-     colour does not move when the preset swaps, and the red/green pair this replaced read poorly
-     against either preset's dark background. (The old class names are not written out here —
-     Tailwind v4's scanner is comment-blind, so naming them would keep the dead utilities in the
-     built stylesheet.) Lighthouse never sees these — the live region is `sr-only`
-     until a submission resolves — so they are chosen by measurement rather than by eye.
-     Measured against every surface this text can land on (background/muted/accent), worst case:
-     destructive 5.33:1, success 5.42:1, both over the 4.5:1 AA floor for normal-weight text. */
+  /* Status, part of the preset surface, not a hardcoded stock colour — a fixed colour wouldn't
+     move with a preset swap. (Old class names deliberately not written out — Tailwind's scanner
+     is comment-blind.) Lighthouse never sees these (sr-only until a submission resolves), so
+     chosen by measurement: worst case over background/muted/accent — destructive 5.33:1,
+     success 5.42:1, both over the 4.5:1 AA floor. */
   --c-destructive: oklch(52% 0.19 27);
   --c-success: oklch(48% 0.12 152);
 }

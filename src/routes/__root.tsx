@@ -5,9 +5,9 @@ import {
   Scripts,
   useRouterState,
 } from '@tanstack/react-router'
-import { site } from '~/config/site.config'
-import { ThemeScript } from '~/theme'
-import '~/styles/theme.css'
+import { site } from '@/config/site.config'
+import { ThemeScript } from '@/theme'
+import '@/styles/theme.css'
 
 export const Route = createRootRoute({
   component: RootDocument,

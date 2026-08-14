@@ -1,7 +1,7 @@
-import { Reveal } from '~/motion'
-import { Container } from '~/shell/layout/container'
-import { Section } from '~/shell/layout/section'
-import type { BlockProps } from '~/shell/types'
+import { Container } from '@/components/layout/container'
+import { Section } from '@/components/layout/section'
+import type { BlockProps } from '@/lib/types'
+import { Reveal } from '@/motion'
 import type { FeaturesCopy } from './copy.mn'
 
 export function FeaturesGrid({ copy, surface, anchorId, headingLevel }: BlockProps<FeaturesCopy>) {
@@ -15,11 +15,10 @@ export function FeaturesGrid({ copy, surface, anchorId, headingLevel }: BlockPro
       <Container className="mt-14">
         <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {copy.items.map((item) => (
-            // `shadow-card` is the one place in the current block set that consumes
-            // `--elevation-card` (see theme.css's `@theme inline` mapping): `none` on `editorial`,
-            // a real soft shadow on `warm`. `bg-background` on a `muted`/`accent` section reads as
-            // a card floating on the section surface; on a `default` section it's a hairline-only
-            // card, since editorial's shadow is `none` and the background matches its container.
+            // `shadow-card` maps to `--elevation-card` (see theme.css's `@theme inline`
+            // mapping): `none` on editorial, a soft shadow on warm. `bg-background` on a
+            // `muted`/`accent` section reads as a floating card; on `default` it's
+            // hairline-only, since editorial's shadow is none.
             <div
               key={item.title}
               className="border-border bg-background rounded-base shadow-card border p-6"

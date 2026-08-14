@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { BlockProps } from '~/shell/types'
+import type { BlockProps } from '@/lib/types'
 import type { CtaCopy } from './copy.mn'
 import { CtaBanner } from './cta-banner'
 import { CtaSplit } from './cta-split'

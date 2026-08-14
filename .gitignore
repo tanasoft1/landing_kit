@@ -13,3 +13,6 @@ __unconfig*
 todos.json
 .kit
 .lighthouseci
+
+# SDD execution scratch (ledgers, briefs, review packages)
+.superpowers/

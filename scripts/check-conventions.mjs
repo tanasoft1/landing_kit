@@ -255,17 +255,39 @@ function walk(dir, opts, isExempt = () => false) {
 // The two files that DEFINE the layout primitives are the only legitimate authors of the
 // utilities the rules ban — `section.tsx` is where `py-section` and the one raw `<section>`
 // element belong, `container.tsx` is where `px-gutter`/`max-w-*` belong. Exempting them by exact
-// path, not by a `src/shell/layout/` prefix: a third file added to that directory would be a new
-// primitive nobody reviewed, and it should have to argue for its exemption explicitly.
+// path, not by a `src/components/layout/` prefix: a third file added to that directory would be a
+// new primitive nobody reviewed, and it should have to argue for its exemption explicitly.
 const LAYOUT_PRIMITIVES = new Set([
-  'src/shell/layout/section.tsx',
-  'src/shell/layout/container.tsx',
+  'src/components/layout/section.tsx',
+  'src/components/layout/container.tsx',
 ])
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
 walk('src/blocks', { headings: true })
 walk('src/routes', { headings: false })
-walk('src/shell', { headings: false }, isLayoutPrimitive)
+walk('src/components', { headings: false }, isLayoutPrimitive)
+
+// --- src/lib stays .tsx-free --------------------------------------------------------------------
+// Before the split, `walk('src/shell', …)` covered every file that is now under EITHER
+// `src/components/` or `src/lib/`. `src/lib/` is walked by nothing above, so a `.tsx` added there
+// would be invisible to the layout rules, the heading rule and the `<Link>` ban — and unlike the
+// directory literals elsewhere in this script, nothing would throw. It would just quietly not be
+// checked. `walk('src/lib', …)` is deliberately NOT the fix: `src/lib/` holds nine `.ts` files and
+// zero `.tsx` today, so that call would be vacuous by construction — green for a reason that has
+// nothing to do with whether the rule works. Assert the split rule itself instead.
+function findTsxFiles(dir) {
+  const found = []
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry)
+    if (statSync(p).isDirectory()) found.push(...findTsxFiles(p))
+    else if (p.endsWith('.tsx')) found.push(p)
+  }
+  return found
+}
+
+for (const p of findTsxFiles('src/lib')) {
+  failures.push(`${p}  .tsx under src/lib/ — .tsx belongs in src/components/, src/lib/ is .ts only`)
+}
 
 // --- no client-side <Link> anywhere ------------------------------------------------------------
 // Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
@@ -322,7 +344,7 @@ function checkNoRouterLink(file) {
 }
 
 walkFiles('src/blocks', checkNoRouterLink)
-walkFiles('src/shell', checkNoRouterLink)
+walkFiles('src/components', checkNoRouterLink)
 walkFiles('src/routes', checkNoRouterLink)
 
 // --- /docs must keep its `noindex` ------------------------------------------------------------
@@ -482,19 +504,19 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
 }
 
 // --- /docs' RECIPES list must name real README headings ---------------------------------------
-// `src/shell/docs/config-reference.tsx`'s RECIPES array names README `##` sections verbatim, as
-// plain text rather than links (README.md ships in neither `public/` nor `dist/client/`, so a link
-// would 404 in every real deployment — see that file's header comment). Plain text is the right
-// call and it has a cost: nothing about renaming a README heading tells you that `/docs` still
-// points readers at the old name. A developer following a stale pointer finds nothing and
-// concludes the docs are unreliable, which is the exact failure the "don't link a 404" decision
-// was avoiding in the first place.
+// `src/components/docs/config-reference.tsx`'s RECIPES array names README `##` sections verbatim,
+// as plain text rather than links (README.md ships in neither `public/` nor `dist/client/`, so a
+// link would 404 in every real deployment — see that file's header comment). Plain text is the
+// right call and it has a cost: nothing about renaming a README heading tells you that `/docs`
+// still points readers at the old name. A developer following a stale pointer finds nothing and
+// concludes the docs are unreliable, which is the exact failure the "don't link a 404" decision was
+// avoiding in the first place.
 //
 // Deliberately one-directional: every RECIPES entry must be a README heading, but not every README
 // heading need be a recipe (the README also has `## Quick start`, `## Scripts`, `## Contents`,
 // `## Architecture in one page` — reference material, not tasks). A two-directional check would
 // force every future README section into the /docs list.
-const CONFIG_REFERENCE = 'src/shell/docs/config-reference.tsx'
+const CONFIG_REFERENCE = 'src/components/docs/config-reference.tsx'
 const README = 'README.md'
 
 /** The `const RECIPES = [...] as const` array literal, through the optional `as const`. */
@@ -564,6 +586,7 @@ if (failures.length) {
   process.exit(1)
 }
 console.log(
-  '✓ check-conventions: layout primitives in blocks/routes/shell, no literal <h1>/<h2> in blocks, ' +
-    'no client-side <Link> anywhere, /docs noindex intact, /docs RECIPES match README headings',
+  '✓ check-conventions: layout primitives in blocks/routes/components, no literal <h1>/<h2> in ' +
+    'blocks, no client-side <Link> anywhere, src/lib is .tsx-free, /docs noindex intact, ' +
+    '/docs RECIPES match README headings',
 )

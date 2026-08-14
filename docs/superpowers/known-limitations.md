@@ -135,8 +135,8 @@ it safe could stop being true — which already happened three times during this
 - **The `<Link>` ban scans `.tsx` files only.** `walkFiles` filters on `p.endsWith('.tsx')`, so a
   `.ts` module that re-exports `Link` — `export { Link } from '@tanstack/react-router'` in a
   barrel file, say — is invisible to it, and every `.tsx` consumer then imports `Link` from a path
-  the check does not recognise. The rule now covers `src/blocks`, `src/shell` **and** `src/routes`
-  (that last gap closed this round), but the file-extension gap is still open.
+  the check does not recognise. The rule covers `src/blocks`, `src/components` **and** `src/routes`
+  (the `src/routes` gap was closed during Plan 2), but the file-extension gap is still open.
 - **The layout rules also scan `.tsx` only**, with the same consequence for a class string defined
   in a `.ts` file and imported.
 - **`font-size: 0` is not in the hidden-content scan** (`verify-build.mjs`). `transform: scale(0)`
@@ -144,19 +144,62 @@ it safe could stop being true — which already happened three times during this
   because it is a legitimate technique for controlling whitespace between inline-block children,
   so a blanket ban would have a real false-positive rate. It does hide text.
 
+**Neither script — a comment can change the build output, and nothing checks it**
+
+Unlike everything else in this section, this one is live today rather than latent.
+
+Tailwind v4 scans *files*, and the scanner is comment-blind. `src/styles/theme.css` sets
+`source(none)` and then declares the scan set explicitly as `src/**/*.{ts,tsx}` and
+`configs/**/*.{ts,tsx}`, so **writing a utility class name in a comment in any of those files ships
+that utility**, whether or not real code uses it. Three such rules ship right now, each from a
+single comment and from no `className` anywhere in the tree:
+
+| Comment | Token | Rule in the stylesheet |
+|---|---|---|
+| `src/blocks/contact/contact-form.tsx:74` | `-left-[9999px]` | `left:-9999px` |
+| `src/components/layout/container.tsx:8` | `ml-0` | `margin-left:0` |
+| `src/blocks/features/features-grid.tsx:18` | `inline` (inside `@theme inline`) | `display:inline` |
+
+Exactly 74 bytes of dead CSS: `.-left-\[9999px\]{left:-9999px}` (31 B), `.ml-0{margin-left:0}`
+(20 B), `.inline{display:inline}` (23 B).
+
+**All three predate Plan 3a.** They are on `b77f0ed` with the same `@source` globs, so those bytes
+were already shipping. The Plan 3a comment-shortening pass is what *exposed* them: three shortened
+comments dropped their tokens, the CSS came out 74 bytes smaller, and every gate stayed green. Read
+that as the byte-identity constraint working, not failing.
+
+The cost is not the bytes — it is that **editing a comment silently changes build output**,
+discoverable only by rebuilding and hashing. Nothing in `pnpm verify`, `check-conventions.mjs` or
+`verify-build.mjs` detects it.
+
+`theme.css` itself is outside the globs — `.css` matches neither pattern — which is why the rule
+written at its head can safely name classes while component comments cannot.
+
+Two of the three tokens are decoration rather than content and could be dropped at no cost to the
+comment's meaning: `contact-form.tsx` is arguing that arbitrary bracket values are banned, and
+*which* value carries nothing; `container.tsx` is arguing that margin precedence follows Tailwind's
+internal order, and it already names `mx-auto` and `mr-auto`, which are real code and do the actual
+work. `inline` is different — `@theme inline` is the directive's real name, so that sentence should
+not be contorted to avoid it.
+
+A real gate would be a `check-conventions.mjs` rule flagging utility-shaped or bracket-arbitrary
+tokens inside comments in the scanned set. That script already parses these files with the
+TypeScript AST, so comment ranges are available to it. Comparing CSS byte counts across a change is
+not a gate — it is a manual step that expires with the plan that mandated it.
+
 ## Small deferred items
 
 Each is low-risk and was judged not worth churn during the build.
 
-- `src/shell/chrome/header.tsx` — three hardcoded `locale === 'mn'` ternaries for aria-labels,
+- `src/components/header.tsx` — three hardcoded `locale === 'mn'` ternaries for aria-labels,
   rather than a config-owned label map. Fine while the system is bilingual-only.
-- `src/shell/pages/resolve-link.ts` — `createResolver` imports `registry` at module scope instead
-  of receiving it as a parameter. This is a shell→blocks dependency, inverting the layering every
-  other shell file respects. Worth a parameter if this file is touched again.
-- `src/shell/seo/json-ld.ts` — `BreadcrumbList`'s home crumb assumes `pages[0]` is the home page by
+- `src/lib/pages/resolve-link.ts` — `createResolver` imports `registry` at module scope instead
+  of receiving it as a parameter. This is a `src/lib`→`src/blocks` dependency, inverting the
+  layering every other file in `src/lib` respects. Worth a parameter if this file is touched again.
+- `src/lib/seo/json-ld.ts` — `BreadcrumbList`'s home crumb assumes `pages[0]` is the home page by
   array position rather than matching `path === '/'`. True in both current configs; silent under a
   future reorder.
-- `src/shell/theme/theme-script.tsx` — the no-flash script's `|| defaultMode` fallback is
+- `src/components/theme-script.tsx` — the no-flash script's `|| defaultMode` fallback is
   unreachable, because the preceding `matchMedia` ternary always returns a truthy string. If
   `theme.default` is meant to override the OS preference as the initial state, it currently does
   not.
