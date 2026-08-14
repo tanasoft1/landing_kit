@@ -598,16 +598,31 @@ if (existsSync(CONFIG_REFERENCE)) {
 // flags"), the dangling Contents entry it would otherwise leave behind fails loudly instead of
 // shipping a 404 anchor.
 //
-// Slugs are DERIVED with GitHub's own anchor rule (lowercase; strip anything that isn't a letter,
-// digit, space or hyphen; spaces become hyphens) rather than hand-listed, so a heading like
+// Slugs are DERIVED with GitHub's own anchor rule rather than hand-listed, so a heading like
 // "`/docs`: the living developer reference" — whose backticks, slash and colon all vanish in the
 // real anchor — is handled the same way as every other heading, with no special case to rot.
+//
+// This mirrors github-slugger (the library GitHub's own renderer uses): lowercase, DELETE
+// punctuation and symbols, then replace each remaining space with one hyphen. Three details are
+// load-bearing and were each got wrong by an earlier, tighter `[^a-z0-9 -]` allowlist:
+//
+//   - Letters outside ASCII survive. This kit is bilingual, so "## Монгол хэл" is a heading a
+//     developer here will really write; GitHub anchors it #монгол-хэл, and an ASCII-only allowlist
+//     slugged it to the empty string and failed a correct README.
+//   - Underscores survive (GitHub strips connector punctuation's neighbours, not `_` itself), so
+//     "## site_config and env" anchors #site_config-and-env, not #siteconfig-and-env.
+//   - Each space is replaced INDIVIDUALLY, never collapsed as a run. "## Blocks & variants" loses
+//     the "&" but keeps both spaces around it, so the real anchor is #blocks--variants — two
+//     hyphens. The same goes for any " — " or " / " between words.
+//
+// Written as a deny-list over Unicode property escapes (keep letters, digits, combining marks,
+// `_`, `-` and space; delete the rest) so it stays dependency-free — this script has to run inside
+// a generated project, where adding an npm package is not an option.
 const githubSlug = (text) =>
   text
     .toLowerCase()
-    .replace(/[^a-z0-9 -]+/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}\p{M}\-_ ]+/gu, '')
+    .replace(/ /g, '-')
 
 if (existsSync(README)) {
   const readmeLines = readFileSync(README, 'utf8').split('\n')
