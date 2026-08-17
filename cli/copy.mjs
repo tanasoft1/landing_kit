@@ -71,6 +71,48 @@ const README_EDITS = [
     "`/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without",
     '`/`. Without',
   ],
+
+  // Second pass over the same rule, after a scaffold was generated and grepped rather than
+  // reasoned about: the list above was an enumeration of "every kit-only reference", and an
+  // enumeration is only as complete as the reading that produced it. These six survived it —
+  // the two smoke scripts, the alias pairs named by filename (the unshipped half of each is not
+  // there, and under `--theme=single` neither is `theme.both.tsx`), the one-page smoke config,
+  // two Lighthouse measurements a scaffold cannot reproduce, and a gotcha about naming
+  // `submit.rpc.ts`, a file the scaffold does not have.
+  [
+    '`node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads',
+    '`node scripts/verify-build.mjs` (run by `verify`) reads',
+  ],
+  [
+    '| flat `src/` files | Alternate implementations behind an alias — ' +
+      '`motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, ' +
+      "`submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s " +
+      '`resolve.alias`, never a component or a lib, which is why neither half lives in either ' +
+      'bucket. |',
+    '| flat `src/` files | The implementations behind an alias — motion, theme and submit — ' +
+      "each resolved by `vite.config.ts`'s `resolve.alias`, never a component or a lib, " +
+      'which is why none of them lives in either bucket. |',
+  ],
+  ['    config — this is the mechanism the one-page smoke config exercises.', '    config.'],
+  [
+    '  chroma. Measured Lighthouse accessibility is **1.00** on both locales, both presets, ' +
+      'mobile and\n  desktop.',
+    '  chroma.',
+  ],
+  [
+    'both `pnpm verify` and Lighthouse stay green — the accessibility audit measures ' +
+      'contrast, not\nwhether a focus ring resolved.',
+    '`pnpm verify` stays green — nothing it checks can see whether a focus ring resolved.',
+  ],
+  [
+    '\n- **`submit.rpc.ts` is deliberately not named `submit.server.ts`.** TanStack ' +
+      "Start's client-import\n  protection refuses to bundle any `**/*.server.*` file into " +
+      'the client by filename, regardless of\n  content. This file is the sanctioned ' +
+      'client-safe `createServerFn` stub the client is meant to\n  import, so renaming keeps ' +
+      'the protection intact for every *other* file instead of carving out an\n  exception ' +
+      'that the next person copying this pattern could get wrong.',
+    '',
+  ],
 ]
 
 // --- guards -----------------------------------------------------------------------------------
@@ -216,7 +258,12 @@ function dropContentsEntry(lines, heading) {
 // not the exact replacement this file claims to make.
 function replaceExactText(text, file, from, to) {
   const at = text.indexOf(from)
-  const shown = from.split('\n')[0]
+  // The first NON-EMPTY line, truncated: an edit whose match starts at a line break (removing a
+  // list item takes the newline before it, so the whole item goes and no blank line is left) has
+  // an empty first line, and reported `expected text not found:` with nothing after it — a throw
+  // that fires but says nothing is barely better than one that does not fire.
+  const first = from.split('\n').find((l) => l !== '') ?? from
+  const shown = first.length > 90 ? `${first.slice(0, 90)}…` : first
   if (at === -1) throw new Error(`${file}: expected text not found: ${shown}`)
   if (text.indexOf(from, at + from.length) !== -1) {
     throw new Error(`${file}: expected text is not unique, so the edit is ambiguous: ${shown}`)
