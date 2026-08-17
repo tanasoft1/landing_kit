@@ -377,15 +377,19 @@ export function copyKit(kitRoot, outDir, answers) {
   try {
     return copyInto(kitRoot, outDir, answers)
   } catch (err) {
-    rollback(outDir, preexisting, err)
+    rollbackTarget(outDir, preexisting, err)
     throw err
   }
 }
 
-// A half-copied target is worse than no target: the next run hits `assertEmptyTarget` and reports
+// A half-written target is worse than no target: the next run hits `assertEmptyTarget` and reports
 // that the developer's directory already has contents, blaming them for the tool's own debris and
 // never mentioning the `rm -rf` that recovery needs. Any mid-copy failure reaches this — a
 // truncated tarball, ENOSPC, EACCES on one file.
+//
+// Exported because the generate layer writes into the same directory afterwards, and a failure
+// there leaves exactly the same debris with exactly the same misleading message on the next run.
+// `cli/index.mjs` owns one rollback spanning both phases; this is it.
 //
 // The target's contents are cleared wholesale rather than by replaying the written list, because
 // the written list is not the full record: `mkdirSync(…, { recursive: true })` creates directories
@@ -393,7 +397,7 @@ export function copyKit(kitRoot, outDir, answers) {
 // pushed. `assertEmptyTarget` proved the directory empty before the first write, so everything in
 // it now is ours and clearing it is exact. The directory itself goes only if this tool created it:
 // an empty directory the developer made is theirs to keep.
-function rollback(outDir, preexisting, cause) {
+export function rollbackTarget(outDir, preexisting, cause) {
   try {
     if (!existsSync(outDir)) return
     if (!preexisting) rmSync(outDir, { recursive: true, force: true })
