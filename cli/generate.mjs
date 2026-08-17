@@ -13,7 +13,7 @@
 // to either file would be made), so an edit to one and not the other stops the CLI here.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { BLOCK_DEFAULT_VARIANT } from './prompts.mjs'
+import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER } from './prompts.mjs'
 
 // --- the dependency split ----------------------------------------------------------------------
 //
@@ -492,29 +492,125 @@ ${entries}
 // the copy layer had already written 60-odd files into the target by the time this threw, and
 // only the rollback made the end state right. The end state was correct either way; the claim
 // "refuses before anything is written" was not, and a claim is what the next person builds on.
+/**
+ * Every `target: '…'` one block's bilingual copy names, with the file each came from.
+ *
+ * The single place the copy files are read for links, so `assertBlockLinksResolve` below and
+ * `readBlockDeps` further down cannot disagree about what the copy says — they are meant to be two
+ * uses of one reading, not two readings.
+ *
+ * Comments are stripped first, as in `navTargets`: a commented-out `target: 'features'` in an
+ * example would otherwise register as a real link.
+ */
+function copyLinkTargets(kitRoot, id) {
+  const found = []
+  for (const locale of ['mn', 'en']) {
+    const rel = `src/blocks/${id}/copy.${locale}.ts`
+    const src = readKitFile(kitRoot, rel)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+    for (const [, target] of src.matchAll(/\btarget:\s*'([^']+)'/g)) found.push({ target, rel })
+  }
+  return found
+}
+
 export function assertBlockLinksResolve(kitRoot, answers) {
   for (const id of answers.blocks) {
-    for (const locale of ['mn', 'en']) {
-      const rel = `src/blocks/${id}/copy.${locale}.ts`
-      const src = readKitFile(kitRoot, rel)
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '')
-      for (const [, target] of src.matchAll(/\btarget:\s*'([^']+)'/g)) {
-        // Only block ids: the page ids this layer writes are `home`, which no copy targets, and
-        // `contact`, which exists as a page only when the contact BLOCK was selected anyway.
-        if (answers.blocks.includes(target)) continue
-        throw new Error(
-          `Block '${id}' links to '${target}', which is not one of the selected blocks ` +
-            `(${answers.blocks.join(', ')}).\n` +
-            `  ${rel} has \`target: '${target}'\`\n` +
-            '  Block links resolve through src/lib/pages/resolve-link.ts, which throws during ' +
-            'server rendering for\n  a target on no page — the page prerenders blank and `pnpm ' +
-            'verify` reports "expected exactly 1\n  <h1>, found 0" without ever naming the link.' +
-            `\n  Add '${target}' to --blocks, or drop '${id}'.`,
-        )
-      }
+    for (const { target, rel } of copyLinkTargets(kitRoot, id)) {
+      // Only block ids: the page ids this layer writes are `home`, which no copy targets, and
+      // `contact`, which exists as a page only when the contact BLOCK was selected anyway.
+      if (answers.blocks.includes(target)) continue
+      throw new Error(
+        `Block '${id}' links to '${target}', which is not one of the selected blocks ` +
+          `(${answers.blocks.join(', ')}).\n` +
+          `  ${rel} has \`target: '${target}'\`\n` +
+          '  Block links resolve through src/lib/pages/resolve-link.ts, which throws during ' +
+          'server rendering for\n  a target on no page — the page prerenders blank and `pnpm ' +
+          'verify` reports "expected exactly 1\n  <h1>, found 0" without ever naming the link.' +
+          `\n  Add '${target}' to --blocks, or drop '${id}'.`,
+      )
     }
   }
+}
+
+// --- the manifests' declaration of those links, reconciled against them --------------------------
+//
+// `assertBlockLinksResolve` above refuses an unbuildable selection AFTER it has been made. That is
+// the right behaviour for the flag path and the wrong one for a prompt: a developer who unticks
+// `contact` should be told while the question is still open. So the prompt layer needs the same
+// fact up front, and gets it from each block's `requires.blocks` (src/lib/types.ts).
+//
+// That makes two descriptions of one fact — the manifest declaration and the copy files' actual
+// `target`s — and two descriptions drift. The drift is not cosmetic: an under-declared manifest
+// makes the prompt offer a combination `assertBlockLinksResolve` then refuses, which is precisely
+// the bug the declaration exists to remove, and an over-declared one makes the prompt refuse a
+// combination that would have built. Both are silent. So they are compared here, on every run,
+// before either is used, and a mismatch is fatal.
+
+/** What a block's copy actually requires: its link targets, minus itself. Sorted, deduped. */
+function copyBlockDeps(kitRoot, id) {
+  const deps = new Set()
+  for (const { target } of copyLinkTargets(kitRoot, id)) {
+    // A block linking to itself is always satisfied whenever it is selected, so it is not a
+    // dependency — hero's `secondaryCta` targets `hero`. The manifests do not list it either.
+    if (target !== id) deps.add(target)
+  }
+  return [...deps].sort()
+}
+
+/**
+ * What a block's manifest DECLARES it requires: `requires: { …, blocks: [ … ] }`.
+ *
+ * Text-parsed with comments stripped, never imported — `manifest.ts` is TypeScript and this file is
+ * plain `.mjs` under `pnpm dlx`, and the comment above every one of these arrays would otherwise
+ * count as a declaration (each names the copy field, in quotes).
+ *
+ * An absent `requires`, or a `requires` without `blocks`, means no dependencies — which is the
+ * truth for `features` and `contact` and is checked against the copy like every other block.
+ */
+function manifestBlockDeps(kitRoot, id) {
+  const src = readKitFile(kitRoot, `src/blocks/${id}/manifest.ts`)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+  const requires = src.match(/\brequires:\s*\{([^}]*)\}/)
+  if (requires === null) return []
+  const blocks = requires[1].match(/\bblocks:\s*\[([^\]]*)\]/)
+  if (blocks === null) return []
+  return [...blocks[1].matchAll(/'([^']+)'/g)].map(([, dep]) => dep).sort()
+}
+
+/**
+ * `{ [blockId]: string[] }` for every block the kit ships — the prompt layer's copy of the
+ * dependency graph. Throws if any manifest's declaration and its copy files disagree, naming both
+ * sides so the fix is obvious from the message alone.
+ *
+ * Called from `cli/index.mjs` before `resolveAnswers`, so a kit whose manifests have drifted from
+ * its copy cannot scaffold at all — not on the prompt path, not on the flag path, not with
+ * `--yes`. A check that only ran on the path that consumes it would pass forever on CI, which only
+ * ever runs `--yes`.
+ */
+export function readBlockDeps(kitRoot) {
+  const deps = {}
+  for (const id of BLOCK_ORDER) {
+    const declared = manifestBlockDeps(kitRoot, id)
+    const actual = copyBlockDeps(kitRoot, id)
+    if (declared.join(',') !== actual.join(',')) {
+      throw new Error(
+        `Block '${id}' declares different dependencies than its copy actually has.\n` +
+          `  src/blocks/${id}/manifest.ts declares requires.blocks: ` +
+          `[${declared.map((d) => `'${d}'`).join(', ')}]\n` +
+          `  src/blocks/${id}/copy.mn.ts + copy.en.ts link to:      ` +
+          `[${actual.map((d) => `'${d}'`).join(', ')}]\n` +
+          '  These are two descriptions of one fact and they have drifted. The copy files are the ' +
+          'truth —\n  every `target:` in them must resolve to a selected block at render, or the ' +
+          'page comes out blank.\n' +
+          `  Fix: set requires.blocks on '${id}' to [${actual.map((d) => `'${d}'`).join(', ')}], ` +
+          'or change the copy.',
+      )
+    }
+    deps[id] = actual
+  }
+  return deps
 }
 
 /**

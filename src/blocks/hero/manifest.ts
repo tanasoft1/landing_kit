@@ -30,5 +30,10 @@ export const hero = {
   // No `schema`: `buildJsonLd` (src/lib/seo/json-ld.ts) already emits exactly one `WebPage`
   // node per page, so a block re-describing the page would be a second, conflicting one.
   // `schema` is for markup a block's own content earns (`FAQPage`, `Product`, …), never page identity.
-  requires: { npm: [], ui: [] },
+  // `blocks` mirrors the link targets in ./copy.mn.ts and ./copy.en.ts: `primaryCta.target` is
+  // 'contact'. Move this array whenever that copy field's target changes — the CLI refuses a
+  // selection whose copy links to an unselected block, and a stale array here means the prompt
+  // offers a combination the CLI then rejects. (`secondaryCta.target` is 'hero', this block
+  // itself, so it is always satisfied and is deliberately not listed.)
+  requires: { npm: [], ui: [], blocks: ['contact'] },
 } satisfies BlockManifest<HeroCopy, HeroVariant>
