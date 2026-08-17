@@ -15,5 +15,10 @@ export const cta = {
   variantNames,
   defaultVariant: 'banner',
   copy: { mn, en },
-  requires: { npm: [], ui: [] },
+  // `blocks` mirrors the link targets in ./copy.mn.ts and ./copy.en.ts: `primaryCta.target` is
+  // 'contact' and `secondaryCta.target` is 'features'. Move this array whenever either copy field's
+  // target changes — see hero/manifest.ts for what a stale array costs. `secondaryCta` is optional
+  // on `CtaCopy` and only the `split` variant renders it, but both copy files always define it, so
+  // the dependency holds for every variant.
+  requires: { npm: [], ui: [], blocks: ['contact', 'features'] },
 } satisfies BlockManifest<CtaCopy, CtaVariant>

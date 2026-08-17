@@ -81,5 +81,10 @@ export type BlockManifest<C = any, V extends string = string> = {
   copy: Record<Locale, C>
   nav?: { labelKey: keyof C & string }
   schema?: BlockSchema<C>
-  requires?: { npm?: string[]; ui?: string[] }
+  // `blocks` lists the OTHER blocks this one's copy links to by `target`. Selecting this block
+  // without them ships a link to nothing: `createResolver` (src/lib/pages/resolve-link.ts) throws
+  // during server rendering, the page prerenders blank, and `pnpm verify` reports "expected exactly
+  // 1 <h1>, found 0" without ever naming the link. The scaffolding CLI reads this to keep such a
+  // combination out of the interactive prompt. A block linking to itself is not a dependency.
+  requires?: { npm?: string[]; ui?: string[]; blocks?: string[] }
 }

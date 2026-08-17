@@ -162,20 +162,63 @@ async function askChoice(rl, label, choices, fallback) {
   }
 }
 
-async function askBlocks(rl) {
+// --- block dependencies at the prompt ------------------------------------------------------------
+//
+// Blocks are NOT freely combinable: hero's and cta's copy link to other blocks by id, and a link to
+// an unselected block throws during server rendering (see `assertBlockLinksResolve` in
+// generate.mjs). `assertBlockLinksResolve` is the backstop and stays exactly as it is for the flag
+// path — a wrong `--blocks` is a wrong command and deserves an error.
+//
+// A prompt is different. Accepting an answer and then failing four questions later is a worse
+// experience than not accepting it, and the developer is right there to fix it. So the same fact,
+// declared in the manifests as `requires.blocks` and reconciled against the copy by `readBlockDeps`,
+// is enforced here: an unbuildable selection is refused at the question and the question re-asked.
+
+/** The `[selected block, block it needs]` pairs the selection is missing. Empty means buildable. */
+function missingBlockDeps(blocks, blockDeps) {
+  const missing = []
+  for (const id of blocks) {
+    for (const dep of blockDeps[id] ?? []) {
+      if (!blocks.includes(dep)) missing.push([id, dep])
+    }
+  }
+  return missing
+}
+
+async function askBlocks(rl, blockDeps) {
   const fallback = BLOCK_ORDER.join(',')
   for (;;) {
     const answer = (await ask(rl, `? Blocks (comma-separated) [${fallback}]: `)).trim()
-    if (answer === '') return [...BLOCK_ORDER]
+    let blocks
     try {
-      return parseBlocks(answer, 'blocks')
+      blocks = answer === '' ? [...BLOCK_ORDER] : parseBlocks(answer, 'blocks')
     } catch (err) {
       console.log(`  ${err.message}`)
+      continue
     }
+    const missing = missingBlockDeps(blocks, blockDeps)
+    if (missing.length === 0) return blocks
+    // Named per pair, not as one lumped list: "hero and cta need contact and features" does not
+    // say which to drop if you only wanted one of them.
+    for (const [id, dep] of missing) {
+      console.log(`  '${id}' links to '${dep}', so '${dep}' must be selected too.`)
+    }
+    console.log(
+      `  You chose: ${blocks.join(', ')}. Add the missing block, or drop the one needing it.`,
+    )
   }
 }
 
-export async function resolveAnswers(argv) {
+/**
+ * `blockDeps` is `readBlockDeps(KIT_ROOT)` from generate.mjs — the dependency graph the manifests
+ * declare, already reconciled against the copy files. Required, not defaulted: a missing argument
+ * would leave `missingBlockDeps` finding nothing and silently turn the prompt guard off, which is
+ * the one failure this whole mechanism exists to prevent.
+ */
+export async function resolveAnswers(argv, blockDeps) {
+  if (blockDeps === null || typeof blockDeps !== 'object') {
+    throw new Error('resolveAnswers needs the block dependency map from readBlockDeps()')
+  }
   const { dir, flags, yes } = parseArgs(argv)
   // An unset shell variable makes this `''`, which would scaffold over the repo root instead of
   // into `frontend/`. Missing and empty are the same mistake and get the same message.
@@ -210,7 +253,9 @@ export async function resolveAnswers(argv) {
 
     if (flags.blocks !== undefined) answers.blocks = parseBlocks(flags.blocks)
     else if (yes) answers.blocks = [...BLOCK_ORDER]
-    else answers.blocks = await askBlocks(prompt())
+    // The flag path is deliberately NOT checked here: `assertBlockLinksResolve` refuses it in
+    // cli/index.mjs, reading the copy files themselves rather than a declaration about them.
+    else answers.blocks = await askBlocks(prompt(), blockDeps)
 
     checkVariantFlagsMatchBlocks(flags, answers.blocks)
 

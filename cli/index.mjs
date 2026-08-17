@@ -6,6 +6,7 @@ import { copyKit, rollbackTarget } from './copy.mjs'
 import {
   assertBlockLinksResolve,
   generateFiles,
+  readBlockDeps,
   readKitVersion,
   registerInWorkspace,
 } from './generate.mjs'
@@ -24,12 +25,19 @@ Options:
   --theme=both|single        Light + dark, or a single mode  (default: both)
   --preset=editorial|warm    Token preset                    (default: editorial)
   --blocks=a,b,c             Blocks to include               (default: all four)
+                             Not a free choice — see Blocks below
   --variant-<block>=<name>   Layout for one block            (default: its own)
   -y, --yes                  Take every default, ask nothing
   -h, --help                 Show this
 
 Blocks:   hero (centered|split)  features (grid|alternating)
           cta (banner|split)     contact (default)
+
+          Blocks are not independent — their copy links to each other, and a
+          link to a block you left out makes the page render blank:
+            hero  requires  contact
+            cta   requires  contact, features
+          8 of the 15 possible combinations are refused for this reason.
 
 Example:  pnpm dlx @dewdie/landing-kit@latest frontend --yes
 `
@@ -40,7 +48,14 @@ async function main() {
     console.log(HELP)
     return
   }
-  const answers = await resolveAnswers(process.argv)
+  // Before the first question, not just before the first write. This reconciles each block's
+  // `requires.blocks` against the `target`s in its own copy files and throws if they disagree —
+  // the prompt is about to offer or refuse combinations on the strength of that declaration, and a
+  // declaration that has drifted from the copy would make it offer one the CLI then rejects.
+  // Unconditional, so `--yes` and the flag path prove it too; those are the only paths CI runs.
+  const blockDeps = readBlockDeps(KIT_ROOT)
+
+  const answers = await resolveAnswers(process.argv, blockDeps)
   const outDir = resolve(process.cwd(), answers.dir)
   const kitVersion = readKitVersion(KIT_ROOT)
 
