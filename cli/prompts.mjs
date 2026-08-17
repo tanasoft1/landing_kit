@@ -199,7 +199,9 @@ export async function resolveAnswers(argv) {
   }
 
   try {
-    const answers = { dir }
+    // Trimmed, not just tested for emptiness: `landing-kit "  frontend  "` is a shell quoting slip,
+    // and storing it untrimmed creates a directory whose name really does have the spaces in it.
+    const answers = { dir: dir.trim() }
     for (const name of Object.keys(CHOICES)) {
       if (flags[name] !== undefined) answers[name] = flags[name]
       else if (yes) answers[name] = DEFAULTS[name]
