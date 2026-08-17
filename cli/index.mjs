@@ -1,5 +1,12 @@
 #!/usr/bin/env node
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { copyKit } from './copy.mjs'
 import { parseArgs, resolveAnswers } from './prompts.mjs'
+
+// The package root, one level up from `cli/`. Under `pnpm dlx` that is the unpacked tarball, so
+// the kit being copied is always the published one — never anything in the user's own tree.
+const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const HELP = `landing-kit — scaffold a bilingual landing site
 
@@ -27,7 +34,9 @@ async function main() {
     return
   }
   const answers = await resolveAnswers(process.argv)
-  console.log(JSON.stringify(answers, null, 2))
+  const outDir = resolve(process.cwd(), answers.dir)
+  const written = copyKit(KIT_ROOT, outDir, answers)
+  console.log(`\n✓ ${written.length} files written to ${answers.dir}/\n`)
 }
 
 main().catch((err) => {
