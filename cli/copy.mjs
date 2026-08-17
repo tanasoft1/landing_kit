@@ -356,10 +356,169 @@ function transformConfigReference(text) {
   return lines.join('\n')
 }
 
+// --- the surviving half of each boundary pair ---------------------------------------------------
+
+// The kit ships two implementations behind each of `@/motion`, `@/theme` and `@/submit`, and
+// `vite.config.ts` swaps between them on an env flag. A generated project gets exactly one, chosen
+// at scaffold time and baked into `vite.config.ts` and `tsconfig.json` — there is no flag left to
+// flip. So every sentence in the surviving half that explains itself by reference to the other one
+// describes machinery that is not there, which is the rule Task 4 applied to the README.
+//
+// Each edit is exact-match and throws on a miss or an ambiguity, via `replaceExactText`. The
+// `file` label is per-EDIT rather than per-file wherever one file has two edits whose first line
+// could be confused, because the thrown message quotes that first line to say what failed.
+
+function transformMotionAnimated(text) {
+  const file = 'src/motion.animated.tsx'
+  const out = replaceExactText(
+    text,
+    `${file} (LCP note)`,
+    // `## Lighthouse budget` is a README section Task 4 deletes, and `lighthouserc*.json` is never
+    // copied — this pointed at both. Lighthouse itself is still a thing a developer can run; the
+    // budget in this project is not.
+    " * Want a real opacity fade above the fold? That's a deliberate LCP trade-off — re-check the\n" +
+      ' * Lighthouse budget first.',
+    " * Want a real opacity fade above the fold? That's a deliberate LCP trade-off — measure LCP\n" +
+      ' * before and after.',
+  )
+  return replaceExactText(
+    out,
+    `${file} (module contract)`,
+    '// Drift between the two `@/motion` variants is a type error here, not a runtime surprise —\n' +
+      "// tsconfig's `paths` only ever type-checks `@/motion` against this file, so `KIT_ANIMATION=off`\n" +
+      '// (motion.noop.tsx) would otherwise be the one configuration nothing type-checks.',
+    '// Asserts this module really is a complete `@/motion`, which nothing else does: a consumer\n' +
+      '// only type-checks the exports it imports, so dropping one here would compile until\n' +
+      '// something reached for it.',
+  )
+}
+
+function transformSubmitEndpoint(text) {
+  const file = 'src/submit.endpoint.ts'
+  const out = replaceExactText(
+    text,
+    `${file} (schema note)`,
+    '  // Same schema the RPC variant validates, so neither mode is the weaker one.',
+    '  // Validated before anything is sent, so a malformed submission never reaches the endpoint.',
+  )
+  return replaceExactText(
+    out,
+    `${file} (module contract)`,
+    '// Drift between the two `@/submit` variants is a type error here, not a runtime surprise —\n' +
+      "// tsconfig's `paths` only ever type-checks `@/submit` against one variant, so the other\n" +
+      '// (KIT_SUBMIT=server) would otherwise be the one configuration nothing type-checks.',
+    '// Asserts this module really is a complete `@/submit`, which nothing else does: a consumer\n' +
+      '// only type-checks the exports it imports, so dropping one here would compile until\n' +
+      '// something reached for it.',
+  )
+}
+
+function transformSubmitSchema(text) {
+  const file = 'src/submit-schema.ts'
+  const out = replaceExactText(
+    text,
+    `${file} (wire note)`,
+    ' * What goes over the wire, validated by both submit variants.',
+    ' * What goes over the wire.',
+  )
+  return replaceExactText(
+    out,
+    `${file} (module contract)`,
+    ' * Every `@/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one\n' +
+      ' * variant, so without this the other is never type-checked and the swapped configuration\n' +
+      ' * becomes the one nobody verifies. Same rule as `@/motion` and `@/theme`.',
+    ' * The exact surface `@/submit` must satisfy. Same rule as `@/motion` and `@/theme`.',
+  )
+}
+
+// The only one of these that is answer-dependent: under `--theme=single` the file it names is the
+// one that shipped, and the note is the only thing explaining why the toggle on /docs does nothing.
+function transformTokenGallery(text, answers) {
+  const from =
+    '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
+    '          swatches it changes. In a single-mode build `@/theme` resolves to `theme.single.tsx`,\n' +
+    '          whose `ThemeToggle` renders `null` — so this adds no theme-switching code where there is none.'
+  const to =
+    answers.theme === 'single'
+      ? '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
+        '          swatches it changes. This site is single-mode, so `@/theme` resolves to\n' +
+        '          `theme.single.tsx`, whose `ThemeToggle` renders `null` — the control below is\n' +
+        '          deliberately inert.'
+      : '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
+        '          swatches it changes.'
+  return replaceExactText(text, 'src/components/docs/token-gallery.tsx', from, to)
+}
+
+// --- biome.json ---------------------------------------------------------------------------------
+
+// `noRestrictedImports` is a live rule, not inert configuration, which is exactly why the dead
+// entries matter: an entry naming a module that resolves to no file can never fire, because
+// `import … from '@/motion.noop'` is already a "cannot find module" type error before Biome sees
+// it. What it does do is tell a developer reading the lint config that this project has a
+// `motion.noop`, a `submit.rpc` and both theme implementations. It has none of them.
+//
+// The entries naming files that DID ship are kept, and they are the valuable ones: those imports
+// resolve, so without the rule a direct import would silently bypass the alias.
+//
+// Removed as whole named pairs rather than line by line because the last entry in a JSON object
+// carries no trailing comma — deleting `@/theme.single` from the second override on its own would
+// leave `@/theme.both": "…",` dangling and produce a file that is not JSON.
+const BIOME_INDENT = ' '.repeat(18)
+const themeRule = (half) =>
+  `${BIOME_INDENT}"@/theme.${half}": "Import '@/theme' — the alias selects the implementation."`
+
+function transformBiomeJson(text, answers) {
+  const file = 'biome.json'
+  const keep = answers.theme === 'both' ? 'both' : 'single'
+
+  let out = replaceExactText(
+    text,
+    `${file} (motion.noop entry)`,
+    `${BIOME_INDENT}"@/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
+    '',
+  )
+  // The theme pair and the `@/submit.rpc` line are taken together in the blocks override: the same
+  // two theme lines appear in the second override too, and the shorter of the two texts is a
+  // substring of the longer, so neither is unique on its own. `@/submit.rpc` follows only here.
+  out = replaceExactText(
+    out,
+    `${file} (blocks override)`,
+    `${themeRule('both')},\n${themeRule('single')},\n` +
+      `${BIOME_INDENT}"@/submit.rpc": "Import '@/submit' — the alias selects the implementation.",\n`,
+    `${themeRule(keep)},\n`,
+  )
+  out = replaceExactText(
+    out,
+    `${file} (components/routes override)`,
+    `${themeRule('both')},\n${themeRule('single')}\n                }`,
+    `${themeRule(keep)}\n                }`,
+  )
+
+  // The edits above are line surgery on a file whose last-entry-has-no-comma rule they have to
+  // respect. Getting that wrong ships a `biome.json` that Biome cannot parse, which fails the
+  // generated project's `pnpm lint` with a message about syntax rather than about this. Cheap to
+  // rule out here, and it also catches a kit whose biome.json was already broken by hand.
+  try {
+    JSON.parse(out)
+  } catch (err) {
+    throw new Error(
+      `${file}: the transformed file is not valid JSON (${err.message}). The alias entries are ` +
+        "removed as whole pairs to respect JSON's no-trailing-comma rule — check those edits, " +
+        "or the kit's own biome.json.",
+    )
+  }
+  return out
+}
+
 const TRANSFORMS = {
   'README.md': transformReadme,
   'src/styles/theme.css': transformThemeCss,
   'src/components/docs/config-reference.tsx': transformConfigReference,
+  'src/components/docs/token-gallery.tsx': transformTokenGallery,
+  'src/motion.animated.tsx': transformMotionAnimated,
+  'src/submit.endpoint.ts': transformSubmitEndpoint,
+  'src/submit-schema.ts': transformSubmitSchema,
+  'biome.json': transformBiomeJson,
 }
 
 // --- the copier -------------------------------------------------------------------------------
@@ -434,10 +593,17 @@ function copyInto(kitRoot, outDir, answers) {
     throw new Error(`Kit has no preset '${answers.preset}' — ${presetFile} is missing`)
   }
 
-  for (const rel of COPY_FILES) copyOne(kitRoot, outDir, rel, written)
+  // Every copy path is composed with `keep`, not just the tree walk. A transformed file reached
+  // through any of them would be copied verbatim and then rewritten a moment later, leaving
+  // correctness to depend on the order of the two writes — `src/submit.endpoint.ts` arrives via
+  // BOUNDARY_FILES and `biome.json` via COPY_FILES, so this is not hypothetical.
+  for (const rel of COPY_FILES) {
+    if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
+  }
   for (const id of answers.blocks) copyTree(kitRoot, outDir, blockDir(id), written, keep)
   for (const choice of Object.values(BOUNDARY_FILES)) {
-    copyOne(kitRoot, outDir, typeof choice === 'function' ? choice(answers) : choice, written)
+    const rel = typeof choice === 'function' ? choice(answers) : choice
+    if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
   }
 
   for (const rel of TRANSFORMED_FILES) {

@@ -3,7 +3,12 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { copyKit, rollbackTarget } from './copy.mjs'
-import { generateFiles, readKitVersion, registerInWorkspace } from './generate.mjs'
+import {
+  assertBlockLinksResolve,
+  generateFiles,
+  readKitVersion,
+  registerInWorkspace,
+} from './generate.mjs'
 import { parseArgs, resolveAnswers } from './prompts.mjs'
 
 // The package root, one level up from `cli/`. Under `pnpm dlx` that is the unpacked tarball, so
@@ -38,6 +43,12 @@ async function main() {
   const answers = await resolveAnswers(process.argv)
   const outDir = resolve(process.cwd(), answers.dir)
   const kitVersion = readKitVersion(KIT_ROOT)
+
+  // Before the copy layer, not inside the generate layer: this rejects the ANSWERS, and answers
+  // that cannot produce a working site should never reach the point of creating a directory. With
+  // this inside `generateFiles` the target held 60-odd copied files before the throw, and only the
+  // rollback made that invisible — correct, but not what "refuses before anything is written" says.
+  assertBlockLinksResolve(KIT_ROOT, answers)
 
   // Read BEFORE the first write, and shared by both phases. `copyKit` proves the target empty and
   // rolls its own failures back; a failure in `generateFiles` would otherwise leave a target that
