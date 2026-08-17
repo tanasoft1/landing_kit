@@ -6,6 +6,8 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -14,7 +16,9 @@ import {
   blockDir,
   COPY_DIRS,
   COPY_FILES,
+  IGNORED_NAMES,
   NEVER_COPY,
+  NEVER_COPY_ANYWHERE,
   PRESET_DIR,
   TRANSFORMED_FILES,
 } from './kit-manifest.mjs'
@@ -36,23 +40,67 @@ const DROPPED_SECTIONS = [
 // Scripts that do not exist in a generated `package.json`, so their rows describe nothing.
 const DROPPED_SCRIPTS = ['smoke:full', 'smoke:onepage', 'lighthouse', 'lighthouse:desktop']
 
+// The rest of the README's kit-only machinery: prose, not whole sections. Removing the three
+// sections above is not enough on its own — it leaves the intro promising env flags, an
+// architecture row for a `configs/` directory that is never copied, and two anchors
+// (`#the-three-env-flags`, `#lighthouse-budget`) pointing at headings that no longer exist. The
+// generated project's `check-conventions.mjs` gate only sees the Contents list, so it would pass
+// with both broken links in the body.
+//
+// Several of these span two lines. Matched against the whole text rather than line by line for
+// exactly that reason, and each one throws when absent or ambiguous.
+const README_EDITS = [
+  [
+    '**swapping config files and env flags — never by editing components**',
+    '**swapping config files — never by editing components**',
+  ],
+  ["type-check, including `configs/` (added to `tsconfig.json`'s `include`).", 'type-check.'],
+  [
+    'in `pages.config.ts` (`configs/<name>/pages.config.ts` or\n  `src/config/pages.config.ts`)',
+    'in `src/config/pages.config.ts`',
+  ],
+  [
+    'resolved in `vite.config.ts` based on an\n  env flag, never on an `if` inside a component: ' +
+      '`@/motion`, `@/theme`, `@/submit`. See\n  [The three env flags](#the-three-env-flags).',
+    'resolved in `vite.config.ts`, never an\n  `if` inside a component: `@/motion`, `@/theme`, ' +
+      '`@/submit`.',
+  ],
+  ['for this reason; see [Lighthouse budget](#lighthouse-budget) for why.', 'for this reason.'],
+  ['  none of the JS. Same for `KIT_ANIMATION=off` and the `motion` library.', '  none of the JS.'],
+  [
+    "`/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without",
+    '`/`. Without',
+  ],
+]
+
 // --- guards -----------------------------------------------------------------------------------
 
 // Overwriting a developer's work silently is the worst thing this tool could do, so "exists" is
 // not the test — "has anything in it" is. Dotfiles count: a `.git` in there means it is someone's
-// repository, not an empty slot.
+// repository, not an empty slot. A non-directory gets its own message rather than the raw
+// `ENOTDIR` `readdirSync` would otherwise surface: it is the same do-not-clobber case.
 function assertEmptyTarget(outDir, label) {
   if (!existsSync(outDir)) return
+  if (!statSync(outDir).isDirectory()) {
+    throw new Error(`Target '${label}' already exists and is not a directory`)
+  }
   if (readdirSync(outDir).length > 0) {
     throw new Error(`Target directory '${label}' already exists and is not empty`)
   }
 }
 
 // The manifest says what to copy; this says what may never be copied whatever the manifest says.
+// NEVER_COPY is anchored at the root and NEVER_COPY_ANYWHERE matches any segment — see the
+// manifest for why the two cannot be one list.
 function assertCopyable(rel) {
-  const top = rel.split('/')[0]
-  if (NEVER_COPY.includes(top)) {
-    throw new Error(`Refusing to copy '${rel}': '${top}' is in NEVER_COPY`)
+  const segments = rel.split('/')
+  if (NEVER_COPY.includes(segments[0])) {
+    throw new Error(`Refusing to copy '${rel}': '${segments[0]}' is in NEVER_COPY`)
+  }
+  for (const segment of segments) {
+    if (NEVER_COPY_ANYWHERE.includes(segment)) {
+      throw new Error(`Refusing to copy '${rel}': '${segment}' is in NEVER_COPY_ANYWHERE`)
+    }
   }
 }
 
@@ -92,6 +140,7 @@ function copyTree(kitRoot, outDir, rel, written, keep) {
     a.name < b.name ? -1 : 1,
   )
   for (const entry of entries) {
+    if (IGNORED_NAMES.includes(entry.name)) continue
     const childRel = `${rel}/${entry.name}`
     if (entry.isDirectory()) copyTree(kitRoot, outDir, childRel, written, keep)
     else if (keep(childRel)) copyOne(kitRoot, outDir, childRel, written)
@@ -100,28 +149,58 @@ function copyTree(kitRoot, outDir, rel, written, keep) {
 
 // --- README.md --------------------------------------------------------------------------------
 
+// Line indices of the real '## ' headings. Fence-aware, because a section's extent is decided by
+// where the *next* heading is: a fenced block containing a line like '## Contents' would otherwise
+// end the section early and leave the rest of it behind as orphan prose — and that failure is
+// silent, since the heading being removed was found. Everything else in this file throws on a
+// miss; this was the one path that could quietly do the wrong thing instead.
+function headingIndices(lines) {
+  const out = []
+  let inFence = false
+  for (const [i, line] of lines.entries()) {
+    if (line.trimStart().startsWith('```')) inFence = !inFence
+    else if (!inFence && line.startsWith('## ')) out.push(i)
+  }
+  if (inFence) {
+    throw new Error('README.md: unclosed ``` fence — cannot tell headings from fenced code')
+  }
+  return out
+}
+
+/** `[start, end)` line range of one '## ' section, end-exclusive. Throws if the heading is gone. */
+function sectionRange(lines, heading, why) {
+  const headings = headingIndices(lines)
+  const at = headings.findIndex((i) => lines[i].trimEnd() === `## ${heading}`)
+  if (at === -1) throw new Error(`README.md: no '## ${heading}' heading — ${why}`)
+  return [headings[at], at + 1 < headings.length ? headings[at + 1] : lines.length]
+}
+
 // Exact heading match, never a fuzzy one, and a miss throws. A silent no-op here ships a README
 // describing features the project does not have, and nothing downstream would notice.
 function dropSection(lines, heading) {
-  const start = lines.findIndex((l) => l.trimEnd() === `## ${heading}`)
-  if (start === -1) {
-    throw new Error(
-      `README.md: no '## ${heading}' heading to remove — it was renamed or already gone, and a ` +
-        'generated project would keep a section describing something it does not have',
-    )
-  }
-  // To the line before the next '## ', or to the end of the file for the last section.
-  const after = lines.findIndex((l, i) => i > start && l.startsWith('## '))
-  lines.splice(start, (after === -1 ? lines.length : after) - start)
+  const [start, end] = sectionRange(
+    lines,
+    heading,
+    'it was renamed or already gone, and a generated project would keep a section describing ' +
+      'something it does not have',
+  )
+  lines.splice(start, end - start)
+}
+
+// Every row removal is scoped to the section holding its table. Searching the whole file would
+// find the first line that happens to start the same way, and a table-row removal that hits the
+// wrong table is exactly the silent wrong result the fence handling above exists to prevent.
+function dropRowIn(lines, heading, prefix, why) {
+  const [start, end] = sectionRange(lines, heading, `cannot find the table to edit (${why})`)
+  const at = lines.findIndex((l, i) => i > start && i < end && l.startsWith(prefix))
+  if (at === -1) throw new Error(`README.md: no '${prefix}…' row under '## ${heading}' — ${why}`)
+  lines.splice(at, 1)
 }
 
 // Scoped to the Contents block on purpose: the same bracketed text appears as an inline link in
 // the body, and removing that would leave a sentence with a hole in it.
 function dropContentsEntry(lines, heading) {
-  const start = lines.findIndex((l) => l.trim() === '## Contents')
-  if (start === -1) throw new Error("README.md: no '## Contents' heading — cannot trim its list")
-  const after = lines.findIndex((l, i) => i > start && l.startsWith('## '))
-  const end = after === -1 ? lines.length : after
+  const [start, end] = sectionRange(lines, 'Contents', 'cannot trim its list')
   const prefix = `- [${heading}](#`
   const at = lines.findIndex((l, i) => i > start && i < end && l.trimStart().startsWith(prefix))
   if (at === -1) {
@@ -133,16 +212,16 @@ function dropContentsEntry(lines, heading) {
   lines.splice(at, 1)
 }
 
-function dropScriptRow(lines, script) {
-  const prefix = `| \`pnpm ${script}\` |`
-  const at = lines.findIndex((l) => l.startsWith(prefix))
-  if (at === -1) {
-    throw new Error(
-      `README.md: no Scripts row for 'pnpm ${script}' — a generated package.json has no such ` +
-        'script, so the row must be removed and could not be found',
-    )
+// A miss throws, and so does a second match: an edit that could land in either of two places is
+// not the exact replacement this file claims to make.
+function replaceExactText(text, file, from, to) {
+  const at = text.indexOf(from)
+  const shown = from.split('\n')[0]
+  if (at === -1) throw new Error(`${file}: expected text not found: ${shown}`)
+  if (text.indexOf(from, at + from.length) !== -1) {
+    throw new Error(`${file}: expected text is not unique, so the edit is ambiguous: ${shown}`)
   }
-  lines.splice(at, 1)
+  return text.slice(0, at) + to + text.slice(at + from.length)
 }
 
 function transformReadme(text) {
@@ -151,9 +230,27 @@ function transformReadme(text) {
     dropContentsEntry(lines, heading)
     dropSection(lines, heading)
   }
-  for (const script of DROPPED_SCRIPTS) dropScriptRow(lines, script)
+  for (const script of DROPPED_SCRIPTS) {
+    dropRowIn(
+      lines,
+      'Scripts',
+      `| \`pnpm ${script}\` |`,
+      `a generated package.json has no '${script}' script`,
+    )
+  }
+  dropRowIn(
+    lines,
+    'Architecture in one page',
+    '| `configs/` |',
+    'a generated project has no `configs/` directory',
+  )
+
+  // Prose edits run last, over the joined text: three of them span two lines, and all of them sit
+  // in sections that survive, so the structural removals above cannot disturb them.
+  let out = lines.join('\n')
+  for (const [from, to] of README_EDITS) out = replaceExactText(out, 'README.md', from, to)
   // Cutting the final section leaves the blank line that separated it; one trailing newline.
-  return `${lines.join('\n').replace(/\n+$/, '')}\n`
+  return `${out.replace(/\n+$/, '')}\n`
 }
 
 // --- src/styles/theme.css ---------------------------------------------------------------------
@@ -179,7 +276,17 @@ function transformThemeCss(text, answers) {
   // `configs/` is never copied, and Tailwind's `@source` scan of a path that does not exist is a
   // silent no-op — the kind of leftover that survives for years.
   replaceExactLine(lines, file, '@source "../../configs/**/*.{ts,tsx}";', null)
-  return lines.join('\n')
+  // And the paragraph justifying that line goes with it. A comment explaining code that is not
+  // there is worse than no comment: the next reader looks for the `@source` it describes, does not
+  // find it, and has to work out which of the two is wrong.
+  return replaceExactText(
+    lines.join('\n'),
+    file,
+    '   here: `.css` is outside the globs below.)\n\n' +
+      '   Both source trees are listed: `KIT_CONFIG=onepage` is a supported build and must not ' +
+      'lose\n   styles from a config that renders a class. */',
+    '   here: `.css` is outside the globs below.) */',
+  )
 }
 
 // --- src/components/docs/config-reference.tsx ---------------------------------------------------
@@ -216,8 +323,46 @@ const TRANSFORMS = {
  * @returns every path written, relative to `outDir`.
  */
 export function copyKit(kitRoot, outDir, answers) {
+  // Outside the try below on purpose: this is the one failure where the contents of `outDir` are
+  // the developer's, and cleaning up after it would delete exactly what it exists to protect.
   assertEmptyTarget(outDir, answers.dir)
+  const preexisting = existsSync(outDir)
+  try {
+    return copyInto(kitRoot, outDir, answers)
+  } catch (err) {
+    rollback(outDir, preexisting, err)
+    throw err
+  }
+}
 
+// A half-copied target is worse than no target: the next run hits `assertEmptyTarget` and reports
+// that the developer's directory already has contents, blaming them for the tool's own debris and
+// never mentioning the `rm -rf` that recovery needs. Any mid-copy failure reaches this — a
+// truncated tarball, ENOSPC, EACCES on one file.
+//
+// The target's contents are cleared wholesale rather than by replaying the written list, because
+// the written list is not the full record: `mkdirSync(…, { recursive: true })` creates directories
+// nobody logged, and a `copyFileSync` that dies part-way leaves a truncated file that was never
+// pushed. `assertEmptyTarget` proved the directory empty before the first write, so everything in
+// it now is ours and clearing it is exact. The directory itself goes only if this tool created it:
+// an empty directory the developer made is theirs to keep.
+function rollback(outDir, preexisting, cause) {
+  try {
+    if (!existsSync(outDir)) return
+    if (!preexisting) rmSync(outDir, { recursive: true, force: true })
+    else {
+      for (const name of readdirSync(outDir)) {
+        rmSync(join(outDir, name), { recursive: true, force: true })
+      }
+    }
+  } catch (err) {
+    // Reported alongside the real failure, never instead of it — the original error is the one
+    // worth acting on, and a cleanup that failed is only a footnote telling you to finish by hand.
+    cause.message += `\n  (cleaning up '${outDir}' also failed: ${err.message} — remove it by hand)`
+  }
+}
+
+function copyInto(kitRoot, outDir, answers) {
   const written = []
   const presetFile = `${PRESET_DIR}/${answers.preset}.css`
   // A transformed file also lives inside a copied tree; taking it here would mean writing it twice
@@ -227,8 +372,11 @@ export function copyKit(kitRoot, outDir, answers) {
   mkdirSync(outDir, { recursive: true })
 
   for (const dir of COPY_DIRS) {
-    if (dir === PRESET_DIR) copyTree(kitRoot, outDir, dir, written, (rel) => rel === presetFile)
-    else copyTree(kitRoot, outDir, dir, written, keep)
+    // Composed, not replaced: an un-composed filter here is the same double-write hazard `keep`
+    // exists to remove, kept alive in one branch.
+    if (dir === PRESET_DIR) {
+      copyTree(kitRoot, outDir, dir, written, (rel) => keep(rel) && rel === presetFile)
+    } else copyTree(kitRoot, outDir, dir, written, keep)
   }
   // The filter above cannot tell "no such preset" from "filtered everything out" on its own.
   if (!written.includes(presetFile)) {

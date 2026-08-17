@@ -53,8 +53,17 @@ export const TRANSFORMED_FILES = [
 ]
 
 // Never copied under any answers. Not documentation: `copy.mjs` checks every path it is about to
-// write against this list, so a stray COPY_DIRS entry is a loud failure rather than a `docs/`
-// folder quietly shipped into a client repo.
+// write against both lists below, so a stray COPY_DIRS entry is a loud failure rather than a
+// `docs/` folder quietly shipped into a client repo.
+//
+// Refusal, not omission, and that is the difference from IGNORED_NAMES below: anything here being
+// reachable at all means the kit or this manifest is wrong, and shipping it would be worse than
+// stopping.
+//
+// Two lists because the entries mean two different things, and conflating them is wrong in both
+// directions. These are ROOT paths — `docs/` the plan folder, `configs/` the alternate-config
+// tree. Matching them at any depth would reject `src/components/docs/`, a directory the kit really
+// does ship.
 export const NEVER_COPY = [
   'cli',
   'docs',
@@ -63,11 +72,21 @@ export const NEVER_COPY = [
   'lighthouserc.json',
   'lighthouserc.desktop.json',
   'pnpm-lock.yaml',
-  'node_modules',
-  'dist',
-  '.kit',
-  '.git',
 ]
+
+// These are names that are wrong at ANY depth, so they are matched per path segment. The walk
+// descends into whatever is really on disk rather than a listing, so a nested `dist/` or
+// `node_modules/` inside a copied tree reaches the check with a perfectly innocent prefix in front
+// of it — and unlike `.DS_Store`, `npm pack` does not strip those.
+export const NEVER_COPY_ANYWHERE = ['node_modules', 'dist', '.kit', '.git']
+
+// Skipped wherever they turn up in a copied tree, silently. Not NEVER_COPY: `.DS_Store` is written
+// by the Finder beside any folder someone has looked at, so a kit checked out on macOS routinely
+// has them and refusing to scaffold over one would break the tool on the machine it is developed
+// on. `npm pack` strips them from the published tarball, so this only matters when the CLI runs
+// against a working copy — which is exactly how it is tested. Exact names, no globbing: editor
+// swap files (`.foo.ts.swp`) are transient and deliberately not chased.
+export const IGNORED_NAMES = ['.DS_Store']
 
 // The one COPY_DIRS entry that is filtered rather than copied whole.
 export const PRESET_DIR = 'src/styles/presets'
