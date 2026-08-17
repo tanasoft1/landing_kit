@@ -25,11 +25,9 @@ export const COPY_FILES = [
   'src/routeTree.gen.ts',
   'src/motion.types.ts',
   'src/theme.types.ts',
-  'src/submit-schema.ts',
   'src/blocks/variant-registry.ts',
   'scripts/check-conventions.mjs',
   'scripts/verify-build.mjs',
-  'biome.json',
   'components.json',
   'tsr.config.json',
 ]
@@ -46,10 +44,20 @@ export const BOUNDARY_FILES = {
 // Copied with an edit, because the kit's own copy of each names things a generated project does
 // not have. This list drives the transform loop in `copy.mjs`, so a file listed here with no
 // transform registered is an error rather than a verbatim copy nobody notices.
+// Each of the last five is here for one reason: the kit ships TWO implementations behind every
+// `@/motion`, `@/theme` and `@/submit` alias and a generated project gets exactly one, so the
+// surviving half's own prose explains itself by pointing at the half that is not there — and
+// `biome.json` bans imports of files no scaffold contains. Same rule as the README: a generated
+// project may not describe machinery it does not have.
 export const TRANSFORMED_FILES = [
   'README.md',
   'src/styles/theme.css',
   'src/components/docs/config-reference.tsx',
+  'src/components/docs/token-gallery.tsx',
+  'src/motion.animated.tsx',
+  'src/submit.endpoint.ts',
+  'src/submit-schema.ts',
+  'biome.json',
 ]
 
 // Never copied under any answers. Not documentation: `copy.mjs` checks every path it is about to

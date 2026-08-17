@@ -486,7 +486,13 @@ ${entries}
 // same reason `navTargets` reads the manifests: a block that gains or loses a link must not need
 // this file edited to stay correct. This is the static form of the check `createResolver` performs
 // at render, moved to the only point where the answer can still be changed.
-function assertBlockLinksResolve(kitRoot, answers) {
+//
+// Exported and called by `cli/index.mjs` BEFORE the copy layer runs, not from `generateFiles`.
+// That ordering is the whole point and it was wrong once: with the call inside `generateFiles`,
+// the copy layer had already written 60-odd files into the target by the time this threw, and
+// only the rollback made the end state right. The end state was correct either way; the claim
+// "refuses before anything is written" was not, and a claim is what the next person builds on.
+export function assertBlockLinksResolve(kitRoot, answers) {
   for (const id of answers.blocks) {
     for (const locale of ['mn', 'en']) {
       const rel = `src/blocks/${id}/copy.${locale}.ts`
@@ -806,15 +812,16 @@ export function readKitVersion(kitRoot) {
  * Writes every file a scaffold cannot inherit into `outDir`.
  *
  * Assumes the copy layer has already run: nothing here is written twice and nothing here overlaps
- * `cli/kit-manifest.mjs`. Every drift assertion runs BEFORE the first write, so a kit that has
- * moved on fails with the target still untouched rather than half-written.
+ * `cli/kit-manifest.mjs`. Every drift assertion runs before this layer's first write, so a kit
+ * that has moved on fails with nothing of its own left behind — and `assertBlockLinksResolve`,
+ * the one check that rejects the *answers* rather than the kit, runs earlier still, in
+ * `cli/index.mjs` ahead of the copy layer, so a refused combination creates no directory at all.
  *
  * @returns every path written, relative to `outDir`.
  */
 export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const manifest = kitManifest(kitRoot)
   assertSeoCopyMatchesKit(kitRoot)
-  assertBlockLinksResolve(kitRoot, answers)
 
   const tsconfig = tsconfigJson(answers)
   assertTsconfigMatchesKit(kitRoot, tsconfig)
