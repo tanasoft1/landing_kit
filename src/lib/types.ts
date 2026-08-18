@@ -81,5 +81,11 @@ export type BlockManifest<C = any, V extends string = string> = {
   copy: Record<Locale, C>
   nav?: { labelKey: keyof C & string }
   schema?: BlockSchema<C>
-  requires?: { npm?: string[]; ui?: string[] }
+  // `blocks` lists the OTHER blocks this one's copy links to by `target`. Every one of them has to
+  // sit on some page in `pages.config.ts`, or the link resolves to nothing: `createResolver`
+  // (src/lib/pages/resolve-link.ts) throws during server rendering, the page prerenders blank, and
+  // `pnpm verify` reports "expected exactly 1 <h1>, found 0" without ever naming the link. So this
+  // is the list to read before dropping a block from a page. A block linking to itself is not a
+  // dependency — it is satisfied wherever the block is.
+  requires?: { npm?: string[]; ui?: string[]; blocks?: string[] }
 }

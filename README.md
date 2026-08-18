@@ -8,21 +8,21 @@ exists to keep that true.
 ## Contents
 
 - [Quick start](#quick-start)
+- [Scaffolding a new site](#scaffolding-a-new-site)
 - [Scripts](#scripts)
 - [Architecture in one page](#architecture-in-one-page)
 - [Adding a block](#adding-a-block)
 - [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
 - [Reskinning: the token surface](#reskinning-the-token-surface)
 - [`/docs`: the living developer reference](#docs-the-living-developer-reference)
+- [Removing the /docs page](#removing-the-docs-page)
 - [The Cyrillic font requirement](#the-cyrillic-font-requirement)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
 - [The contact form](#the-contact-form)
 - [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
 - [Lighthouse budget](#lighthouse-budget)
-- [Known limitations](docs/superpowers/known-limitations.md) — open issues, latent gaps in the
-  verification scripts, and what's deliberately deferred. Read this before changing the block
-  registry, either script, or anything performance-related.
+- [Publishing](#publishing)
 
 ## Quick start
 
@@ -30,6 +30,58 @@ exists to keep that true.
 pnpm install
 pnpm dev
 ```
+
+## Scaffolding a new site
+
+You do not have to copy this repository by hand. The kit publishes a scaffolding CLI that writes
+a fresh project into a directory of your choosing:
+
+```bash
+pnpm dlx @dewdie/landing-kit@latest frontend
+```
+
+It asks five questions — pages, theme, preset, blocks, and a variant per selected block — and
+then writes `frontend/`. Every question has a flag, so a scripted run can skip the prompts
+entirely; `--yes` takes every default and asks nothing:
+
+```bash
+pnpm dlx @dewdie/landing-kit@latest frontend --yes
+```
+
+| Flag | Values | Default |
+|---|---|---|
+| `--pages=` | `multi`, `one` | `multi` |
+| `--theme=` | `both`, `single` | `both` |
+| `--preset=` | `editorial`, `warm` | `editorial` |
+| `--blocks=` | comma-separated ids — `hero`, `features`, `cta`, `contact` | all four |
+| `--variant-<block>=` | per block, e.g. `--variant-hero=split` | that block's `defaultVariant` |
+| `-y`, `--yes` | — | off (prompts) |
+| `-h`, `--help` | — | — |
+
+Variants per block: `hero` (`centered`, `split`), `features` (`grid`, `alternating`), `cta`
+(`banner`, `split`), `contact` (`default`). `--help` is the reference for all of this; the table
+above is orientation.
+
+**`--blocks` is not a free multi-select.** Blocks link to each other by target id from inside
+their own copy, and a link to a block you left out makes the page render blank rather than fail
+loudly. So a block that links out requires what it links to:
+
+| Block | Requires | Because |
+|---|---|---|
+| `hero` | `contact` | `primaryCta.target` is `'contact'`. |
+| `cta` | `contact`, `features` | `primaryCta.target` is `'contact'`, `secondaryCta.target` is `'features'`. |
+| `features` | — | links to nothing |
+| `contact` | — | links to nothing |
+
+That leaves 7 of the 15 non-empty subsets buildable; the other 8 are refused. The interactive
+prompt re-asks and names which block needs which; `--blocks` exits 1 with the same information
+before writing anything.
+
+**Set `url` before you verify.** The generated `src/config/site.config.ts` carries the
+placeholder `https://your-domain.example`, and `scripts/verify-build.mjs` fails on that exact
+string — so a new project's `pnpm verify` is red until you replace it with the real domain. That
+is deliberate: `site.url` is what the canonical tags, the `hreflang` set, the JSON-LD graph and
+`sitemap.xml` are all built from, and a placeholder domain shipped to production is silent.
 
 ## Scripts
 
@@ -88,9 +140,8 @@ The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` 
   error, and the machine gate stays green (see [Adding a block](#adding-a-block)). Components are
   reached only through
   `src/blocks/block-modules.ts` (dynamic `import()`, client) and `src/blocks/variants.all.ts`
-  (static, server). See
-  [Known limitations](docs/superpowers/known-limitations.md#resolved-pre-hydration-block-imports)
-  for the measurements and for the `React.lazy` approach that was tried and reverted.
+  (static, server). `React.lazy` was tried for this and reverted: a lazy component suspends during
+  hydration, so React discards the server-rendered subtree — measured CLS 0.000 → 0.169.
 - **Pages** are declared *only* in `pages.config.ts` (`configs/<name>/pages.config.ts` or
   `src/config/pages.config.ts`) as an ordered list of block references. There is no manual
   routing — `src/routes/$.tsx` is a catch-all that resolves any path against the page list.
@@ -338,6 +389,19 @@ It is not part of the site a visitor sees, kept out by three separate mechanisms
    the build if a `/docs` `Disallow` or sitemap entry reappears; `scripts/check-conventions.mjs`
    fails if the `noindex` meta is removed.
 
+## Removing the /docs page
+
+`/docs` costs visitors nothing — it is `noindex`, absent from the sitemap, and never
+prerendered. Delete it when you no longer need the reference:
+
+```bash
+rm src/routes/docs.tsx
+rm -rf src/components/docs
+```
+
+Nothing else. `pnpm verify` passes with the route absent; it only insists on the
+`noindex` meta when the route is there.
+
 ## The Cyrillic font requirement
 
 Both font families (`@fontsource-variable/inter`, `@fontsource-variable/manrope`) **must** have
@@ -465,9 +529,8 @@ Measured on the default config's build with the **`editorial`** preset — the c
 and the only preset any committed configuration has ever built. Task 6 measured `warm` through a
 temporary local `@import` swap and found the numbers unchanged within run-to-run noise, which is
 expected (a preset swap moves CSS variables and fonts, not the JavaScript the performance score is
-dominated by) but is not reproducible from anything in the repository. See
-[Known limitations](docs/superpowers/known-limitations.md) before treating the `warm` figures as
-measured.
+dominated by) but is not reproducible from anything in the repository. Treat the `warm` figures as
+inferred, not measured.
 
 Median of 5 runs per URL, all four pages:
 
@@ -490,8 +553,21 @@ The other original cause — blocks eagerly bundled into one 559 KB chunk that e
 including the contact form's `react-hook-form` and `zod` on pages with no form — is fixed: block
 components are now resolved via dynamic `import()` and awaited *before* `hydrateRoot`, so the main
 chunk dropped to 333 KB raw (107 KB gzip) and each page's `<head>` carries a `modulepreload` for
-exactly the chunks it needs. See
-[Known limitations](docs/superpowers/known-limitations.md#resolved-pre-hydration-block-imports)
-for the full mechanism, the `React.lazy` approach that was tried first and reverted (it halved the
-bundle but regressed CLS to 0.169), and why CLS staying at 0 through this change was the real
-constraint, not raw bundle size.
+exactly the chunks it needs. `React.lazy` was tried first and reverted: it halved the bundle but
+regressed CLS to 0.169. CLS staying at 0 through this change was the real constraint, not raw
+bundle size.
+
+## Publishing
+
+```bash
+# bump "version" in package.json
+npm publish
+```
+
+`npm publish` packs the working tree, not the last commit. During Plan 2 a verification run
+rewrote `package.json` and `pnpm-lock.yaml` on its own, so publishing an unchecked tree is a
+live risk. **Rule: `git status` clean and `pnpm verify` green before publishing.**
+
+Every app package lives in `devDependencies`, which looks wrong and is not: this package is a
+generator that ships no runtime. Anything in `dependencies` would be downloaded on every
+`pnpm dlx`. The generated project gets the ordinary split, written fresh by the CLI.
