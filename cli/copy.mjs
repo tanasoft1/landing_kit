@@ -51,7 +51,13 @@ const DROPPED_SECTIONS_README_ONLY = [
 ]
 
 // Scripts that do not exist in a generated `package.json`, so their rows describe nothing.
-const DROPPED_SCRIPTS = ['smoke:full', 'smoke:onepage', 'lighthouse', 'lighthouse:desktop']
+//
+// Empty since `smoke:*` and `lighthouse*` moved out of `package.json` into `tools/kit.mjs`: the
+// kit's README no longer documents them as `pnpm` scripts, so there is no row left to remove.
+// Kept as the seam rather than deleted, because the next kit-only script added to the Scripts
+// table needs exactly this list — and `dropRowIn` throws when a named row is absent, so a stale
+// entry here would fail every scaffold rather than pass one quietly.
+const DROPPED_SCRIPTS = []
 
 // The rest of the README's kit-only machinery: prose, not whole sections. Removing the three
 // sections above is not enough on its own — it leaves the intro promising env flags, an
@@ -97,14 +103,20 @@ const README_EDITS = [
     '`node scripts/verify-build.mjs` (run by `verify`) reads',
   ],
   [
-    '| flat `src/` files | Alternate implementations behind an alias — ' +
+    '| `src/integrations/` | Alternate implementations behind an alias — ' +
       '`motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, ' +
       "`submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s " +
       '`resolve.alias`, never a component or a lib, which is why neither half lives in either ' +
-      'bucket. |',
-    '| flat `src/` files | The implementations behind an alias — motion, theme and submit — ' +
+      'bucket. A generated project receives exactly one half of each pair. |',
+    '| `src/integrations/` | The implementations behind an alias — motion, theme and submit — ' +
       "each resolved by `vite.config.ts`'s `resolve.alias`, never a component or a lib, " +
       'which is why none of them lives in either bucket. |',
+  ],
+  // `tools/` is not in `package.json`'s `files`, so a scaffold has no such directory to describe.
+  [
+    '| `tools/` | Maintainer commands for the kit itself (`node tools/kit.mjs`). Deliberately ' +
+      "absent from `package.json`'s `files`, so it never ships to a generated project. |\n",
+    '',
   ],
   ['    config — this is the mechanism the one-page smoke config exercises.', '    config.'],
   [
@@ -382,7 +394,7 @@ function transformConfigReference(text) {
 // could be confused, because the thrown message quotes that first line to say what failed.
 
 function transformMotionAnimated(text) {
-  const file = 'src/motion.animated.tsx'
+  const file = 'src/integrations/motion.animated.tsx'
   const out = replaceExactText(
     text,
     `${file} (LCP note)`,
@@ -407,7 +419,7 @@ function transformMotionAnimated(text) {
 }
 
 function transformSubmitEndpoint(text) {
-  const file = 'src/submit.endpoint.ts'
+  const file = 'src/integrations/submit.endpoint.ts'
   const out = replaceExactText(
     text,
     `${file} (schema note)`,
@@ -427,7 +439,7 @@ function transformSubmitEndpoint(text) {
 }
 
 function transformSubmitSchema(text) {
-  const file = 'src/submit-schema.ts'
+  const file = 'src/integrations/submit-schema.ts'
   const out = replaceExactText(
     text,
     `${file} (wire note)`,
@@ -478,7 +490,7 @@ function transformTokenGallery(text, answers) {
 // leave `@/theme.both": "…",` dangling and produce a file that is not JSON.
 const BIOME_INDENT = ' '.repeat(18)
 const themeRule = (half) =>
-  `${BIOME_INDENT}"@/theme.${half}": "Import '@/theme' — the alias selects the implementation."`
+  `${BIOME_INDENT}"@/integrations/theme.${half}": "Import '@/theme' — the alias selects the implementation."`
 
 function transformBiomeJson(text, answers) {
   const file = 'biome.json'
@@ -487,7 +499,7 @@ function transformBiomeJson(text, answers) {
   let out = replaceExactText(
     text,
     `${file} (motion.noop entry)`,
-    `${BIOME_INDENT}"@/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
+    `${BIOME_INDENT}"@/integrations/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
     '',
   )
   // The theme pair and the `@/submit.rpc` line are taken together in the blocks override: the same
@@ -497,7 +509,7 @@ function transformBiomeJson(text, answers) {
     out,
     `${file} (blocks override)`,
     `${themeRule('both')},\n${themeRule('single')},\n` +
-      `${BIOME_INDENT}"@/submit.rpc": "Import '@/submit' — the alias selects the implementation.",\n`,
+      `${BIOME_INDENT}"@/integrations/submit.rpc": "Import '@/submit' — the alias selects the implementation.",\n`,
     `${themeRule(keep)},\n`,
   )
   out = replaceExactText(
@@ -528,9 +540,9 @@ const TRANSFORMS = {
   'src/styles/theme.css': transformThemeCss,
   'src/components/docs/config-reference.tsx': transformConfigReference,
   'src/components/docs/token-gallery.tsx': transformTokenGallery,
-  'src/motion.animated.tsx': transformMotionAnimated,
-  'src/submit.endpoint.ts': transformSubmitEndpoint,
-  'src/submit-schema.ts': transformSubmitSchema,
+  'src/integrations/motion.animated.tsx': transformMotionAnimated,
+  'src/integrations/submit.endpoint.ts': transformSubmitEndpoint,
+  'src/integrations/submit-schema.ts': transformSubmitSchema,
   'biome.json': transformBiomeJson,
 }
 

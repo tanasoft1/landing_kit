@@ -292,7 +292,7 @@ for (const p of findTsxFiles('src/lib')) {
 
 // --- no client-side <Link> anywhere ------------------------------------------------------------
 // Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
-// `src/client.tsx`'s `hydrate()` await. A `<Link>` from `@tanstack/react-router` performs a
+// `src/app/client.tsx`'s `hydrate()` await. A `<Link>` from `@tanstack/react-router` performs a
 // client-side transition, which can land on a page whose blocks were never fetched: the block
 // renders with a module that was never registered, and `getVariants` throws — with no build-time
 // signal. Every navigation on this stack is deliberately a plain `<a href>` (a full page load,

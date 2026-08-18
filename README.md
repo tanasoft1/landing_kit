@@ -95,10 +95,6 @@ is deliberate: `site.url` is what the canonical tags, the `hreflang` set, the JS
 | `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
 | `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/components`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/components/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
 | `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
-| `pnpm smoke:full` | Builds the **default** config with every boundary at its "on" setting (`KIT_CONFIG=default KIT_ANIMATION=on KIT_SUBMIT=server`) and runs `verify-build.mjs`. | 4 pages (`/`, `/en`, `/contact`, `/en/contact`) prerender correctly. |
-| `pnpm smoke:onepage` | Builds the **one-page smoke** config with every boundary at its "off"/alternate setting (`KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint`) and runs `verify-build.mjs`. | 2 pages (`/`, `/en`) prerender correctly, with zero component changes from the default build — this is the proof that config-swapping actually works. |
-| `pnpm lighthouse` | **Rebuilds the default config**, then `lhci autorun` against `dist/client` using `lighthouserc.json`, 5 runs per URL for a stable median. The rebuild is not optional: `lhci` measures whatever is already in `dist/client`, and the smoke scripts leave a *different* config's output there — run in gate order, this used to measure the one-page, light-only, unanimated build while asserting the default config's budget. | Mobile (throttled CPU + network), the harder and more representative preset; `categories:performance` is a hard `error` at `minScore: 0.85`. |
-| `pnpm lighthouse:desktop` | Same, rebuild included, but `lighthouserc.desktop.json` — a separate config, not a flag on the same one. | Desktop preset; `categories:performance` is a hard `error` at `minScore: 0.95`, since both locales measure 1.00 here (see [Lighthouse budget](#lighthouse-budget)). |
 
 `node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
 `.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
@@ -114,13 +110,15 @@ The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` 
 
 | Path | Holds |
 |---|---|
+| `src/app/` | The framework entry points — `client.tsx`, `server.ts`, `router.tsx`, and the generated `routeTree.gen.ts`. Named explicitly in `vite.config.ts`, since TanStack Start otherwise looks for them directly under `src/`. |
+| `src/integrations/` | Alternate implementations behind an alias — `motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, `submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s `resolve.alias`, never a component or a lib, which is why neither half lives in either bucket. A generated project receives exactly one half of each pair. |
 | `src/blocks/` | One folder per block — `manifest.ts`, `variants.ts`, components — registered in `registry.ts`. |
 | `src/components/` | Shared `.tsx`: layout primitives, header/footer, theme toggle, `/docs`-only UI. |
 | `src/lib/` | Shared `.ts`: SEO emission, page enumeration/resolution, shared types. No JSX, ever. |
 | `src/routes/` | TanStack Start file routes — `__root.tsx`, `index.tsx`, `docs.tsx`, and the `$.tsx` catch-all that resolves `pages.config.ts`. |
 | `src/styles/` | `theme.css` (design tokens) and `presets/` (swappable token sets). |
 | `configs/` | Alternate `pages.config.ts`/`site.config.ts` pairs, e.g. `configs/smoke-onepage/`, selected by `KIT_CONFIG`. |
-| flat `src/` files | Alternate implementations behind an alias — `motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, `submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s `resolve.alias`, never a component or a lib, which is why neither half lives in either bucket. |
+| `tools/` | Maintainer commands for the kit itself (`node tools/kit.mjs`). Deliberately absent from `package.json`'s `files`, so it never ships to a generated project. |
 
 - **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
   A block is deliberately split across two modules:
@@ -631,3 +629,25 @@ live risk. **Rule: `git status` clean and `pnpm verify` green before publishing.
 Every app package lives in `devDependencies`, which looks wrong and is not: this package is a
 generator that ships no runtime. Anything in `dependencies` would be downloaded on every
 `pnpm dlx`. The generated project gets the ordinary split, written fresh by the CLI.
+
+### Maintainer commands
+
+Before publishing, run the checks that are not part of `pnpm verify`:
+
+```bash
+node tools/kit.mjs smoke:full        # default config, every boundary "on"  → 4 pages
+node tools/kit.mjs smoke:onepage     # one-page config, every boundary flipped → 2 pages
+node tools/kit.mjs lighthouse        # mobile budget, hard fail under 0.85
+node tools/kit.mjs lighthouse:desktop # desktop budget, hard fail under 0.95
+```
+
+These are **not** `package.json` scripts, deliberately. `scripts` ships inside the tarball, so as
+entries there they gave every consumer four commands referencing `configs/` and `lighthouserc*` —
+neither of which is in `files`. Nothing ran them and nothing could. `tools/` is excluded from
+`files`, so moving them here removes them from the published package without a publish-time
+rewrite of `package.json`, which would edit the working tree during `npm publish` — the exact
+risk this section opens with.
+
+Run the two smoke builds before `lighthouse`, not after: `lhci` measures whatever is already in
+`dist/client`, and each smoke build leaves a *different* config's output there. `lighthouse`
+rebuilds first for that reason.

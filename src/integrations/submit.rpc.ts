@@ -4,7 +4,7 @@ import {
   type SubmitModule,
   type SubmitResult,
   submissionSchema,
-} from '@/submit-schema'
+} from '@/integrations/submit-schema'
 
 // Deliberately named `.rpc.ts`, not `.server.ts` — see the `@/submit` alias comment in
 // vite.config.ts for why. Do NOT rename this back to `submit.server.ts` and do NOT re-add an
