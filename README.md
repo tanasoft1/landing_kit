@@ -22,10 +22,7 @@ below is written to keep that true.
 - [Gotchas](#gotchas)
 - [Scripts](#scripts)
 - [Scaffolding options](#scaffolding-options)
-- [The three env flags](#the-three-env-flags)
-- [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
-- [Lighthouse budget](#lighthouse-budget)
-- [Publishing](#publishing)
+- [Working on the kit itself](#working-on-the-kit-itself)
 
 ## Create your site
 
@@ -93,12 +90,31 @@ Start here. This is where nearly all real work happens:
 
 | You want to | Edit |
 |---|---|
-| Change the words on the page | `src/blocks/<block>/copy.mn.ts` and `copy.en.ts` |
+| Change the words on the page | `src/blocks/<block>/copy.ts` |
 | Add, remove or reorder sections on a page | `src/config/pages.config.ts` |
 | Change the site name, menu or contact details | `src/config/site.config.ts` |
 | Change colours, fonts, spacing or radius | `src/styles/presets/*.css` |
 | Change how a section *looks* | that block's `.tsx` file, e.g. `src/blocks/hero/hero-centered.tsx` |
 | Add a whole new kind of section | a new folder in `src/blocks/` — use the command in [Adding a block](#adding-a-block) |
+
+### Inside a block folder
+
+Every block is one folder, and every folder holds the same four kinds of file. Using
+`src/blocks/hero/` as the example:
+
+| File | What it does | Edit it when |
+|---|---|---|
+| `copy.ts` | Holds all the text, in both languages. | Changing any wording — this is the one you open most |
+| `block.ts` | Describes the block: its id, which layouts it offers, and which layout is the default. | Adding a layout, or changing the default |
+| `variants.ts` | Connects each layout name to its component. | Adding a layout (one line) |
+| `hero-centered.tsx` | The actual markup for one layout. There is one of these per layout. | Changing how the section looks |
+
+So the everyday file is `copy.ts`, and the everyday change is text. The other three you touch only
+when adding or restyling a layout.
+
+`block.ts` and `variants.ts` are split for one measured reason, explained in
+[Why `block.ts` and `variants.ts` are separate](#why-blockts-and-variantsts-are-separate). The
+short version: **never import a component into `block.ts`.**
 
 ### Files you don't touch
 
@@ -121,18 +137,38 @@ on it, and the [rules](#rules-the-build-enforces) assume it is intact.
 ## Adding a page
 
 ```bash
+pnpm dlx @dewsoft/landing-kit add-page about
+```
+
+That is the whole command. It gives you a working `/about` page in both languages with placeholder
+text, and `pnpm verify` passes straight away. Then you edit two things by hand:
+
+1. The **titles and descriptions** for both languages — they arrive as `About (mn)` / `About (en)`,
+   so you can see what to replace.
+2. The **`blocks` array** — which sections the page shows.
+
+Both live in the entry the command just wrote, in `src/config/pages.config.ts`.
+
+> **Important: no new folder, and no new route file.** If you have used Next.js or similar, this is
+> the one thing that works differently here. A page is **one entry in
+> `src/config/pages.config.ts`** — nothing else. `src/routes/$.tsx` already catches every path and
+> looks it up in that list, which is why `src/routes/` stays at four files no matter how many pages
+> you add.
+
+You can pass the values up front instead, if you already know them:
+
+```bash
 pnpm dlx @dewsoft/landing-kit add-page about --blocks=features,cta \
   --title-mn="Бидний тухай" --title-en="About us"
 ```
+
+Optional flags: `--path=/company` (defaults to `/<id>`), `--desc-mn=…`, `--desc-en=…`.
 
 > **Why `pnpm dlx` and not just `landing-kit`?** Your project does not depend on this kit — it is a
 > standalone app, which is the point. So there is no `landing-kit` command on your PATH, and typing
 > one gives `command not found`. `pnpm dlx` downloads the kit, runs it once, and forgets it.
 
-A page is **one entry in `src/config/pages.config.ts`**. You never add a file to `src/routes/` —
-`$.tsx` is a catch-all that resolves any path against the page list.
-
-By hand, the same thing:
+This is what the entry looks like, if you would rather write it yourself:
 
 ```ts
 {
@@ -148,8 +184,8 @@ By hand, the same thing:
 
 That one entry produces both locales' URLs, the sitemap entries and the prerendered files.
 
-Both titles are required and they must differ — the build rejects two locales sharing a `<title>`
-as duplicate content.
+**The two languages must not share a title or a description.** The build rejects that as duplicate
+content, so give each language its own wording. (This is why the placeholders differ.)
 
 To put the page in the menu, add `{ target: 'about' }` to `nav` in `site.config.ts`. The label is
 that page's `seo.title` for the language being rendered.
@@ -159,37 +195,64 @@ that page's `seo.title` for the language being rendered.
 
 ## Adding a block
 
+A block is a new kind of section — testimonials, pricing, an FAQ. One command:
+
 ```bash
 pnpm dlx @dewsoft/landing-kit add-block testimonials
+```
+
+Unlike a page, this **does** create a folder: `src/blocks/testimonials/`. It writes four files
+there, makes all three registrations, and `pnpm verify` passes right away. Then you edit two things:
+
+1. The **copy**, in `src/blocks/testimonials/copy.ts` — both languages are in that one file.
+2. The **look**, in `src/blocks/testimonials/testimonials-simple.tsx`.
+
+> **You will not see it on the site yet.** A new block is registered but on no page. Add
+> `'testimonials'` to a page's `blocks` array in `src/config/pages.config.ts` to make it appear.
+> Until then it shows only on [`/docs`](#docs-the-live-reference).
+
+Want two layouts instead of one? Name them up front:
+
+```bash
 pnpm dlx @dewsoft/landing-kit add-block pricing --variants=simple,detailed
 ```
 
-The first makes one variant named `simple`; the second makes two. Same `pnpm dlx` reason as
+The default is a single variant named `simple`. Same `pnpm dlx` reason as
 [Adding a page](#adding-a-page) — there is no bare `landing-kit` command.
 
-That writes the folder, makes all three registrations, and formats the result — so `pnpm verify`
-passes with nothing else to run. Then:
+By hand, you write the four files described in
+[Inside a block folder](#inside-a-block-folder), then register the block in three places:
+`registry.ts`, `block-modules.ts` and `variants.all.ts`.
 
-1. Write the copy in `src/blocks/testimonials/copy.mn.ts` and `copy.en.ts`.
-2. Add `'testimonials'` to a page's `blocks` in `pages.config.ts`.
-3. Run `pnpm verify`.
+Get a registration wrong and TypeScript names the missing one — all three are typed
+`Record<BlockId, …>`, and `BlockId` comes from the registry. This is the main reason to use the
+command instead.
 
-By hand, a block is four files in its own folder plus three registrations:
+### Why `block.ts` and `variants.ts` are separate
 
-| File | Holds |
+This is the one part of the folder that is not obvious, and it is **not** a TanStack Start
+convention — TanStack Start knows nothing about blocks. It is this kit's own design, for one
+measured reason.
+
+- **`block.ts`** holds the *facts*: id, variant names, the copy, the nav label. It is loaded
+  **immediately** for every block, because the `<title>`, the JSON-LD and the menu need each
+  block's text before anything renders.
+- **`variants.ts`** holds the *components*. They load **only for the blocks on the page you are
+  looking at**.
+
+That is the whole point. Merging them into one file was measured:
+
+| | main bundle |
 |---|---|
-| `copy.mn.ts` | The Mongolian copy, and the `Copy` type both locales share |
-| `copy.en.ts` | The English copy, typed against that same type |
-| `manifest.ts` | Variant **names**, default variant, copy. **No component imports** |
-| `variants.ts` | The name → component map |
+| two files (as shipped) | **316 KB** |
+| merged into one | **440 KB** |
 
-and then add it to `registry.ts`, `block-modules.ts` and `variants.all.ts`.
+The `motion` library stops getting its own chunk and joins the main bundle, so every visitor
+downloads it whether the page animates or not. Nothing warns you: the build passes and every check
+stays green.
 
-Get the registrations wrong and TypeScript tells you by name — all three are typed
-`Record<BlockId, …>`, and `BlockId` comes from the registry. **One mistake is not caught:** a
-component imported into `manifest.ts`. The manifest is loaded eagerly for SEO, so a component
-reached from it lands in the main bundle. Measured cost: 334 KB → 459 KB, with every check still
-green. Keep `manifest.ts` free of components.
+**So the one rule is: never import a component into `block.ts`.** Everything else in the folder
+you can rearrange freely.
 
 ## Adding a variant
 
@@ -197,7 +260,7 @@ A variant is a different layout for the same block and copy. Three steps, all in
 folder:
 
 1. Add the component, e.g. `src/blocks/hero/hero-poster.tsx`.
-2. Add its name to `variantNames` in `manifest.ts` — `['centered', 'split', 'poster'] as const`.
+2. Add its name to `variantNames` in `block.ts` — `['centered', 'split', 'poster'] as const`.
 3. Map the name to the component in `variants.ts` — `poster: HeroPoster`.
 
 Then use it: `{ id: 'hero', variant: 'poster' }` in `pages.config.ts`.
@@ -285,9 +348,9 @@ it fails silently.
 - **Never import `Link` from `@tanstack/react-router`.** Every link is a plain `<a href>`. Blocks
   are loaded once for the first URL, so a client-side jump would land on a page whose blocks were
   never fetched. Full page loads are cheap here — every page is static HTML.
-- **Both locales, always.** There is no fallback language. Declare the copy type in `copy.mn.ts`
-  and import it into `copy.en.ts`, so a missing translation is a compile error.
-- **No components in `manifest.ts`.** See [Adding a block](#adding-a-block).
+- **Both locales, always.** There is no fallback language. `copy.ts` declares one type and types
+  both `mn` and `en` against it, so a missing translation is a compile error.
+- **No components in `block.ts`.** See [Adding a block](#adding-a-block).
 
 ## Gotchas
 
@@ -338,68 +401,8 @@ letting the build fail later.
 
 The generated project has no dependency on this kit. It is a plain TanStack Start app.
 
-## The three env flags
+## Working on the kit itself
 
-Set at build or dev time. Each swaps an import alias in `vite.config.ts` — never an `if` inside a
-component.
-
-| Flag | Values | Effect |
-|---|---|---|
-| `KIT_ANIMATION` | `on` (default), `off` | `off` swaps `@/motion` to passthrough components, and the `motion` library leaves the bundle entirely. |
-| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` POSTs to `VITE_CONTACT_ENDPOINT`. `server` uses a TanStack Start server function. Both validate with the same schema. |
-| `KIT_CONFIG` | `default` (default), `onepage` | Selects which config directory the app and the build driver both read. |
-
-`site.theme.mode` in `site.config.ts` works the same way: `'both'` ships the toggle and the
-no-flash script, anything else ships no theme-switching code at all.
-
-## Swapping the whole config: `configs/`
-
-`configs/smoke-onepage/` is a complete second config — one page holding every block, light only.
-It exists to prove the premise end to end: it contains **no components and no overrides**, and
-needs zero edits under `src/`.
-
-```bash
-node tools/kit.mjs smoke:onepage
-```
-
-produces a working single-page, light-only, unanimated site — where the hero's CTA resolves to
-`#contact` (an anchor) instead of `/contact` (a page), from the same components and the same copy.
-
-If you add another config, remember that **`vite.config.ts` must branch on `KIT_CONFIG` too**. The
-alias only affects app code Vite bundles; the config file reads its own `pages`/`site` directly to
-drive prerendering.
-
-## Lighthouse budget
-
-`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) assert on all four
-prerendered pages of the default build.
-
-```bash
-node tools/kit.mjs lighthouse
-node tools/kit.mjs lighthouse:desktop
-```
-
-Both are maintainer commands and neither ships to a generated project.
-
-## Publishing
-
-This package is published to npm as `@dewsoft/landing-kit`.
-
-```bash
-npm version patch     # or minor / major
-npm publish
-```
-
-`files` in `package.json` is an allowlist — anything not named there never reaches the tarball,
-which is how `tools/`, `configs/` and the Lighthouse configs stay out of published installs.
-
-### Maintainer commands
-
-`tools/kit.mjs` holds the commands that only make sense in this repository:
-
-```bash
-node tools/kit.mjs smoke:full         # default config, animated, server submit
-node tools/kit.mjs smoke:onepage      # one-page config, no animation, endpoint submit
-node tools/kit.mjs lighthouse         # mobile budget
-node tools/kit.mjs lighthouse:desktop # desktop budget
-```
+Contributing to the kit, rather than building a site with it? The env flags, the second config, the
+Lighthouse budgets and the publish steps are in [MAINTAINERS.md](./MAINTAINERS.md). None of it
+applies to a site you generate.

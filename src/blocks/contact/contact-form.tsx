@@ -5,7 +5,7 @@ import { Section } from '@/components/layout/section'
 import { contactSchema, MIN_ELAPSED_MS } from '@/integrations/submit-schema'
 import type { BlockProps } from '@/lib/types'
 import { submitContact } from '@/submit'
-import type { ContactCopy } from './copy.mn'
+import type { ContactCopy } from './copy'
 
 type Fields = { name: string; email: string; message: string; honeypot_url: string }
 

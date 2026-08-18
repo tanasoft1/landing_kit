@@ -17,9 +17,6 @@ const RECIPES = [
   'Fonts and Mongolian Cyrillic',
   'Rules the build enforces',
   'Gotchas',
-  'The three env flags',
-  'Swapping the whole config: `configs/`',
-  'Lighthouse budget',
 ] as const
 
 export function ConfigReference() {

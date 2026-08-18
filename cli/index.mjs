@@ -118,7 +118,7 @@ function runSubcommand(cmd, argv) {
         '--blocks=features,cta --title-mn="Бидний тухай" --title-en="About us"',
     )
   }
-  const { rel, path, blocks, formatted } = addPage(name, {
+  const { rel, path, blocks, placeholders, formatted } = addPage(name, {
     path: flags.path,
     blocks: list(flags.blocks),
     titleMn: flags['title-mn'],
@@ -130,10 +130,17 @@ function runSubcommand(cmd, argv) {
   console.log(`  updated  ${rel}`)
   console.log(`
   Next:
-    1. Edit the \`seo\` title and description for both languages in ${rel}
-    2. To put it in the header menu, add { target: '${name}' } to \`nav\`
+    1. ${
+      placeholders
+        ? `Replace the placeholder \`seo\` title and description for BOTH languages in\n       ${rel} — the titles currently end in '(mn)' and '(en)'`
+        : `Check the \`seo\` title and description for both languages in ${rel}`
+    }
+    2. Change which sections the page shows: edit its \`blocks\` array in ${rel}
+    3. To put it in the header menu, add { target: '${name}' } to \`nav\`
        in src/config/site.config.ts
-    3. ${verifyStep(formatted)}
+    4. ${verifyStep(formatted)}
+
+  Note: there is no new folder and no new route file — a page IS the entry above.
 `)
 }
 

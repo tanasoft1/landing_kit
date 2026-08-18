@@ -2,7 +2,7 @@ import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import type { BlockProps } from '@/lib/types'
 import { FadeIn } from '@/motion'
-import type { HeroCopy } from './copy.mn'
+import type { HeroCopy } from './copy'
 
 export function HeroSplit({
   copy,

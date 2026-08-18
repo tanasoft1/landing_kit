@@ -2,7 +2,7 @@ import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import type { BlockProps } from '@/lib/types'
 import { Reveal } from '@/motion'
-import type { FeaturesCopy } from './copy.mn'
+import type { FeaturesCopy } from './copy'
 
 export function FeaturesAlternating({
   copy,

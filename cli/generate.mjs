@@ -449,7 +449,7 @@ const importOrder = (blocks) => [...blocks].sort()
 
 function registryTs(answers) {
   const imports = importOrder(answers.blocks)
-    .map((id) => `import { ${id} } from './${id}/manifest'`)
+    .map((id) => `import { ${id} } from './${id}/block'`)
     .join('\n')
   const entries = answers.blocks.map((id) => `  ${id},`).join('\n')
   return `import type { BlockManifest } from '@/lib/types'
@@ -510,13 +510,11 @@ ${entries}
  */
 function copyLinkTargets(kitRoot, id) {
   const found = []
-  for (const locale of ['mn', 'en']) {
-    const rel = `src/blocks/${id}/copy.${locale}.ts`
-    const src = readKitFile(kitRoot, rel)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/[^\n]*/g, '')
-    for (const [, target] of src.matchAll(/\btarget:\s*'([^']+)'/g)) found.push({ target, rel })
-  }
+  const rel = `src/blocks/${id}/copy.ts`
+  const src = readKitFile(kitRoot, rel)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+  for (const [, target] of src.matchAll(/\btarget:\s*'([^']+)'/g)) found.push({ target, rel })
   return found
 }
 
@@ -567,7 +565,7 @@ function copyBlockDeps(kitRoot, id) {
 /**
  * What a block's manifest DECLARES it requires: `requires: { …, blocks: [ … ] }`.
  *
- * Text-parsed with comments stripped, never imported — `manifest.ts` is TypeScript and this file is
+ * Text-parsed with comments stripped, never imported — `block.ts` is TypeScript and this file is
  * plain `.mjs` under `pnpm dlx`, and the comment above every one of these arrays would otherwise
  * count as a declaration (each names the copy field, in quotes).
  *
@@ -579,7 +577,7 @@ function copyBlockDeps(kitRoot, id) {
  * detected and named rather than reported as an empty declaration — see below for why.
  */
 function manifestBlockDeps(kitRoot, id) {
-  const rel = `src/blocks/${id}/manifest.ts`
+  const rel = `src/blocks/${id}/block.ts`
   const src = readKitFile(kitRoot, rel)
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
@@ -663,9 +661,9 @@ export function readBlockDeps(kitRoot) {
     if (declared.join(',') !== actual.join(',')) {
       throw new Error(
         `Block '${id}' declares different dependencies than its copy actually has.\n` +
-          `  src/blocks/${id}/manifest.ts declares requires.blocks: ` +
+          `  src/blocks/${id}/block.ts declares requires.blocks: ` +
           `[${declared.map((d) => `'${d}'`).join(', ')}]\n` +
-          `  src/blocks/${id}/copy.mn.ts + copy.en.ts link to:      ` +
+          `  src/blocks/${id}/copy.ts links to:                    ` +
           `[${actual.map((d) => `'${d}'`).join(', ')}]\n` +
           '  These are two descriptions of one fact and they have drifted. The copy files are the ' +
           'truth —\n  every `target:` in them must resolve to a selected block at render, or the ' +
@@ -849,7 +847,7 @@ ${literals.join('\n')}
  */
 function navTargets(kitRoot, answers) {
   return answers.blocks.filter((id) => {
-    const src = readKitFile(kitRoot, `src/blocks/${id}/manifest.ts`)
+    const src = readKitFile(kitRoot, `src/blocks/${id}/block.ts`)
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '')
     return /\bnav:\s*\{/.test(src)
