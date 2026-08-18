@@ -229,8 +229,13 @@ function packageJson(outDir, answers, { deps }) {
       lint: 'biome ci .',
       fix: 'biome check --write .',
       conventions: 'node scripts/check-conventions.mjs',
+      // Chains the binaries directly rather than `pnpm lint && pnpm typecheck && …`. Naming the
+      // package manager here would hard-require pnpm: `npm run verify` would die on
+      // `pnpm: command not found`, which is a miserable first experience for anyone who installed
+      // with npm. Every package manager puts `node_modules/.bin` on PATH for a script, so this
+      // form works under all three.
       verify:
-        'pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs',
+        'biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && node scripts/verify-build.mjs',
     },
     dependencies: pickDeps(runtime, deps),
     devDependencies: pickDeps(BUILD_DEPS, deps),

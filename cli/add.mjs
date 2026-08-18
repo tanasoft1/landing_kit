@@ -405,7 +405,7 @@ export function addPage(id, opts) {
   if (!titleMn || !titleEn) {
     throw new Error(
       `--title-mn and --title-en are both required. Example:\n` +
-        `  landing-kit add-page ${id} --blocks=${blocks.join(',')} ` +
+        `  pnpm dlx @dewsoft/landing-kit add-page ${id} --blocks=${blocks.join(',')} ` +
         `--title-mn="Бидний тухай" --title-en="About us"`,
     )
   }

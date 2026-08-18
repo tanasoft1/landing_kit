@@ -7,7 +7,8 @@ below is written to keep that true.
 
 ## Contents
 
-- [Quick start](#quick-start)
+- [Create your site](#create-your-site)
+- [Running it](#running-it)
 - [What you edit](#what-you-edit)
 - [Adding a page](#adding-a-page)
 - [Adding a block](#adding-a-block)
@@ -20,23 +21,52 @@ below is written to keep that true.
 - [Rules the build enforces](#rules-the-build-enforces)
 - [Gotchas](#gotchas)
 - [Scripts](#scripts)
-- [Scaffolding a new site](#scaffolding-a-new-site)
+- [Scaffolding options](#scaffolding-options)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
 - [Lighthouse budget](#lighthouse-budget)
 - [Publishing](#publishing)
 
-## Quick start
+## Create your site
+
+Nothing to install first. Pick the line for your package manager and run it — `my-site` is the
+folder it creates:
 
 ```bash
-pnpm install
-pnpm dev
+pnpm dlx @dewsoft/landing-kit@latest my-site     # pnpm
+npx --yes @dewsoft/landing-kit@latest my-site    # npm
+yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+  (on yarn 1, use the npx line)
 ```
 
-Mongolian is at `/`, English at `/en`.
+It asks you four short questions. Press Enter for each to take the default, or add `--yes` to the
+end to skip all of them.
 
-Before you deploy, set `url` in `src/config/site.config.ts` to your real domain. `pnpm verify`
-fails until you do.
+Then start it:
+
+```bash
+cd my-site
+pnpm install      # or: npm install / yarn install
+pnpm dev          # or: npm run dev / yarn dev
+```
+
+Open the address it prints. **Mongolian is at `/`, English at `/en`.**
+
+Now go to [What you edit](#what-you-edit).
+
+## Running it
+
+Day to day you need two commands:
+
+```bash
+pnpm dev       # while you work
+pnpm verify    # before you deploy — runs every check
+```
+
+Any package manager works. Swap `pnpm` for `npm run` or `yarn` throughout.
+
+> **Do this before your first deploy:** open `src/config/site.config.ts` and change `url` to your
+> real domain. `pnpm verify` refuses to pass until you do — a wrong domain does not show on the
+> page, but it quietly breaks every link Google reads.
 
 ## What you edit
 
@@ -45,33 +75,59 @@ Two words explain the whole model:
 - A **block** is one section of a page — hero, features, cta, contact.
 - A **page** is just an ordered list of blocks.
 
-So most work happens in four files:
+### You don't need to know TanStack Start
+
+This is built on TanStack Start, but you do not have to learn it to build a site. It does three
+jobs for you, all of them already wired up:
+
+1. Turns your pages into plain HTML files at build time, so Google can read them.
+2. Serves Mongolian at `/` and English at `/en` from one set of components.
+3. Puts the right `<title>`, description and social tags on every page.
+
+The files that talk to the framework are `src/app/` and `src/routes/`. **You never open them.**
+Everything you actually edit is ordinary React and TypeScript.
+
+### Files you edit
+
+Start here. This is where nearly all real work happens:
 
 | You want to | Edit |
 |---|---|
 | Change the words on the page | `src/blocks/<block>/copy.mn.ts` and `copy.en.ts` |
-| Add, remove or reorder sections | `src/config/pages.config.ts` |
+| Add, remove or reorder sections on a page | `src/config/pages.config.ts` |
 | Change the site name, menu or contact details | `src/config/site.config.ts` |
-| Change colours, fonts or spacing | `src/styles/presets/*.css` |
+| Change colours, fonts, spacing or radius | `src/styles/presets/*.css` |
+| Change how a section *looks* | that block's `.tsx` file, e.g. `src/blocks/hero/hero-centered.tsx` |
+| Add a whole new kind of section | a new folder in `src/blocks/` — use the command in [Adding a block](#adding-a-block) |
 
-The rest of `src/` you rarely open:
+### Files you don't touch
 
-| Path | Holds |
+Nothing here needs editing to build a normal site. If you think you need to change one of these,
+it is worth asking whether there is a config-shaped way to do it instead:
+
+| Path | Why leave it alone |
 |---|---|
-| `src/blocks/` | One folder per block: its copy, its manifest, its components |
-| `src/components/` | Shared UI — layout, header, footer, theme toggle |
-| `src/lib/` | Shared logic — SEO, page resolution, types. No JSX, ever |
-| `src/routes/` | Four route files. You will not need a fifth — see [Adding a page](#adding-a-page) |
-| `src/styles/` | `theme.css` (the system) and `presets/` (the skin) |
-| `src/app/` | Framework entry points. Leave these alone |
-| `src/integrations/` | Motion, theme and submit implementations, chosen at build time |
+| `src/app/` | The framework's entry points. Editing these breaks the build in confusing ways |
+| `src/routes/` | Four files, and four is enough forever. A new page is a config entry, **not** a new route file — see [Adding a page](#adding-a-page) |
+| `src/lib/` | SEO, sitemap, page resolution. Driven entirely by your two config files |
+| `src/styles/theme.css` | The design *system*. To restyle, edit a preset instead — see [Changing the design](#changing-the-design) |
+| `src/integrations/` | Motion, theme and form-submit wiring, picked when the project was created |
+| `scripts/` | The checks behind `pnpm verify` |
+
+`src/components/` sits in between: layout primitives (`Section`, `Container`), the header and the
+footer. You will edit the header or footer eventually. Leave `layout/` alone — every block depends
+on it, and the [rules](#rules-the-build-enforces) assume it is intact.
 
 ## Adding a page
 
 ```bash
-landing-kit add-page about --blocks=features,cta \
+pnpm dlx @dewsoft/landing-kit add-page about --blocks=features,cta \
   --title-mn="Бидний тухай" --title-en="About us"
 ```
+
+> **Why `pnpm dlx` and not just `landing-kit`?** Your project does not depend on this kit — it is a
+> standalone app, which is the point. So there is no `landing-kit` command on your PATH, and typing
+> one gives `command not found`. `pnpm dlx` downloads the kit, runs it once, and forgets it.
 
 A page is **one entry in `src/config/pages.config.ts`**. You never add a file to `src/routes/` —
 `$.tsx` is a catch-all that resolves any path against the page list.
@@ -104,9 +160,12 @@ that page's `seo.title` for the language being rendered.
 ## Adding a block
 
 ```bash
-landing-kit add-block testimonials                       # one variant, named `simple`
-landing-kit add-block pricing --variants=simple,detailed # two
+pnpm dlx @dewsoft/landing-kit add-block testimonials
+pnpm dlx @dewsoft/landing-kit add-block pricing --variants=simple,detailed
 ```
+
+The first makes one variant named `simple`; the second makes two. Same `pnpm dlx` reason as
+[Adding a page](#adding-a-page) — there is no bare `landing-kit` command.
 
 That writes the folder, makes all three registrations, and formats the result — so `pnpm verify`
 passes with nothing else to run. Then:
@@ -263,16 +322,15 @@ it fails silently.
 checks each one: exactly one `<h1>`, no hidden content in the HTML, a complete `hreflang` set,
 valid JSON-LD, and a sitemap that agrees with the `<head>`.
 
-## Scaffolding a new site
+## Scaffolding options
 
-You do not copy this repository by hand. The CLI writes a fresh project:
+Every question the CLI asks has a flag, so a scaffold can be fully scripted:
 
 ```bash
 pnpm dlx @dewsoft/landing-kit@latest frontend --yes
 ```
 
-It asks four questions — pages, theme, preset, blocks — and every answer has a flag, so
-`--yes` takes the defaults. Run `landing-kit --help` for the full list.
+Run `pnpm dlx @dewsoft/landing-kit --help` for the full list.
 
 Blocks are not freely combinable: some blocks' copy links to others, and a link to a block you
 left out would render a blank page. The CLI refuses those combinations at the question rather than
