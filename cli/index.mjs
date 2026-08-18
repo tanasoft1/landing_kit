@@ -22,8 +22,13 @@ const HELP = `landing-kit — scaffold a bilingual landing site
 Usage:  pnpm dlx @dewsoft/landing-kit@latest <dir> [options]
 
         Inside a project you already scaffolded:
-          landing-kit add-block <name> [--variants=a,b]
-          landing-kit add-page  <id> --blocks=a,b --title-mn=".." --title-en=".."
+          pnpm dlx @dewsoft/landing-kit add-block <name> [--variants=a,b]
+          pnpm dlx @dewsoft/landing-kit add-page  <id> --blocks=a,b \\
+                        --title-mn=".." --title-en=".."
+
+        There is no bare "landing-kit" command: a generated project does not
+        depend on this package, so nothing puts it on your PATH. "pnpm dlx"
+        fetches and runs it.
 
 Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
@@ -45,8 +50,8 @@ Blocks:   hero (centered|split)  features (grid|alternating)
           8 of the 15 possible combinations are refused for this reason.
 
 Example:  pnpm dlx @dewsoft/landing-kit@latest frontend --yes
-          landing-kit add-block testimonials
-          landing-kit add-page about --blocks=features,cta \\
+          pnpm dlx @dewsoft/landing-kit add-block testimonials
+          pnpm dlx @dewsoft/landing-kit add-page about --blocks=features,cta \\
                         --title-mn="Бидний тухай" --title-en="About us"
 `
 
@@ -86,7 +91,9 @@ function runSubcommand(cmd, argv) {
 
   if (cmd === 'add-block') {
     if (!name || name.startsWith('-')) {
-      throw new Error('add-block needs a name: landing-kit add-block testimonials')
+      throw new Error(
+        'add-block needs a name: pnpm dlx @dewsoft/landing-kit add-block testimonials',
+      )
     }
     const { written, edited, variants, formatted } = addBlock(
       name,
@@ -99,7 +106,7 @@ function runSubcommand(cmd, argv) {
   Next:
     1. Write the copy in src/blocks/${name}/copy.mn.ts and copy.en.ts
     2. Put it on a page — add '${name}' to that page's \`blocks\` in src/config/pages.config.ts
-       (or: landing-kit add-page <id> --blocks=${name})
+       (or: pnpm dlx @dewsoft/landing-kit add-page <id> --blocks=${name})
     3. ${verifyStep(formatted)}
 `)
     return
@@ -107,8 +114,8 @@ function runSubcommand(cmd, argv) {
 
   if (!name || name.startsWith('-')) {
     throw new Error(
-      'add-page needs an id: landing-kit add-page about --blocks=features,cta ' +
-        '--title-mn="Бидний тухай" --title-en="About us"',
+      'add-page needs an id: pnpm dlx @dewsoft/landing-kit add-page about ' +
+        '--blocks=features,cta --title-mn="Бидний тухай" --title-en="About us"',
     )
   }
   const { rel, path, blocks, formatted } = addPage(name, {

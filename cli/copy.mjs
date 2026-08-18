@@ -42,8 +42,11 @@ const DROPPED_SECTIONS = [
 // no matching RECIPES line, so adding either of these there would make every scaffold fail on a
 // heading that was correctly never listed. Two lists, one difference: RECIPES membership.
 const DROPPED_SECTIONS_README_ONLY = [
-  // Describes the scaffolding CLI, which a generated project does not contain.
-  'Scaffolding a new site',
+  // How to create a project, aimed at someone who has not created one yet. A generated project
+  // already exists, so its README opens on `## Running it` instead.
+  'Create your site',
+  // The remaining CLI flags, for a project that does not contain the CLI.
+  'Scaffolding options',
   // Publishing instructions for THIS package — "bump `version`, run `npm publish`" — aimed at a
   // project that is not this package. Worse than redundant: a reader who follows it publishes
   // their client's landing page to npm.

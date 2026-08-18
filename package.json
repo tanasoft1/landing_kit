@@ -71,6 +71,6 @@
     "lint": "biome ci .",
     "fix": "biome check --write .",
     "conventions": "node scripts/check-conventions.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && node scripts/verify-build.mjs"
+    "verify": "biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && node scripts/verify-build.mjs"
   }
 }
