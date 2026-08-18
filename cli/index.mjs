@@ -36,9 +36,15 @@ Options:
   --preset=editorial|warm    Token preset                    (default: editorial)
   --blocks=a,b,c             Blocks to include               (default: all four)
                              Not a free choice — see Blocks below
+  --add-blocks=a,b           Blocks of your own, any number  (default: none)
+                             Created empty, ready for your copy
   --variant-<block>=<name>   Layout for one block            (default: its own)
   -y, --yes                  Take every default, ask nothing
   -h, --help                 Show this
+
+          In a terminal the questions are arrow-key pickers: up/down to move,
+          Space to toggle a block, Enter to confirm. Piped or non-interactive
+          input falls back to typed answers, so scripts and CI are unaffected.
 
 Blocks:   hero (centered|split)  features (grid|alternating)
           cta (banner|split)     contact (default)
@@ -48,6 +54,11 @@ Blocks:   hero (centered|split)  features (grid|alternating)
             hero  requires  contact
             cta   requires  contact, features
           8 of the 15 possible combinations are refused for this reason.
+
+          The block list also takes names of your own: choose "add your own"
+          in the picker, or pass --add-blocks. Each becomes a real block on
+          the home page with placeholder copy for you to replace. At least
+          one of the four above is still required.
 
 Example:  pnpm dlx @dewsoft/landing-kit@latest frontend --yes
           pnpm dlx @dewsoft/landing-kit add-block testimonials
@@ -104,7 +115,7 @@ function runSubcommand(cmd, argv) {
     for (const f of edited) console.log(`  updated  ${f}`)
     console.log(`
   Next:
-    1. Write the copy in src/blocks/${name}/copy.mn.ts and copy.en.ts
+    1. Write the copy — both languages — in src/blocks/${name}/copy.ts
     2. Put it on a page — add '${name}' to that page's \`blocks\` in src/config/pages.config.ts
        (or: pnpm dlx @dewsoft/landing-kit add-page <id> --blocks=${name})
     3. ${verifyStep(formatted)}
@@ -201,6 +212,15 @@ async function main() {
   Then set \`url\` in src/config/site.config.ts to your real domain.
   \`pnpm verify\` fails until you do.
 `)
+  // Named one per line, because these are the only files in the whole scaffold that hold text
+  // nobody wrote. Left unsaid, the placeholder headings ship.
+  if (answers.custom.length > 0) {
+    console.log(
+      `  Your own blocks are on the home page with placeholder text. Write their copy in:`,
+    )
+    for (const id of answers.custom) console.log(`    src/blocks/${id}/copy.ts`)
+    console.log('')
+  }
 }
 
 main().catch((err) => {

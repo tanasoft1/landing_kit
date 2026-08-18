@@ -1,4 +1,9 @@
 import { createInterface } from 'node:readline/promises'
+import { blockNameProblem } from './add.mjs'
+import { isInteractive, runCheckbox, runRadio } from './select.mjs'
+
+/** The single layout a scaffold-time custom block is born with. `add-block` can add more later. */
+export const CUSTOM_VARIANT = 'simple'
 
 export const BLOCK_ORDER = ['hero', 'features', 'cta', 'contact']
 export const BLOCK_VARIANTS = {
@@ -22,6 +27,76 @@ const CHOICES = {
 }
 const DEFAULTS = { pages: 'multi', theme: 'both', preset: 'editorial' }
 const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset' }
+
+// One short line per choice, shown beside it in the arrow-key picker. Someone scaffolding their
+// first site has no idea what `editorial` or `alternating` looks like, and the whole point of a
+// picker over a typed answer is that the options can explain themselves.
+const HINTS = {
+  multi: 'Home and Contact as separate pages',
+  one: 'Everything on a single page',
+  both: 'Light and dark, with a toggle',
+  single: 'One mode only, no toggle',
+  editorial: 'Quiet and neutral, small radius',
+  warm: 'Amber and rounder, with a soft shadow',
+}
+
+const VARIANT_HINTS = {
+  hero: { centered: 'Text centred, no image', split: 'Text beside an image' },
+  features: { grid: 'Cards in a grid', alternating: 'Rows, image side alternating' },
+  cta: { banner: 'Full-width band', split: 'Two columns' },
+}
+
+const BLOCK_HINTS = {
+  hero: 'The opening section',
+  features: 'What you offer',
+  cta: 'A call to action',
+  contact: 'Contact form',
+}
+
+// --- blocks of your own ---------------------------------------------------------------------------
+//
+// The four above are the ones the kit ships copy and layouts for. A site that needs a pricing table
+// or an FAQ needs a block that does not exist yet, and the answer used to be "scaffold first, then
+// run add-block" — a second command, in a second place, that nobody reads about until later.
+//
+// So the block question takes new names too, as many as you like. Each one becomes a real block
+// folder in the scaffold: same four files `add-block` writes, registered the same way, already on
+// the home page — with placeholder copy, waiting for its text.
+
+const ADD_ITEM = {
+  label: 'add your own',
+  hint: 'a section the kit has no copy for (pricing, faq, …)',
+  prompt: 'name',
+  addedHint: 'yours — placeholder text to replace',
+  validateNew: (name, taken) => customBlockProblem(name, taken),
+}
+
+/** The reason `name` cannot be a new block, or null. One message for the flag and the picker. */
+function customBlockProblem(name, taken) {
+  const problem = blockNameProblem(name)
+  if (problem !== null) return problem
+  if (BLOCK_ORDER.includes(name)) {
+    return `'${name}' is a built-in block already — pick it from the list, don't add it.`
+  }
+  if (taken.includes(name)) return `'${name}' has already been added.`
+  return null
+}
+
+/** `--add-blocks=pricing,faq`, validated exactly as the typed-in names are. */
+function parseCustomBlocks(raw, label = '--add-blocks') {
+  const given = raw.split(',').map((s) => s.trim())
+  if (given.length === 1 && given[0] === '') return []
+  const out = []
+  for (const name of given) {
+    if (name === '') throw new Error(`Invalid ${label} '${raw}'. It has an empty entry.`)
+    const problem = customBlockProblem(name, out)
+    if (problem !== null) throw new Error(`Invalid ${label}: ${problem}`)
+    out.push(name)
+  }
+  return out
+}
+
+const withHints = (values, hints) => values.map((value) => ({ value, hint: hints?.[value] }))
 
 export function parseArgs(argv) {
   const args = argv.slice(2)
@@ -61,11 +136,11 @@ export function parseArgs(argv) {
 // default and nothing says so. Both are errors.
 function checkFlagNames(flags) {
   for (const name of Object.keys(flags)) {
-    if (name === 'yes' || name === 'help' || Object.hasOwn(CHOICES, name) || name === 'blocks')
-      continue
+    if (name === 'yes' || name === 'help' || Object.hasOwn(CHOICES, name)) continue
+    if (name === 'blocks' || name === 'add-blocks') continue
     if (name.startsWith('variant-')) continue
     throw new Error(
-      `Unknown flag --${name}. Allowed: --pages, --theme, --preset, --blocks, ` +
+      `Unknown flag --${name}. Allowed: --pages, --theme, --preset, --blocks, --add-blocks, ` +
         '--variant-<block>, --yes, --help',
     )
   }
@@ -162,6 +237,14 @@ async function askChoice(rl, label, choices, fallback) {
   }
 }
 
+/** The arrow-key equivalent, opened on the default so Enter alone still takes it. */
+const pickChoice = (label, choices, fallback, hints) =>
+  runRadio({
+    title: label,
+    options: withHints(choices, hints),
+    initialIndex: Math.max(0, choices.indexOf(fallback)),
+  })
+
 // --- block dependencies at the prompt ------------------------------------------------------------
 //
 // Blocks are NOT freely combinable: hero's and cta's copy link to other blocks by id, and a link to
@@ -185,6 +268,42 @@ function missingBlockDeps(blocks, blockDeps) {
   return missing
 }
 
+/**
+ * The same rule as `askBlocks`, enforced live instead of after the fact.
+ *
+ * `runCheckbox` refuses to submit while this returns lines, so an unbuildable set cannot be
+ * confirmed at all — and the reason sits under the list the whole time you are choosing, rather
+ * than appearing once the question has already closed.
+ */
+const blockValidator = (blockDeps) => (selected) => {
+  // At least one BUILT-IN, not just at least one block. Blocks of your own are born with
+  // placeholder copy and no nav entry, so a site made only of them is a page of lorem ipsum —
+  // and the header would have nothing to link to.
+  if (!selected.some((id) => BLOCK_ORDER.includes(id))) {
+    return ['Pick at least one of the blocks the kit ships.']
+  }
+  const missing = missingBlockDeps(selected, blockDeps)
+  if (missing.length === 0) return null
+  return missing.map(([id, dep]) => `'${id}' links to '${dep}', so '${dep}' must be selected too.`)
+}
+
+const pickBlocks = (blockDeps, offerAdd = true) =>
+  runCheckbox({
+    title: 'Blocks',
+    options: withHints(BLOCK_ORDER, BLOCK_HINTS),
+    initialChecked: [...BLOCK_ORDER],
+    validate: blockValidator(blockDeps),
+    // Hidden when `--add-blocks` already answered it, so the row cannot collect names that are
+    // then thrown away.
+    addItem: offerAdd ? ADD_ITEM : null,
+  })
+
+/** Splits one picker answer into the kit's blocks and the ones typed in, each in list order. */
+const splitBlocks = (selected) => ({
+  blocks: selected.filter((id) => BLOCK_ORDER.includes(id)),
+  custom: selected.filter((id) => !BLOCK_ORDER.includes(id)),
+})
+
 async function askBlocks(rl, blockDeps) {
   const fallback = BLOCK_ORDER.join(',')
   for (;;) {
@@ -206,6 +325,21 @@ async function askBlocks(rl, blockDeps) {
     console.log(
       `  You chose: ${blocks.join(', ')}. Add the missing block, or drop the one needing it.`,
     )
+  }
+}
+
+/** The typed equivalent of the picker's `add your own` row: a second question, same rules. */
+async function askCustomBlocks(rl) {
+  for (;;) {
+    const answer = (
+      await ask(rl, '? Blocks of your own (comma-separated names, blank for none): ')
+    ).trim()
+    if (answer === '') return []
+    try {
+      return parseCustomBlocks(answer, 'blocks of your own')
+    } catch (err) {
+      console.log(`  ${err.message}`)
+    }
   }
 }
 
@@ -242,7 +376,14 @@ export async function resolveAnswers(argv, blockDeps) {
     if (flags[name] !== undefined) checkChoice(name, flags[name])
   }
   if (flags.blocks !== undefined) parseBlocks(flags.blocks)
+  if (flags['add-blocks'] !== undefined) parseCustomBlocks(flags['add-blocks'])
   checkVariantFlags(flags)
+
+  // One input mode for the whole run, decided once. Readline and the raw-mode picker both own
+  // stdin while they are open, so alternating between them mid-run would have two readers racing
+  // for the same keypress. Not a TTY — piped stdin, CI, `--yes` — means typed prompts, which is
+  // also what keeps every scripted invocation behaving exactly as it did before.
+  const interactive = isInteractive()
 
   let rl = null
   const prompt = () => {
@@ -257,14 +398,34 @@ export async function resolveAnswers(argv, blockDeps) {
     for (const name of Object.keys(CHOICES)) {
       if (flags[name] !== undefined) answers[name] = flags[name]
       else if (yes) answers[name] = DEFAULTS[name]
-      else answers[name] = await askChoice(prompt(), LABELS[name], CHOICES[name], DEFAULTS[name])
+      else if (interactive) {
+        answers[name] = await pickChoice(LABELS[name], CHOICES[name], DEFAULTS[name], HINTS)
+      } else {
+        answers[name] = await askChoice(prompt(), LABELS[name], CHOICES[name], DEFAULTS[name])
+      }
     }
 
-    if (flags.blocks !== undefined) answers.blocks = parseBlocks(flags.blocks)
-    else if (yes) answers.blocks = [...BLOCK_ORDER]
-    // The flag path is deliberately NOT checked here: `assertBlockLinksResolve` refuses it in
-    // cli/index.mjs, reading the copy files themselves rather than a declaration about them.
-    else answers.blocks = await askBlocks(prompt(), blockDeps)
+    const customFlag =
+      flags['add-blocks'] === undefined ? null : parseCustomBlocks(flags['add-blocks'])
+
+    // One picker answers both — ticking the kit's blocks and typing your own are the same question
+    // in a terminal. Everywhere else they are two, because a flag or a piped line cannot be one.
+    if (interactive && flags.blocks === undefined && !yes) {
+      const picked = splitBlocks(await pickBlocks(blockDeps, customFlag === null))
+      answers.blocks = picked.blocks
+      answers.custom = customFlag ?? picked.custom
+    } else {
+      if (flags.blocks !== undefined) answers.blocks = parseBlocks(flags.blocks)
+      else if (yes) answers.blocks = [...BLOCK_ORDER]
+      // The flag path is deliberately NOT checked here: `assertBlockLinksResolve` refuses it in
+      // cli/index.mjs, reading the copy files themselves rather than a declaration about them.
+      else answers.blocks = await askBlocks(prompt(), blockDeps)
+
+      if (customFlag !== null) answers.custom = customFlag
+      // Flags mean a scripted run: a question nobody typed an answer to would hang it.
+      else if (yes || flags.blocks !== undefined) answers.custom = []
+      else answers.custom = await askCustomBlocks(prompt())
+    }
 
     checkVariantFlagsMatchBlocks(flags, answers.blocks)
 
@@ -276,7 +437,14 @@ export async function resolveAnswers(argv, blockDeps) {
       if (flag !== undefined) answers.variants[block] = flag
       else if (variants.length === 1) answers.variants[block] = variants[0]
       else if (yes) answers.variants[block] = BLOCK_DEFAULT_VARIANT[block]
-      else {
+      else if (interactive) {
+        answers.variants[block] = await pickChoice(
+          `${block} layout`,
+          variants,
+          BLOCK_DEFAULT_VARIANT[block],
+          VARIANT_HINTS[block],
+        )
+      } else {
         answers.variants[block] = await askChoice(
           prompt(),
           block,
@@ -285,6 +453,9 @@ export async function resolveAnswers(argv, blockDeps) {
         )
       }
     }
+    // Not asked: a block that does not exist yet has exactly one layout, and naming it here means
+    // every block in `answers` has a variant, so nothing downstream needs a special case.
+    for (const block of answers.custom) answers.variants[block] = CUSTOM_VARIANT
 
     return answers
   } finally {

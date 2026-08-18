@@ -20,14 +20,65 @@ import { join } from 'node:path'
 // object literals and a different casing for the export; refusing them is cheaper than that.
 const NAME_RULE = /^[a-z][a-z0-9]*$/
 
+/** The reason `name` is unusable, or null. Shared with the scaffolding prompt, which shows it. */
+export function nameProblem(name, what) {
+  if (NAME_RULE.test(name)) return null
+  return (
+    `'${name}' is not a valid ${what} name — use lowercase letters and digits, starting with a ` +
+    `letter (e.g. 'testimonials', 'pricing', 'faq2'). No dashes: the name is also a TypeScript ` +
+    `identifier here.`
+  )
+}
+
 function assertName(name, what) {
-  if (!NAME_RULE.test(name)) {
-    throw new Error(
-      `'${name}' is not a valid ${what} name — use lowercase letters and digits, starting with a ` +
-        `letter (e.g. 'testimonials', 'pricing', 'faq2'). No dashes: the name is also a TypeScript ` +
-        `identifier here.`,
+  const problem = nameProblem(name, what)
+  if (problem !== null) throw new Error(problem)
+}
+
+/**
+ * Names a BLOCK cannot have, on top of the character rule.
+ *
+ * A block id is written into generated code as a binding: `import { faq } from './faq/block'`.
+ * Two groups of words break that, and both produce a project that will not compile, from a name
+ * the CLI accepted:
+ *
+ *   - reserved words. `import { default } from './default/block'` is a syntax error.
+ *   - the identifiers `registry.ts`, `block-modules.ts` and `variants.all.ts` already declare.
+ *     A block named `registry` collides with the exported `registry` const in the same file.
+ *
+ * Both were reproduced before this list existed. It applies to block names only — variant names
+ * become object keys and component-name fragments, where `default` is fine, and the kit's own
+ * contact block has a variant called exactly that.
+ */
+const RESERVED_BLOCK_NAMES = new Set([
+  // Reserved words, plus the strict-mode and module-scope ones. Only lowercase spellings can
+  // reach here: the character rule already refuses a leading capital.
+  ...`await break case catch class const continue debugger default delete do else enum export
+      extends false finally for function if implements import in instanceof interface let new null
+      package private protected public return static super switch this throw true try typeof var
+      void while with yield`.split(/\s+/),
+  // Declared by the files that would import the block. `blockModules` and `registerVariants` are
+  // declared there too and are deliberately NOT listed: the character rule refuses a capital
+  // letter, so no name that reaches here can collide with them, and an entry that can never fire
+  // is an entry nobody can trust.
+  'all',
+  'manifests',
+  'registry',
+  'variants',
+])
+
+/** The reason `name` cannot be a block, or null. Used by `add-block` and by the scaffolder. */
+export function blockNameProblem(name) {
+  const problem = nameProblem(name, 'block')
+  if (problem !== null) return problem
+  if (RESERVED_BLOCK_NAMES.has(name)) {
+    return (
+      `'${name}' cannot be a block name — it is a reserved word or a name the generated files ` +
+      `already use, and \`import { ${name} } from './${name}/block'\` would not compile. ` +
+      `Try '${name}s' or something more specific.`
     )
   }
+  return null
 }
 
 const pascal = (s) => s[0].toUpperCase() + s.slice(1)
@@ -176,7 +227,12 @@ function formatFiles(root, files) {
 
 // --- templates ----------------------------------------------------------------------------------
 
-function blockFiles(id, variants) {
+/**
+ * The files a new block folder is made of. Exported because the scaffolder writes these too: a
+ * block typed into the "add your own" row at scaffold time and one added later with `add-block`
+ * must be the same thing, and two copies of these templates would drift.
+ */
+export function blockFiles(id, variants) {
   const Copy = `${pascal(id)}Copy`
   const Variant = `${pascal(id)}Variant`
   const compName = (v) => `${pascal(id)}${pascal(v)}`
@@ -199,13 +255,14 @@ export const en: ${Copy} = {
   lead: 'Write the description here.',
 }
 `,
-    // Named imports are sorted too, and `mn` vs the copy type falls either side depending on the
-    // block's name: `{ type CtaCopy, mn }` but `{ mn, type TestimonialsCopy }`. Hardcoding one
-    // order fails `pnpm lint` for half of all block names.
+    // Named imports are sorted too, ignoring the `type` keyword and the case, so where the copy
+    // type falls depends on the block's name: `{ type CtaCopy, en, mn }` but
+    // `{ en, type FaqCopy, mn }`. Hardcoding one order fails `pnpm lint` for a third of all names.
     'block.ts': `import type { BlockManifest } from '@/lib/types'
-import { ${
-      'en'.localeCompare(Copy) < 0 ? `en, mn, type ${Copy}` : `type ${Copy}, en, mn`
-    } } from './copy'
+import { ${['en', 'mn', Copy]
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      .map((name) => (name === Copy ? `type ${name}` : name))
+      .join(', ')} } from './copy'
 
 // No component import here: this file is imported eagerly by registry.ts, so anything reachable
 // from it lands in the main chunk. Components are reached through ./variants.ts only.
@@ -222,13 +279,20 @@ export const ${id} = {
   // Add \`requires: { blocks: ['contact'] }\` if this block's copy links to another block.
 } satisfies BlockManifest<${Copy}, ${Variant}>
 `,
+    // The relative imports are sorted by specifier, the way `organizeImports` wants them, rather
+    // than written in a fixed order. Hardcoding one order was wrong for every block — `./block`
+    // sorts before `./copy` — and it went unnoticed because `add-block` runs Biome over its own
+    // output straight afterwards. The scaffolder cannot: a project one second old has no Biome
+    // installed yet, so `pnpm verify` was the thing that reported it.
     'variants.ts': `import type { ComponentType } from 'react'
 import type { BlockProps } from '@/lib/types'
-import type { ${Copy} } from './copy'
-import type { ${Variant} } from './block'
-${[...variants]
-  .sort()
-  .map((v) => `import { ${compName(v)} } from './${id}-${v}'`)
+${[
+  ['./block', `import type { ${Variant} } from './block'`],
+  ['./copy', `import type { ${Copy} } from './copy'`],
+  ...variants.map((v) => [`./${id}-${v}`, `import { ${compName(v)} } from './${id}-${v}'`]),
+]
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, line]) => line)
   .join('\n')}
 
 // The only static import of these components anywhere — that is what gives Vite its split point.
@@ -240,18 +304,27 @@ ${variants.map((v) => `  ${v}: ${compName(v)},`).join('\n')}
   }
 
   for (const v of variants) {
+    // Biome keeps the destructured props on one line while they fit in 100 columns and breaks them
+    // one-per-line when they do not, and which side a block lands on depends only on the length of
+    // its name — `PricingSimple` fits, `TestimonialsSimple` does not. Same rule as
+    // `blockModuleEntry` in generate.mjs, and the same reason: a scaffold has no Biome yet.
+    const signature = `export function ${compName(v)}({ copy, surface, anchorId, headingLevel }: BlockProps<${Copy}>) {`
     files[`${id}-${v}.tsx`] = `import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import type { BlockProps } from '@/lib/types'
 import { Reveal } from '@/motion'
 import type { ${Copy} } from './copy'
 
-export function ${compName(v)}({
+${
+  signature.length <= 100
+    ? signature
+    : `export function ${compName(v)}({
   copy,
   surface,
   anchorId,
   headingLevel,
-}: BlockProps<${Copy}>) {
+}: BlockProps<${Copy}>) {`
+}
   const H = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <Section id={anchorId} surface={surface}>
@@ -273,7 +346,8 @@ export function ${compName(v)}({
 // --- add-block ----------------------------------------------------------------------------------
 
 export function addBlock(id, variants) {
-  assertName(id, 'block')
+  const nameIssue = blockNameProblem(id)
+  if (nameIssue !== null) throw new Error(nameIssue)
   for (const v of variants) assertName(v, 'variant')
   if (new Set(variants).size !== variants.length) {
     throw new Error(`--variants has a duplicate: ${variants.join(', ')}`)
