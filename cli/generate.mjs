@@ -567,15 +567,46 @@ function copyBlockDeps(kitRoot, id) {
  *
  * An absent `requires`, or a `requires` without `blocks`, means no dependencies — which is the
  * truth for `features` and `contact` and is checked against the copy like every other block.
+ *
+ * `[^}]*` means the `requires` object must not contain a nested one: a `meta: { … }` alongside
+ * `blocks` would end the match at the inner brace and hide the array behind it. That case is
+ * detected and named rather than reported as an empty declaration — see below for why.
  */
 function manifestBlockDeps(kitRoot, id) {
-  const src = readKitFile(kitRoot, `src/blocks/${id}/manifest.ts`)
+  const rel = `src/blocks/${id}/manifest.ts`
+  const src = readKitFile(kitRoot, rel)
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
+
+  // Returning `[]` for a manifest that plainly declares `blocks: [...]` would make the caller
+  // report "declares requires.blocks: []" against a file where it is right there, and advise
+  // setting it to a value it is already set to — an operator sent to a correct line to make a
+  // change already made. A throw that fires and names the wrong cause costs more than silence,
+  // because it is believed. So an unparseable `requires` is reported as unparseable.
+  const unparseable = () => {
+    if (!/\bblocks:\s*\[/.test(src)) return null
+    return new Error(
+      `Could not parse \`requires\` on block '${id}' — nested braces are not supported.\n` +
+        `  ${rel} declares \`blocks: [...]\`, but this layer reads \`requires\` with a regex that\n` +
+        '  stops at the first `}`, so a nested object such as `meta: { … }` inside `requires`\n' +
+        '  hides everything after it.\n' +
+        '  Fix: keep `requires` flat (`{ npm: [], ui: [], blocks: [...] }`), or teach\n' +
+        '  `manifestBlockDeps` in cli/generate.mjs to parse nested objects.',
+    )
+  }
+
   const requires = src.match(/\brequires:\s*\{([^}]*)\}/)
-  if (requires === null) return []
+  if (requires === null) {
+    const err = unparseable()
+    if (err !== null) throw err
+    return []
+  }
   const blocks = requires[1].match(/\bblocks:\s*\[([^\]]*)\]/)
-  if (blocks === null) return []
+  if (blocks === null) {
+    const err = unparseable()
+    if (err !== null) throw err
+    return []
+  }
   return [...blocks[1].matchAll(/'([^']+)'/g)].map(([, dep]) => dep).sort()
 }
 
@@ -608,7 +639,11 @@ export function readBlockDeps(kitRoot) {
           'or change the copy.',
       )
     }
-    deps[id] = actual
+    // The DECLARED array, not `actual`. The two are equal — the throw above guarantees it, and
+    // that is the only reason this is safe — but the prompt is specified to be driven by what the
+    // manifests declare, and returning the copy-derived set instead would make that specification
+    // true only by coincidence. The declaration drives; the throw above keeps it honest.
+    deps[id] = declared
   }
   return deps
 }
