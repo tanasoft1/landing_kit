@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { addBlock, addPage } from './add.mjs'
 import { copyKit, rollbackTarget } from './copy.mjs'
 import {
   assertBlockLinksResolve,
@@ -19,6 +20,10 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const HELP = `landing-kit — scaffold a bilingual landing site
 
 Usage:  pnpm dlx @dewsoft/landing-kit@latest <dir> [options]
+
+        Inside a project you already scaffolded:
+          landing-kit add-block <name> [--variants=a,b]
+          landing-kit add-page  <id> --blocks=a,b --title-mn=".." --title-en=".."
 
 Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
@@ -40,9 +45,98 @@ Blocks:   hero (centered|split)  features (grid|alternating)
           8 of the 15 possible combinations are refused for this reason.
 
 Example:  pnpm dlx @dewsoft/landing-kit@latest frontend --yes
+          landing-kit add-block testimonials
+          landing-kit add-page about --blocks=features,cta \\
+                        --title-mn="Бидний тухай" --title-en="About us"
 `
 
+/** `--flag=value` pairs from a subcommand's argv tail. Positional args are the caller's business. */
+function subFlags(argv) {
+  const out = {}
+  for (const a of argv) {
+    const m = /^--([\w-]+)=(.*)$/.exec(a)
+    if (m) out[m[1]] = m[2]
+  }
+  return out
+}
+
+const list = (v) =>
+  v === undefined
+    ? undefined
+    : v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+
+/**
+ * `pnpm fix` is only in the next steps when the new files were NOT formatted — which is the
+ * pre-`pnpm install` case. Printing it unconditionally trains people to run a fix step that has
+ * nothing to do, and hides the one time it matters.
+ */
+const verifyStep = (formatted) =>
+  formatted.ran ? 'pnpm verify' : `pnpm fix && pnpm verify   (${formatted.why})`
+
+/**
+ * Subcommands run inside a generated project and never touch KIT_ROOT. Dispatched before
+ * `parseArgs`, which would otherwise read `add-block` as the target directory name.
+ */
+function runSubcommand(cmd, argv) {
+  const name = argv[3]
+  const flags = subFlags(argv.slice(3))
+
+  if (cmd === 'add-block') {
+    if (!name || name.startsWith('-')) {
+      throw new Error('add-block needs a name: landing-kit add-block testimonials')
+    }
+    const { written, edited, variants, formatted } = addBlock(
+      name,
+      list(flags.variants) ?? ['simple'],
+    )
+    console.log(`\n✓ Added block '${name}' (${variants.join(', ')})\n`)
+    for (const f of written) console.log(`  created  ${f}`)
+    for (const f of edited) console.log(`  updated  ${f}`)
+    console.log(`
+  Next:
+    1. Write the copy in src/blocks/${name}/copy.mn.ts and copy.en.ts
+    2. Put it on a page — add '${name}' to that page's \`blocks\` in src/config/pages.config.ts
+       (or: landing-kit add-page <id> --blocks=${name})
+    3. ${verifyStep(formatted)}
+`)
+    return
+  }
+
+  if (!name || name.startsWith('-')) {
+    throw new Error(
+      'add-page needs an id: landing-kit add-page about --blocks=features,cta ' +
+        '--title-mn="Бидний тухай" --title-en="About us"',
+    )
+  }
+  const { rel, path, blocks, formatted } = addPage(name, {
+    path: flags.path,
+    blocks: list(flags.blocks),
+    titleMn: flags['title-mn'],
+    titleEn: flags['title-en'],
+    descMn: flags['desc-mn'],
+    descEn: flags['desc-en'],
+  })
+  console.log(`\n✓ Added page '${name}' at ${path} — ${blocks.join(', ')}\n`)
+  console.log(`  updated  ${rel}`)
+  console.log(`
+  Next:
+    1. Edit the \`seo\` title and description for both languages in ${rel}
+    2. To put it in the header menu, add { target: '${name}' } to \`nav\`
+       in src/config/site.config.ts
+    3. ${verifyStep(formatted)}
+`)
+}
+
 async function main() {
+  const cmd = process.argv[2]
+  if (cmd === 'add-block' || cmd === 'add-page') {
+    runSubcommand(cmd, process.argv)
+    return
+  }
+
   const { help } = parseArgs(process.argv)
   if (help) {
     console.log(HELP)

@@ -13,6 +13,7 @@ exists to keep that true.
 - [Architecture in one page](#architecture-in-one-page)
 - [Adding a block](#adding-a-block)
 - [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
+- [Adding a page](#adding-a-page)
 - [Reskinning: the token surface](#reskinning-the-token-surface)
 - [`/docs`: the living developer reference](#docs-the-living-developer-reference)
 - [Removing the /docs page](#removing-the-docs-page)
@@ -165,6 +166,22 @@ The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` 
 
 ## Adding a block
 
+```bash
+landing-kit add-block testimonials                       # one variant, named `simple`
+landing-kit add-block pricing --variants=simple,detailed # two
+```
+
+That writes the folder and makes all three registrations for you, then formats the result with
+this project's own Biome, so `pnpm verify` passes with nothing else to run. It refuses to add a
+block that already exists, refuses a name that is not a valid identifier (no dashes — the name is
+also a TypeScript symbol), and refuses to run in the kit repository itself.
+
+Then write the copy in `copy.mn.ts` / `copy.en.ts`, put the block on a page, and run
+`pnpm verify`.
+
+The rest of this section is what the command does, for when you would rather do it by hand — or
+need to understand why a step exists. **Nothing here is optional if you skip the command.**
+
 Eight steps: **four** inside the block's own folder (steps 1-4 — the component `.tsx` files
 themselves are renamed and rewritten in step 1, then the copy files, the manifest and the
 variants map), **three** registration points outside it (steps 5-7), and **one** page reference
@@ -304,6 +321,49 @@ cannot forget the second one: `HeroVariant` is derived from `variantNames`, and 
 constrains its map with `satisfies Record<HeroVariant, …>`, so a name added to the array with no
 component is a compile error at `variants.ts`. (The reverse — a component in the map that
 `variantNames` never declares — is also an error, since `satisfies` rejects excess keys.)
+
+## Adding a page
+
+```bash
+landing-kit add-page about --blocks=features,cta \
+  --title-mn="Бидний тухай" --title-en="About us"
+```
+
+A page is **one entry in `src/config/pages.config.ts`** — no new file under `src/routes/`. That is
+what `src/routes/$.tsx` is: a catch-all that resolves any path through `pages.config.ts`. The
+route files stay at four however many pages the site grows to.
+
+Both titles are required, and they must differ. `verify-build.mjs` fails a build where two locales
+share a `<title>` or a meta description, so a page generated with the same wording in both
+languages would hand you a project that cannot pass its own gate.
+
+Optional: `--path=/company` (defaults to `/<id>`), `--desc-mn=…`, `--desc-en=…` (default to the
+titles — worth replacing with real sentences before launch).
+
+By hand, the same thing:
+
+```ts
+{
+  id: 'about',
+  path: '/about',
+  blocks: ['features', 'cta'],
+  seo: {
+    mn: { title: 'Бидний тухай', description: 'Компанийн танилцуулга.' },
+    en: { title: 'About us', description: 'About our company.' },
+  },
+},
+```
+
+Every locale's URL, the sitemap entry and the prerendered file come from that one entry.
+
+To put the page in the header menu, add `{ target: 'about' }` to `nav` in `site.config.ts`. The
+label is that page's `seo.title` for the language being rendered.
+
+**`nav` targets and copy `target`s accept a page id or a block id, and page ids win.** A block id
+resolves to an anchor on the page holding it — `#hero` on the current page, `/#hero` from another.
+If the same block sits on two pages, the link goes to whichever page is listed first in
+`pages.config.ts`. Linking by page id avoids the ambiguity. A target that matches neither is a
+build error, not a dead link.
 
 ## Reskinning: the token surface
 
