@@ -37,6 +37,19 @@ const DROPPED_SECTIONS = [
   'Lighthouse budget',
 ]
 
+// Dropped from the README exactly like the list above, but NOT from `RECIPES`, because they were
+// never in it. `transformConfigReference` iterates `DROPPED_SECTIONS` and throws when an entry has
+// no matching RECIPES line, so adding either of these there would make every scaffold fail on a
+// heading that was correctly never listed. Two lists, one difference: RECIPES membership.
+const DROPPED_SECTIONS_README_ONLY = [
+  // Describes the scaffolding CLI, which a generated project does not contain.
+  'Scaffolding a new site',
+  // Publishing instructions for THIS package — "bump `version`, run `npm publish`" — aimed at a
+  // project that is not this package. Worse than redundant: a reader who follows it publishes
+  // their client's landing page to npm.
+  'Publishing',
+]
+
 // Scripts that do not exist in a generated `package.json`, so their rows describe nothing.
 const DROPPED_SCRIPTS = ['smoke:full', 'smoke:onepage', 'lighthouse', 'lighthouse:desktop']
 
@@ -273,7 +286,7 @@ function replaceExactText(text, file, from, to) {
 
 function transformReadme(text) {
   const lines = text.split('\n')
-  for (const heading of DROPPED_SECTIONS) {
+  for (const heading of [...DROPPED_SECTIONS, ...DROPPED_SECTIONS_README_ONLY]) {
     dropContentsEntry(lines, heading)
     dropSection(lines, heading)
   }
