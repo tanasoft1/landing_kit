@@ -1,6 +1,5 @@
 import type { BlockManifest } from '@/lib/types'
-import { en } from './copy.en'
-import { type HeroCopy, mn } from './copy.mn'
+import { en, type HeroCopy, mn } from './copy'
 
 // Never import a component here. `registry.ts` imports every manifest eagerly, because the SEO
 // layer needs `copy`, `nav` and `schema` before anything renders. Any component reachable from
@@ -30,7 +29,7 @@ export const hero = {
   // per page, so a block describing the page again would be a second, conflicting answer. Use
   // `schema` only for markup a block's own content earns, like `FAQPage` or `Product`.
   //
-  // `blocks` lists the link targets in ./copy.mn.ts and ./copy.en.ts — here, `primaryCta.target`
+  // `blocks` lists the link targets in ./copy.ts — here, `primaryCta.target`
   // is 'contact'. Update it whenever that target changes. It is the only written record that
   // this block breaks if `contact` leaves `pages.config.ts`, and that break is a blank page that
   // never names the link. See `requires` in @/lib/types. (`secondaryCta.target` is 'hero', this
