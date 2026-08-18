@@ -1,6 +1,6 @@
 {
   "name": "@dewsoft/landing-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scaffolds a bilingual (Mongolian + English) landing site: prerendered static HTML, per-locale SEO, and swappable blocks.",
   "keywords": [
     "landing-page",

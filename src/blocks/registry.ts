@@ -1,8 +1,8 @@
 import type { BlockManifest } from '@/lib/types'
-import { contact } from './contact/manifest'
-import { cta } from './cta/manifest'
-import { features } from './features/manifest'
-import { hero } from './hero/manifest'
+import { contact } from './contact/block'
+import { cta } from './cta/block'
+import { features } from './features/block'
+import { hero } from './hero/block'
 
 // Only checks that each entry IS a manifest; each one is already fully typed where it is
 // defined. This exists so `BlockId` below can be derived from the real keys.

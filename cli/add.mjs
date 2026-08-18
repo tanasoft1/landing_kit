@@ -182,7 +182,9 @@ function blockFiles(id, variants) {
   const compName = (v) => `${pascal(id)}${pascal(v)}`
 
   const files = {
-    'copy.mn.ts': `export type ${Copy} = {
+    // Both languages in one file, with the type they share. Declaring the type once and typing
+    // both exports against it is what makes a missing translation a compile error.
+    'copy.ts': `export type ${Copy} = {
   heading: string
   lead: string
 }
@@ -191,8 +193,6 @@ export const mn: ${Copy} = {
   heading: '${pascal(id)} гарчиг',
   lead: 'Энд тайлбар бичнэ үү.',
 }
-`,
-    'copy.en.ts': `import type { ${Copy} } from './copy.mn'
 
 export const en: ${Copy} = {
   heading: '${pascal(id)} heading',
@@ -202,14 +202,13 @@ export const en: ${Copy} = {
     // Named imports are sorted too, and `mn` vs the copy type falls either side depending on the
     // block's name: `{ type CtaCopy, mn }` but `{ mn, type TestimonialsCopy }`. Hardcoding one
     // order fails `pnpm lint` for half of all block names.
-    'manifest.ts': `import type { BlockManifest } from '@/lib/types'
-import { en } from './copy.en'
+    'block.ts': `import type { BlockManifest } from '@/lib/types'
 import { ${
-      'mn'.localeCompare(Copy) < 0 ? `mn, type ${Copy}` : `type ${Copy}, mn`
-    } } from './copy.mn'
+      'en'.localeCompare(Copy) < 0 ? `en, mn, type ${Copy}` : `type ${Copy}, en, mn`
+    } } from './copy'
 
-// No component import here: this manifest is imported eagerly by registry.ts, so anything
-// reachable from it lands in the main chunk. Components are reached through ./variants.ts only.
+// No component import here: this file is imported eagerly by registry.ts, so anything reachable
+// from it lands in the main chunk. Components are reached through ./variants.ts only.
 const variantNames = [${variants.map((v) => `'${v}'`).join(', ')}] as const
 
 export type ${Variant} = (typeof variantNames)[number]
@@ -225,15 +224,15 @@ export const ${id} = {
 `,
     'variants.ts': `import type { ComponentType } from 'react'
 import type { BlockProps } from '@/lib/types'
-import type { ${Copy} } from './copy.mn'
-import type { ${Variant} } from './manifest'
+import type { ${Copy} } from './copy'
+import type { ${Variant} } from './block'
 ${[...variants]
   .sort()
   .map((v) => `import { ${compName(v)} } from './${id}-${v}'`)
   .join('\n')}
 
 // The only static import of these components anywhere — that is what gives Vite its split point.
-// \`satisfies\` makes a variant named in manifest.ts but missing here a compile error.
+// \`satisfies\` makes a variant named in block.ts but missing here a compile error.
 export const variants = {
 ${variants.map((v) => `  ${v}: ${compName(v)},`).join('\n')}
 } satisfies Record<${Variant}, ComponentType<BlockProps<${Copy}>>>
@@ -245,7 +244,7 @@ ${variants.map((v) => `  ${v}: ${compName(v)},`).join('\n')}
 import { Section } from '@/components/layout/section'
 import type { BlockProps } from '@/lib/types'
 import { Reveal } from '@/motion'
-import type { ${Copy} } from './copy.mn'
+import type { ${Copy} } from './copy'
 
 export function ${compName(v)}({
   copy,
@@ -285,8 +284,24 @@ export function addBlock(id, variants) {
   if (existsSync(dir)) {
     throw new Error(`src/blocks/${id}/ already exists — pick another name, or delete it first.`)
   }
-  if (read(root, 'src/blocks/registry.ts').includes(`from './${id}/manifest'`)) {
+  const registrySrc = read(root, 'src/blocks/registry.ts')
+  if (registrySrc.includes(`from './${id}/block'`)) {
     throw new Error(`'${id}' is already registered in src/blocks/registry.ts.`)
+  }
+
+  // Projects scaffolded before block folders were reshaped import `./<id>/manifest`, so every
+  // anchor below misses. Named here rather than left to the generic "no import matching …" throw,
+  // which reads as though the developer had broken their own file. Detected on the registry, not
+  // on a version in `.kit/scaffold.json`: the file being edited is the thing that has to match.
+  if (/from '\.\/[\w-]+\/manifest'/.test(registrySrc)) {
+    throw new Error(
+      `this project was created by an older version of the kit, where a block's metadata lived ` +
+        `in \`manifest.ts\` rather than \`block.ts\`.\n` +
+        `  Use the matching version, which knows that layout:\n` +
+        `    pnpm dlx @dewsoft/landing-kit@0.2.0 add-block ${id}\n` +
+        `  Newer scaffolds put both languages in one \`copy.ts\` and the metadata in \`block.ts\`; ` +
+        `mixing the two shapes in one project is not worth the confusion.`,
+    )
   }
 
   // Every edit computed before the first write: a folder created next to an unregistered
@@ -298,8 +313,8 @@ export function addBlock(id, variants) {
     const lines = read(root, rel).split('\n')
     insertSortedImport(
       lines,
-      /^import \{ \w+ \} from '\.\/[\w-]+\/manifest'$/,
-      `import { ${id} } from './${id}/manifest'`,
+      /^import \{ \w+ \} from '\.\/[\w-]+\/block'$/,
+      `import { ${id} } from './${id}/block'`,
       rel,
     )
     appendObjectEntry(lines, /^const manifests = \{$/, `  ${id},`, rel, 'the `manifests` object')
@@ -384,44 +399,50 @@ export function addPage(id, opts) {
   }
 
   const available = existingBlocks(root)
-  const blocks = opts.blocks ?? []
-  if (blocks.length === 0) {
-    throw new Error(
-      `--blocks is required: a page with no blocks renders an empty document, and ` +
-        `\`pnpm verify\` fails it for having no <h1>. Available: ${available.join(', ')}`,
-    )
-  }
+  // A page needs at least one block: with none it renders an empty document and `pnpm verify`
+  // fails it for having no <h1>. Any block already in the project is a safe default — the
+  // scaffold proved every block's copy links resolve somewhere in `pages.config.ts`, and a block
+  // id resolves against the whole config, not just the page it sits on.
+  const fallbackBlock = available.includes('features') ? 'features' : available[0]
+  const blocks = opts.blocks?.length ? opts.blocks : [fallbackBlock]
   for (const b of blocks) {
     if (!available.includes(b)) {
       throw new Error(`'${b}' is not a block in this project. Available: ${available.join(', ')}`)
     }
   }
 
-  // Required, and required to DIFFER. Defaulting both to the page id was measured writing a page
-  // whose two locales shared a <title>, which `verify-build.mjs` fails by design — duplicate
-  // titles across locales are the SEO defect it exists to catch. A convenience default that
-  // hands back a project failing its own gate is not a convenience.
-  const { titleMn, titleEn } = opts
-  if (!titleMn || !titleEn) {
-    throw new Error(
-      `--title-mn and --title-en are both required. Example:\n` +
-        `  pnpm dlx @dewsoft/landing-kit add-page ${id} --blocks=${blocks.join(',')} ` +
-        `--title-mn="Бидний тухай" --title-en="About us"`,
-    )
-  }
+  // The two locales must DIFFER, for the title and the description alike: `verify-build.mjs`
+  // fails a build where two locales share either, because that is the duplicate-content defect it
+  // exists to catch. So the defaults are per-locale placeholders rather than one shared string —
+  // defaulting both to the page id was measured handing back a project that failed its own gate.
+  const titleMn = opts.titleMn ?? `${pascal(id)} (mn)`
+  const titleEn = opts.titleEn ?? `${pascal(id)} (en)`
   if (titleMn === titleEn) {
     throw new Error(
       `--title-mn and --title-en are identical ('${titleMn}') — \`pnpm verify\` rejects two ` +
         `locales sharing a <title> as duplicate content. Give each language its own wording.`,
     )
   }
+  const descMn = opts.descMn ?? `${pascal(id)} хуудасны тайлбар.`
+  const descEn = opts.descEn ?? `Description of the ${pascal(id)} page.`
+  if (descMn === descEn) {
+    throw new Error(
+      `--desc-mn and --desc-en are identical ('${descMn}') — \`pnpm verify\` rejects two locales ` +
+        `sharing a meta description as duplicate content. Give each language its own wording.`,
+    )
+  }
+
+  // Escaped, because these strings are being written INTO TypeScript source as single-quoted
+  // literals. An apostrophe is ordinary in English copy ("Mongolia's story") and would otherwise
+  // close the literal early and leave `pages.config.ts` unparseable.
+  const q = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   const entry = `  {
     id: '${id}',
     path: '${path}',
     blocks: [${blocks.map((b) => `'${b}'`).join(', ')}],
     seo: {
-      mn: { title: '${titleMn}', description: '${opts.descMn ?? titleMn}' },
-      en: { title: '${titleEn}', description: '${opts.descEn ?? titleEn}' },
+      mn: { title: '${q(titleMn)}', description: '${q(descMn)}' },
+      en: { title: '${q(titleEn)}', description: '${q(descEn)}' },
     },
   },
 `
@@ -430,5 +451,8 @@ export function addPage(id, opts) {
   if (close === -1) throw new Error(`${rel}: cannot find the end of the \`pages\` array.`)
   writeFileSync(join(root, rel), text.slice(0, close) + entry + text.slice(close))
 
-  return { rel, path, blocks, formatted: formatFiles(root, [rel]) }
+  // `placeholders` drives the next-steps output: text nobody chose is text nobody should ship, so
+  // the caller leads with "replace this" only when it actually wrote a placeholder.
+  const placeholders = !opts.titleMn || !opts.titleEn || !opts.descMn || !opts.descEn
+  return { rel, path, blocks, placeholders, formatted: formatFiles(root, [rel]) }
 }

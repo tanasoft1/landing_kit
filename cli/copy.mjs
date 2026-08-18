@@ -28,14 +28,15 @@ import {
 // list, and from /docs' RECIPES array. `check-conventions.mjs` ships to the generated project and
 // checks all three against each other, so a partial removal fails the project's own `pnpm
 // conventions` rather than shipping a dangling anchor.
-const DROPPED_SECTIONS = [
-  // Generated projects get a static `vite.config.ts` with no KIT_* branching.
-  'The three env flags',
-  // `configs/` is never copied.
-  'Swapping the whole config: `configs/`',
-  // Lighthouse is deliberately not shipped (spec §2).
-  'Lighthouse budget',
-]
+// Empty, and by design. Every section that a generated project must not claim to have is now
+// either absent from README.md entirely — the maintainer-only material lives in MAINTAINERS.md,
+// which is not in `package.json`'s `files` — or listed in DROPPED_SECTIONS_README_ONLY below.
+//
+// This list is the one whose entries must ALSO be `RECIPES` entries in
+// `src/components/docs/config-reference.tsx`: `transformConfigReference` iterates it and throws
+// when a heading has no matching RECIPES line. Kept as the seam for the next section that is both
+// a README section and a /docs recipe.
+const DROPPED_SECTIONS = []
 
 // Dropped from the README exactly like the list above, but NOT from `RECIPES`, because they were
 // never in it. `transformConfigReference` iterates `DROPPED_SECTIONS` and throws when an entry has
@@ -47,10 +48,9 @@ const DROPPED_SECTIONS_README_ONLY = [
   'Create your site',
   // The remaining CLI flags, for a project that does not contain the CLI.
   'Scaffolding options',
-  // Publishing instructions for THIS package — "bump `version`, run `npm publish`" — aimed at a
-  // project that is not this package. Worse than redundant: a reader who follows it publishes
-  // their client's landing page to npm.
-  'Publishing',
+  // Points at MAINTAINERS.md, which is not in `files` — so in a generated project the link would
+  // be dead and the subject irrelevant.
+  'Working on the kit itself',
 ]
 
 // Scripts that do not exist in a generated `package.json`, so their rows describe nothing.

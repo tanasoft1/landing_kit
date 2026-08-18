@@ -384,7 +384,7 @@ if (existsSync(join(blocksDir, 'contact'))) {
         `the main entry chunk (${entryFile}) contains react-hook-form (${leaked.join(', ')}). ` +
           `The contact form's dependencies are back in the chunk every page downloads, so pages ` +
           `with no form pay for it — the exact regression the block split exists to prevent. ` +
-          `Check that manifest.ts files import no components and that block-modules.ts is still ` +
+          `Check that block.ts files import no components and that block-modules.ts is still ` +
           `the only path to them.`,
       )
     }

@@ -2,7 +2,7 @@ import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import type { BlockProps } from '@/lib/types'
 import { Reveal } from '@/motion'
-import type { CtaCopy } from './copy.mn'
+import type { CtaCopy } from './copy'
 
 export function CtaSplit({ copy, resolve, surface, anchorId, headingLevel }: BlockProps<CtaCopy>) {
   const H = headingLevel === 1 ? 'h1' : 'h2'
