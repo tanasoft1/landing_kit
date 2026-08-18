@@ -8,6 +8,7 @@ exists to keep that true.
 ## Contents
 
 - [Quick start](#quick-start)
+- [Scaffolding a new site](#scaffolding-a-new-site)
 - [Scripts](#scripts)
 - [Architecture in one page](#architecture-in-one-page)
 - [Adding a block](#adding-a-block)
@@ -21,6 +22,7 @@ exists to keep that true.
 - [The contact form](#the-contact-form)
 - [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
 - [Lighthouse budget](#lighthouse-budget)
+- [Publishing](#publishing)
 
 ## Quick start
 
@@ -28,6 +30,58 @@ exists to keep that true.
 pnpm install
 pnpm dev
 ```
+
+## Scaffolding a new site
+
+You do not have to copy this repository by hand. The kit publishes a scaffolding CLI that writes
+a fresh project into a directory of your choosing:
+
+```bash
+pnpm dlx @dewdie/landing-kit@latest frontend
+```
+
+It asks five questions — pages, theme, preset, blocks, and a variant per selected block — and
+then writes `frontend/`. Every question has a flag, so a scripted run can skip the prompts
+entirely; `--yes` takes every default and asks nothing:
+
+```bash
+pnpm dlx @dewdie/landing-kit@latest frontend --yes
+```
+
+| Flag | Values | Default |
+|---|---|---|
+| `--pages=` | `multi`, `one` | `multi` |
+| `--theme=` | `both`, `single` | `both` |
+| `--preset=` | `editorial`, `warm` | `editorial` |
+| `--blocks=` | comma-separated ids — `hero`, `features`, `cta`, `contact` | all four |
+| `--variant-<block>=` | per block, e.g. `--variant-hero=split` | that block's `defaultVariant` |
+| `-y`, `--yes` | — | off (prompts) |
+| `-h`, `--help` | — | — |
+
+Variants per block: `hero` (`centered`, `split`), `features` (`grid`, `alternating`), `cta`
+(`banner`, `split`), `contact` (`default`). `--help` is the reference for all of this; the table
+above is orientation.
+
+**`--blocks` is not a free multi-select.** Blocks link to each other by target id from inside
+their own copy, and a link to a block you left out makes the page render blank rather than fail
+loudly. So a block that links out requires what it links to:
+
+| Block | Requires | Because |
+|---|---|---|
+| `hero` | `contact` | `primaryCta.target` is `'contact'`. |
+| `cta` | `contact`, `features` | `primaryCta.target` is `'contact'`, `secondaryCta.target` is `'features'`. |
+| `features` | — | links to nothing |
+| `contact` | — | links to nothing |
+
+That leaves 7 of the 15 non-empty subsets buildable; the other 8 are refused. The interactive
+prompt re-asks and names which block needs which; `--blocks` exits 1 with the same information
+before writing anything.
+
+**Set `url` before you verify.** The generated `src/config/site.config.ts` carries the
+placeholder `https://your-domain.example`, and `scripts/verify-build.mjs` fails on that exact
+string — so a new project's `pnpm verify` is red until you replace it with the real domain. That
+is deliberate: `site.url` is what the canonical tags, the `hreflang` set, the JSON-LD graph and
+`sitemap.xml` are all built from, and a placeholder domain shipped to production is silent.
 
 ## Scripts
 
@@ -502,3 +556,18 @@ chunk dropped to 333 KB raw (107 KB gzip) and each page's `<head>` carries a `mo
 exactly the chunks it needs. `React.lazy` was tried first and reverted: it halved the bundle but
 regressed CLS to 0.169. CLS staying at 0 through this change was the real constraint, not raw
 bundle size.
+
+## Publishing
+
+```bash
+# bump "version" in package.json
+npm publish
+```
+
+`npm publish` packs the working tree, not the last commit. During Plan 2 a verification run
+rewrote `package.json` and `pnpm-lock.yaml` on its own, so publishing an unchecked tree is a
+live risk. **Rule: `git status` clean and `pnpm verify` green before publishing.**
+
+Every app package lives in `devDependencies`, which looks wrong and is not: this package is a
+generator that ships no runtime. Anything in `dependencies` would be downloaded on every
+`pnpm dlx`. The generated project gets the ordinary split, written fresh by the CLI.
