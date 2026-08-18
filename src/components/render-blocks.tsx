@@ -36,9 +36,9 @@ export function RenderBlocks({
         }
 
         const variantName = variant ?? manifest.defaultVariant
-        // `getVariants` throws its own error if this block's module was never loaded/registered
-        // — a different failure mode than the one below (unknown variant name on a block that
-        // *is* loaded). Both are wiring bugs, not user-facing conditions.
+        // `getVariants` throws its own error when this block's module was never loaded. That is
+        // a different problem from the one below, which is an unknown variant name on a block
+        // that did load. Both are wiring bugs, not something a visitor can cause.
         const variants = getVariants(id)
         const Component = variants[variantName]
         if (!Component) {
@@ -59,13 +59,13 @@ export function RenderBlocks({
             copy={manifest.copy[locale]}
             site={site}
             resolve={resolve}
-            // The trailing 'default' satisfies noUncheckedIndexedAccess; a modulo
-            // index into ALTERNATION can never actually miss.
+            // The trailing 'default' is only there to satisfy noUncheckedIndexedAccess. A
+            // modulo index into ALTERNATION can never actually miss.
             surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
             anchorId={anchorId}
-            // The first block on the page owns the page's single <h1>; every later block is a
-            // <h2>. A block cannot know its own position, so this is assigned here, not by the
-            // block — same reasoning as `surface` and `anchorId` above.
+            // The first block on the page owns the page's single <h1>. Every later block gets
+            // an <h2>. A block cannot know its own position, so this is set here, not by the
+            // block — same reason as `surface` and `anchorId` above.
             headingLevel={index === 0 ? 1 : 2}
           />
         )

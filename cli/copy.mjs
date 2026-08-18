@@ -59,86 +59,17 @@ const DROPPED_SECTIONS_README_ONLY = [
 // entry here would fail every scaffold rather than pass one quietly.
 const DROPPED_SCRIPTS = []
 
-// The rest of the README's kit-only machinery: prose, not whole sections. Removing the three
-// sections above is not enough on its own — it leaves the intro promising env flags, an
-// architecture row for a `configs/` directory that is never copied, and two anchors
-// (`#the-three-env-flags`, `#lighthouse-budget`) pointing at headings that no longer exist. The
-// generated project's `check-conventions.mjs` gate only sees the Contents list, so it would pass
-// with both broken links in the body.
+// Kit-only prose that is NOT a whole section, and so survives the section drops above.
 //
-// Several of these span two lines. Matched against the whole text rather than line by line for
-// exactly that reason, and each one throws when absent or ambiguous.
-const README_EDITS = [
-  [
-    '**swapping config files and env flags — never by editing components**',
-    '**swapping config files — never by editing components**',
-  ],
-  ["type-check, including `configs/` (added to `tsconfig.json`'s `include`).", 'type-check.'],
-  [
-    'in `pages.config.ts` (`configs/<name>/pages.config.ts` or\n  `src/config/pages.config.ts`)',
-    'in `src/config/pages.config.ts`',
-  ],
-  [
-    'resolved in `vite.config.ts` based on an\n  env flag, never on an `if` inside a component: ' +
-      '`@/motion`, `@/theme`, `@/submit`. See\n  [The three env flags](#the-three-env-flags).',
-    'resolved in `vite.config.ts`, never an\n  `if` inside a component: `@/motion`, `@/theme`, ' +
-      '`@/submit`.',
-  ],
-  ['for this reason; see [Lighthouse budget](#lighthouse-budget) for why.', 'for this reason.'],
-  ['  none of the JS. Same for `KIT_ANIMATION=off` and the `motion` library.', '  none of the JS.'],
-  [
-    "`/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without",
-    '`/`. Without',
-  ],
-
-  // Second pass over the same rule, after a scaffold was generated and grepped rather than
-  // reasoned about: the list above was an enumeration of "every kit-only reference", and an
-  // enumeration is only as complete as the reading that produced it. These six survived it —
-  // the two smoke scripts, the alias pairs named by filename (the unshipped half of each is not
-  // there, and under `--theme=single` neither is `theme.both.tsx`), the one-page smoke config,
-  // two Lighthouse measurements a scaffold cannot reproduce, and a gotcha about naming
-  // `submit.rpc.ts`, a file the scaffold does not have.
-  [
-    '`node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads',
-    '`node scripts/verify-build.mjs` (run by `verify`) reads',
-  ],
-  [
-    '| `src/integrations/` | Alternate implementations behind an alias — ' +
-      '`motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, ' +
-      "`submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s " +
-      '`resolve.alias`, never a component or a lib, which is why neither half lives in either ' +
-      'bucket. A generated project receives exactly one half of each pair. |',
-    '| `src/integrations/` | The implementations behind an alias — motion, theme and submit — ' +
-      "each resolved by `vite.config.ts`'s `resolve.alias`, never a component or a lib, " +
-      'which is why none of them lives in either bucket. |',
-  ],
-  // `tools/` is not in `package.json`'s `files`, so a scaffold has no such directory to describe.
-  [
-    '| `tools/` | Maintainer commands for the kit itself (`node tools/kit.mjs`). Deliberately ' +
-      "absent from `package.json`'s `files`, so it never ships to a generated project. |\n",
-    '',
-  ],
-  ['    config — this is the mechanism the one-page smoke config exercises.', '    config.'],
-  [
-    '  chroma. Measured Lighthouse accessibility is **1.00** on both locales, both presets, ' +
-      'mobile and\n  desktop.',
-    '  chroma.',
-  ],
-  [
-    'both `pnpm verify` and Lighthouse stay green — the accessibility audit measures ' +
-      'contrast, not\nwhether a focus ring resolved.',
-    '`pnpm verify` stays green — nothing it checks can see whether a focus ring resolved.',
-  ],
-  [
-    '\n- **`submit.rpc.ts` is deliberately not named `submit.server.ts`.** TanStack ' +
-      "Start's client-import\n  protection refuses to bundle any `**/*.server.*` file into " +
-      'the client by filename, regardless of\n  content. This file is the sanctioned ' +
-      'client-safe `createServerFn` stub the client is meant to\n  import, so renaming keeps ' +
-      'the protection intact for every *other* file instead of carving out an\n  exception ' +
-      'that the next person copying this pattern could get wrong.',
-    '',
-  ],
-]
+// Empty, and that is the design rather than an accident. Every kit-only claim in the README lives
+// inside one of the five dropped sections, so removing those sections is the whole job. The list
+// was long when kit-only facts were scattered through surviving prose — each one an exact string
+// that broke whenever anyone reworded a sentence near it.
+//
+// Kept as the seam: `replaceExactText` throws on a miss AND on an ambiguity, so a stale entry
+// fails every scaffold loudly instead of passing one quietly. Add here only when a kit-only fact
+// genuinely cannot be moved into a dropped section.
+const README_EDITS = []
 
 // --- guards -----------------------------------------------------------------------------------
 
@@ -310,15 +241,12 @@ function transformReadme(text) {
       `a generated package.json has no '${script}' script`,
     )
   }
-  dropRowIn(
-    lines,
-    'Architecture in one page',
-    '| `configs/` |',
-    'a generated project has no `configs/` directory',
-  )
+  // No row drops here any more: the README's own tables describe only directories a generated
+  // project actually has. `configs/` and `tools/` used to appear in an architecture table and
+  // each needed removing by hand.
 
-  // Prose edits run last, over the joined text: three of them span two lines, and all of them sit
-  // in sections that survive, so the structural removals above cannot disturb them.
+  // Prose edits run last, over the joined text, so the structural removals above cannot disturb
+  // them. Currently a no-op — see README_EDITS.
   let out = lines.join('\n')
   for (const [from, to] of README_EDITS) out = replaceExactText(out, 'README.md', from, to)
   // Cutting the final section leaves the blank line that separated it; one trailing newline.
@@ -394,27 +322,18 @@ function transformConfigReference(text) {
 // could be confused, because the thrown message quotes that first line to say what failed.
 
 function transformMotionAnimated(text) {
-  const file = 'src/integrations/motion.animated.tsx'
-  const out = replaceExactText(
-    text,
-    `${file} (LCP note)`,
-    // `## Lighthouse budget` is a README section Task 4 deletes, and `lighthouserc*.json` is never
-    // copied — this pointed at both. Lighthouse itself is still a thing a developer can run; the
-    // budget in this project is not.
-    " * Want a real opacity fade above the fold? That's a deliberate LCP trade-off — re-check the\n" +
-      ' * Lighthouse budget first.',
-    " * Want a real opacity fade above the fold? That's a deliberate LCP trade-off — measure LCP\n" +
-      ' * before and after.',
-  )
+  // Only the module-contract note needs rewriting. The LCP note above it used to point at the
+  // `## Lighthouse budget` README section; it now says "measure LCP first", which is true in a
+  // generated project too, so there is nothing left to edit there.
   return replaceExactText(
-    out,
-    `${file} (module contract)`,
-    '// Drift between the two `@/motion` variants is a type error here, not a runtime surprise —\n' +
-      "// tsconfig's `paths` only ever type-checks `@/motion` against this file, so `KIT_ANIMATION=off`\n" +
-      '// (motion.noop.tsx) would otherwise be the one configuration nothing type-checks.',
-    '// Asserts this module really is a complete `@/motion`, which nothing else does: a consumer\n' +
-      '// only type-checks the exports it imports, so dropping one here would compile until\n' +
-      '// something reached for it.',
+    text,
+    'src/integrations/motion.animated.tsx (module contract)',
+    '// Type-checks this file against the shared `@/motion` surface, so the two variants cannot drift\n' +
+      '// apart. `tsconfig` points `@/motion` at this file only, which is why motion.noop.tsx needs the\n' +
+      '// same line: without it, `KIT_ANIMATION=off` is the one setup nothing type-checks.',
+    '// Type-checks this file against the shared `@/motion` surface. Nothing else does: a caller\n' +
+      '// only checks the exports it imports, so a missing export would compile until something\n' +
+      '// reached for it.',
   )
 }
 
@@ -429,12 +348,12 @@ function transformSubmitEndpoint(text) {
   return replaceExactText(
     out,
     `${file} (module contract)`,
-    '// Drift between the two `@/submit` variants is a type error here, not a runtime surprise —\n' +
-      "// tsconfig's `paths` only ever type-checks `@/submit` against one variant, so the other\n" +
-      '// (KIT_SUBMIT=server) would otherwise be the one configuration nothing type-checks.',
-    '// Asserts this module really is a complete `@/submit`, which nothing else does: a consumer\n' +
-      '// only type-checks the exports it imports, so dropping one here would compile until\n' +
-      '// something reached for it.',
+    '// Type-checks this file against the shared `@/submit` surface, so the two variants cannot drift\n' +
+      '// apart. `tsconfig` points `@/submit` at one variant only, so without this line the other one\n' +
+      '// (`KIT_SUBMIT=server`) is the setup nothing type-checks.',
+    '// Type-checks this file against the shared `@/submit` surface. Nothing else does: a caller\n' +
+      '// only checks the exports it imports, so a missing export would compile until something\n' +
+      '// reached for it.',
   )
 }
 
@@ -449,10 +368,9 @@ function transformSubmitSchema(text) {
   return replaceExactText(
     out,
     `${file} (module contract)`,
-    ' * Every `@/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one\n' +
-      ' * variant, so without this the other is never type-checked and the swapped configuration\n' +
-      ' * becomes the one nobody verifies. Same rule as `@/motion` and `@/theme`.',
-    ' * The exact surface `@/submit` must satisfy. Same rule as `@/motion` and `@/theme`.',
+    ' * The exact surface every `@/submit` variant must have. `tsconfig` names only one variant, so\n' +
+      ' * without this the other is never type-checked. Same rule as `@/motion` and `@/theme`.',
+    ' * The exact surface `@/submit` must have. Same rule as `@/motion` and `@/theme`.',
   )
 }
 
@@ -620,8 +538,8 @@ function copyInto(kitRoot, outDir, answers) {
 
   // Every copy path is composed with `keep`, not just the tree walk. A transformed file reached
   // through any of them would be copied verbatim and then rewritten a moment later, leaving
-  // correctness to depend on the order of the two writes — `src/submit.endpoint.ts` arrives via
-  // BOUNDARY_FILES and `biome.json` via COPY_FILES, so this is not hypothetical.
+  // correctness to depend on which write lands last. `src/integrations/submit.endpoint.ts`
+  // arrives via BOUNDARY_FILES and `biome.json` via COPY_FILES, so this is not hypothetical.
   for (const rel of COPY_FILES) {
     if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
   }

@@ -4,8 +4,8 @@ import { cta } from './cta/manifest'
 import { features } from './features/manifest'
 import { hero } from './hero/manifest'
 
-// Only proves each entry *is* a manifest; each is already precisely typed at its own
-// definition site. Exists to derive `BlockId` below from the real keys.
+// Only checks that each entry IS a manifest; each one is already fully typed where it is
+// defined. This exists so `BlockId` below can be derived from the real keys.
 const manifests = {
   hero,
   contact,

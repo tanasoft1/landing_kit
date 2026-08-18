@@ -10,19 +10,17 @@ import { join, sep } from 'node:path'
 // They are matched against **what they are actually about**: the contents of `className`/`class`
 // attributes, and the identity of JSX elements. Not against raw file text.
 //
-// That distinction is the whole design, and it was learned the hard way. Matching raw lines meant
-// prose could participate: `section.tsx` explains `py-section`, `container.tsx` explains
-// `px-gutter`, `docs.tsx` opens with a comment about `py-section`. A comment-blanking pass was
-// added to compensate, and it moved the problem rather than removing it — a character-state
-// scanner cannot tell JSX text from code, so a bare `//` in JSX text blanked the rest of a real
-// line (a `min-h-screen` violation went undetected), and an unpaired apostrophe in JSX text
-// (`<p>don't</p>`) opened a string state that never closed, so later comments stopped being
-// blanked and correct code was failed. Both reproduced before this rewrite.
+// That difference is the whole design. Matching raw lines let prose join in: `section.tsx`
+// explains `py-section`, `container.tsx` explains `px-gutter`. Blanking comments first only
+// moved the problem, because a character scanner cannot tell JSX text from code — a bare `//`
+// in JSX text blanked the rest of a real line and hid a `min-h-screen` violation, and an
+// apostrophe in `<p>don't</p>` opened a string that never closed, so correct code started
+// failing. Both were reproduced before this rewrite.
 //
-// Parsing with TypeScript's own parser removes the entire class of problem instead of defending
-// against it: comments are trivia and are never visited, JSX text is a `JsxText` node and is never
-// inspected, and an apostrophe in it is just a character. `typescript` is already a devDependency
-// (`pnpm typecheck` runs `tsc`), and this script runs only in dev/CI, never in the shipped output.
+// TypeScript's own parser removes that whole class of bug instead of defending against it:
+// comments are trivia and never visited, JSX text is a `JsxText` node and never inspected, and
+// an apostrophe in it is just a character. `typescript` is already a devDependency, and this
+// script runs only in dev and CI, never in the shipped site.
 import ts from 'typescript'
 
 // Matched against a resolved class string, never against a line of source.
@@ -43,16 +41,16 @@ const RAW_SECTION_MSG = 'raw <section> element — use <Section>'
 const INLINE_STYLE_MSG = 'inline style — use a Tailwind utility from the token layer'
 // Blocks-only, and unlike the rules above this one genuinely does NOT generalise.
 //
-// Heading level is never a block's own decision — it depends on whether the block happens to be
-// first on the page, which only the renderer knows (`headingLevel` on `BlockProps`, assigned by
-// `RenderBlocks`). A block with a heading must do `const H = headingLevel === 1 ? 'h1' : 'h2'` and
-// render `<H>`; a literal `<h1>`/`<h2>` anywhere in `src/blocks` — hero included — is always wrong.
+// Heading level is never a block's own decision. It depends on whether the block is first on
+// the page, and only the renderer knows that (`headingLevel` on `BlockProps`, set by
+// `RenderBlocks`). A block with a heading writes `const H = headingLevel === 1 ? 'h1' : 'h2'`
+// and renders `<H>`. A literal `<h1>` or `<h2>` anywhere in `src/blocks` is always wrong.
 //
-// A route is the opposite case: it is a fixed page, it knows exactly what it is, and it owns its
-// own heading outline. `src/routes/docs.tsx` writes a literal `<h1>Developer docs</h1>` and three
-// literal `<h2>`s, correctly — there is no renderer above it assigning levels, because `/docs` is
-// not built from `pages.config.ts` blocks. Applying this rule outside `src/blocks` would flag
-// correct code, and a gate that flags correct code stops being believed.
+// A route is the opposite. It is a fixed page, it knows what it is, and it owns its own heading
+// outline. `src/routes/docs.tsx` correctly writes a literal `<h1>` and three literal `<h2>`s,
+// because no renderer above it assigns levels — `/docs` is not built from blocks. Applying this
+// rule outside `src/blocks` would flag correct code, and a gate that does that stops being
+// trusted.
 const HEADING_MSG =
   "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>"
 
@@ -269,13 +267,11 @@ walk('src/routes', { headings: false })
 walk('src/components', { headings: false }, isLayoutPrimitive)
 
 // --- src/lib stays .tsx-free --------------------------------------------------------------------
-// Before the split, `walk('src/shell', …)` covered every file that is now under EITHER
-// `src/components/` or `src/lib/`. `src/lib/` is walked by nothing above, so a `.tsx` added there
-// would be invisible to the layout rules, the heading rule and the `<Link>` ban — and unlike the
-// directory literals elsewhere in this script, nothing would throw. It would just quietly not be
-// checked. `walk('src/lib', …)` is deliberately NOT the fix: `src/lib/` holds nine `.ts` files and
-// zero `.tsx` today, so that call would be vacuous by construction — green for a reason that has
-// nothing to do with whether the rule works. Assert the split rule itself instead.
+// Nothing above walks `src/lib/`, so a `.tsx` added there would be invisible to the layout
+// rules, the heading rule and the `<Link>` ban — and nothing would throw. It would just quietly
+// go unchecked. Adding `walk('src/lib', …)` is NOT the fix: `src/lib/` holds only `.ts` files
+// today, so that call would pass no matter what, which tells you nothing. Check the rule itself
+// instead: no `.tsx` belongs in `src/lib/`.
 function findTsxFiles(dir) {
   const found = []
   for (const entry of readdirSync(dir)) {
@@ -291,29 +287,23 @@ for (const p of findTsxFiles('src/lib')) {
 }
 
 // --- no client-side <Link> anywhere ------------------------------------------------------------
-// Block modules are resolved ONCE, off the initial URL, before hydration — see the comment at
-// `src/app/client.tsx`'s `hydrate()` await. A `<Link>` from `@tanstack/react-router` performs a
-// client-side transition, which can land on a page whose blocks were never fetched: the block
-// renders with a module that was never registered, and `getVariants` throws — with no build-time
-// signal. Every navigation on this stack is deliberately a plain `<a href>` (a full page load,
-// cheap because every page is prerendered static HTML). That's a recorded design property, not a
-// gap, so it's enforced here rather than left to be rediscovered by whoever adds the next nav
-// link.
+// Block modules are loaded ONCE, for the first URL, before hydration — see the comment above
+// the `await` in `src/app/client.tsx`. A `<Link>` from `@tanstack/react-router` navigates on the
+// client, which can land on a page whose blocks were never fetched: the block renders with a
+// module that was never registered and `getVariants` throws, with nothing warning you at build
+// time. So every link here is a plain `<a href>`. That is cheap, because every page is
+// prerendered static HTML.
 //
-// `src/routes` is scanned too, and it is the MOST important directory for this rule, not an
-// exempt one. An earlier version of this comment claimed route-level `<Link>` "would legitimately
-// belong there"; that was wrong, and wrong in the direction that matters. The mechanism does not
-// care which directory the `<Link>` sits in — a `<Link>` in `src/routes/__root.tsx`, the natural
-// home for a skip-link or a global nav, transitions client-side to a page whose block modules
-// were never fetched, and `getVariants` throws at render exactly as it would from anywhere else.
-// Routes are where a global nav would actually be written, so exempting them exempted the one
-// file the trap is most likely to be sprung in. `src/router.tsx`'s `defaultPreload: 'intent'` is
-// dead config that exists only for `<Link>`, which makes the invitation more tempting still.
+// `src/routes` is scanned too, and it is the MOST important directory for this rule. The trap
+// does not care where the `<Link>` sits: one in `src/routes/__root.tsx` — the natural place for
+// a global nav or a skip link — breaks in exactly the same way. Routes are where a global nav
+// would actually be written, so exempting them would exempt the likeliest place to get this
+// wrong. `src/app/router.tsx` still sets `defaultPreload: 'intent'`, which only matters for
+// `<Link>`, making the mistake easier to reach for.
 //
-// Read off the AST for the same reason the layout rules are: the regex this replaced matched a
-// COMMENTED-OUT import (`// import { Link } from '@tanstack/react-router'`) and failed correct
-// code — a false failure in the only machine gate, the same defect class as the prose problem.
-// An `ImportDeclaration` node exists only for a real import.
+// Read from the AST, for the same reason as the layout rules: the regex this replaced matched a
+// COMMENTED-OUT import and failed correct code. An `ImportDeclaration` node only exists for a
+// real import.
 function walkFiles(dir, visit) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
@@ -337,9 +327,9 @@ function checkNoRouterLink(file) {
     const line = lineOf(sf, stmt)
     failures.push(
       `${file}:${line}  imports Link from '@tanstack/react-router' — block modules are ` +
-        `resolved once, pre-hydration, off the initial URL only (src/client.tsx); a client-side ` +
-        `route transition via <Link> would render a page whose blocks were never registered. ` +
-        `Use a plain <a href> instead.`,
+        `loaded once, before hydration, for the first URL only (src/app/client.tsx). A ` +
+        `client-side transition via <Link> would render a page whose blocks were never ` +
+        `registered. Use a plain <a href> instead.`,
     )
   }
 }
@@ -349,22 +339,18 @@ walkFiles('src/components', checkNoRouterLink)
 walkFiles('src/routes', checkNoRouterLink)
 
 // --- /docs must keep its `noindex` ------------------------------------------------------------
-// Asserted here, at the source level, because it CANNOT be asserted from `dist/`: `/docs` is
-// deliberately never prerendered, so there is no artifact for `scripts/verify-build.mjs` to read.
+// Checked in the source, because it CANNOT be checked from `dist/`: `/docs` is never
+// prerendered, so `scripts/verify-build.mjs` has no file to read.
 //
-// This meta tag is now the ONLY mechanism keeping `/docs` out of the search index on an SSR
-// deploy. On a static deploy the route simply 404s and the sitemap never mentions it, but an SSR
-// deploy serves `/docs` at a real URL, and robots.txt deliberately does NOT `Disallow` it — a
-// `Disallow` would stop the crawler fetching the page and therefore stop it ever reading this
-// tag (see src/routes/docs.tsx's header comment, and the matching assertion in verify-build.mjs).
-// Delete this tag and `/docs` becomes indexable with no other signal saying otherwise.
+// This meta tag is the ONLY thing keeping `/docs` out of the search index on an SSR deploy. On a
+// static deploy the route 404s and the sitemap never mentions it, but an SSR deploy serves
+// `/docs` at a real URL, and robots.txt deliberately does NOT `Disallow` it — a `Disallow` would
+// stop the crawler fetching the page, so it would never read this tag. See the header comment in
+// src/routes/docs.tsx. Delete the tag and `/docs` becomes indexable with nothing to stop it.
 //
-// Read off the AST, not with a regex over the source text. The regex this replaced passed GREEN
-// when the meta was commented out — `// { name: 'robots', content: 'noindex, nofollow' },` still
-// matched, because a regex cannot tell code from a comment. That is a silent false negative in the
-// single mechanism keeping `/docs` out of the index on an SSR deploy: precisely the failure this
-// assertion exists to prevent, hidden inside the assertion itself. An object literal in the AST is
-// an object literal; a commented-out one does not exist.
+// Read from the AST, not with a regex. The regex this replaced passed GREEN when the meta was
+// commented out, because a regex cannot tell code from a comment — a silent false pass in the
+// one thing protecting `/docs`. In the AST, a commented-out object literal does not exist.
 const DOCS_ROUTE = 'src/routes/docs.tsx'
 
 /** `{ name: 'robots', content: '… noindex …' }` as a real object literal anywhere in the module. */
@@ -409,15 +395,14 @@ if (existsSync(DOCS_ROUTE) && !hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
 }
 
 // --- every preset must define the complete token surface --------------------------------------
-// The kit's headline claim is that a whole design swaps by changing one `@import` in `theme.css`,
-// and the README tells a third-preset author to use "the same variable set". Nothing verified it.
+// The kit's main claim is that a whole design swaps by changing one `@import` in `theme.css`,
+// and the README tells anyone writing a third preset to use "the same variable set".
 //
-// The failure is silent by construction. `@theme inline` maps `--color-ring: var(--c-ring)`; a
-// preset that omits `--c-ring` leaves that unresolved, which makes the declaration invalid at
-// computed-value time — the focus outline simply does not render. `pnpm verify` is green (no CSS
-// is malformed), and Lighthouse is green too: its accessibility audit checks contrast ratios, not
-// whether a focus ring resolved to a colour. Both shipped presets happen to be complete, so this
-// is unproven rather than broken, and this project treats unproven as unsafe.
+// Getting this wrong fails silently. `@theme inline` maps `--color-ring: var(--c-ring)`, so a
+// preset with no `--c-ring` leaves that unresolved. The declaration becomes invalid when the
+// value is computed, and the focus outline just does not render. No CSS is malformed, so the
+// build stays green. Both presets that ship today are complete, so this check has not caught a
+// real break yet — it exists so the next preset cannot introduce one quietly.
 const THEME_CSS = 'src/styles/theme.css'
 const PRESETS_DIR = 'src/styles/presets'
 
@@ -481,7 +466,7 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
             `${path}  does not declare ${token}, which ${THEME_CSS}'s @theme inline maps. The ` +
               `mapped utility resolves to an invalid value and silently renders nothing — a ` +
               `missing --c-ring means no focus outline, a missing --width-page means no page ` +
-              `measure, with a green build and a green Lighthouse run either way.`,
+              `measure, and the build stays green either way.`,
           )
         }
       }
@@ -503,18 +488,15 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
 }
 
 // --- /docs' RECIPES list must name real README headings ---------------------------------------
-// `src/components/docs/config-reference.tsx`'s RECIPES array names README `##` sections verbatim,
-// as plain text rather than links (README.md ships in neither `public/` nor `dist/client/`, so a
-// link would 404 in every real deployment — see that file's header comment). Plain text is the
-// right call and it has a cost: nothing about renaming a README heading tells you that `/docs`
-// still points readers at the old name. A developer following a stale pointer finds nothing and
-// concludes the docs are unreliable, which is the exact failure the "don't link a 404" decision was
-// avoiding in the first place.
+// The RECIPES array in `src/components/docs/config-reference.tsx` names README `##` sections
+// word for word, as plain text rather than links, because README.md ships in neither `public/`
+// nor `dist/client/` and a link would 404. Plain text is the right call, but it has a cost:
+// renaming a README heading tells you nothing about `/docs` still pointing at the old name. A
+// reader who follows a stale pointer finds nothing and stops trusting the docs.
 //
-// Deliberately one-directional: every RECIPES entry must be a README heading, but not every README
-// heading need be a recipe (the README also has `## Quick start`, `## Scripts`, `## Contents`,
-// `## Architecture in one page` — reference material, not tasks). A two-directional check would
-// force every future README section into the /docs list.
+// One-directional on purpose. Every RECIPES entry must be a README heading, but not every README
+// heading has to be a recipe — `## Quick start`, `## Scripts` and `## Contents` are reference,
+// not tasks. Checking both directions would force every future README section into /docs.
 const CONFIG_REFERENCE = 'src/components/docs/config-reference.tsx'
 const README = 'README.md'
 
@@ -586,21 +568,19 @@ if (existsSync(CONFIG_REFERENCE)) {
 }
 
 // --- README Contents list must mirror the '## ' headings, in both directions -------------------
-// The Contents block (README.md:8-23ish) is hand-maintained prose, not generated, so nothing kept
-// it honest — this file already parses README headings for the RECIPES check above; the same
-// parsing is reused here rather than re-implemented.
+// The Contents block near the top of README.md is written by hand, not generated, so nothing
+// kept it honest. This file already parses README headings for the RECIPES check above, so the
+// same parsing is reused here.
 //
-// Bidirectional on purpose, unlike the one-directional RECIPES check: RECIPES legitimately names
-// only a subset of headings (reference sections a task list has no reason to mention), but a table
-// of contents that omits a real section or links to a section that no longer exists is wrong by
-// definition either way. This is also why the CLI in a later task is expected to keep tripping this
-// check: when generated projects have a kit-only README section trimmed (e.g. "The three env
-// flags"), the dangling Contents entry it would otherwise leave behind fails loudly instead of
-// shipping a 404 anchor.
+// Checked in both directions, unlike RECIPES. RECIPES may legitimately name only some headings,
+// but a table of contents that misses a real section, or links to one that no longer exists, is
+// wrong either way. This is also what catches the CLI: when it trims a kit-only README section
+// from a generated project, the leftover Contents entry fails here instead of shipping a dead
+// anchor.
 //
-// Slugs are DERIVED with GitHub's own anchor rule rather than hand-listed, so a heading like
-// "`/docs`: the living developer reference" — whose backticks, slash and colon all vanish in the
-// real anchor — is handled the same way as every other heading, with no special case to rot.
+// Slugs are DERIVED with GitHub's own anchor rule, never listed by hand, so a heading like
+// "`/docs`: the living developer reference" — whose backticks, slash and colon all disappear in
+// the real anchor — needs no special case.
 //
 // This mirrors github-slugger (the library GitHub's own renderer uses): lowercase, DELETE
 // punctuation and symbols, then replace each remaining space with one hyphen. Three details are

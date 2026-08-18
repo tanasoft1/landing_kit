@@ -2,11 +2,11 @@ import type { BlockId } from './registry'
 import { registerVariants } from './variant-registry'
 
 /**
- * Dynamic import per block, keyed by id — one chunk each. `registry.ts` imports manifests
- * eagerly (copy/nav/schema are needed synchronously for the head and JSON-LD); only components
- * are deferred here, since that's the weight (contact alone: 99 KB raw / 30 KB gzip of
- * react-hook-form + zod). Loading registers components into `variant-registry.ts` so
- * `RenderBlocks` can read them back synchronously.
+ * One dynamic import per block, keyed by id, so each block gets its own chunk. `registry.ts`
+ * loads the manifests eagerly, because the head and JSON-LD need copy, nav and schema right
+ * away. Only the components wait, because they are the weight — contact alone is 99 KB raw
+ * (30 KB gzipped) of react-hook-form and zod. Loading a chunk registers its components in
+ * `variant-registry.ts`, where `RenderBlocks` reads them back synchronously.
  */
 export const blockModules: Record<BlockId, () => Promise<unknown>> = {
   hero: () => import('./hero/variants').then((m) => registerVariants('hero', m.variants)),

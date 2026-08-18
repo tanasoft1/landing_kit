@@ -16,10 +16,10 @@ const COLOR_TOKENS = [
 
 const TYPE_TOKENS = ['display', 'h2', 'h3', 'lead'] as const
 
-// Tailwind's scanner needs a class name written literally — `bg-${t}` is invisible to it and
-// ships nothing. These lookups make every class appear as a literal string once, here. Typed as
-// `Record<(typeof TOKENS)[number], string>`, not `Record<string, string>`, so a token added
-// above without its class here is a compile error, not a blank swatch found by eye.
+// Tailwind's scanner only sees class names written out in full. `bg-${t}` is invisible to it
+// and ships no CSS, so these lookups write each class as a literal string once, here. Typed as
+// `Record<(typeof TOKENS)[number], string>` rather than `Record<string, string>`, so a token
+// added above with no class here is a compile error instead of a blank swatch you find by eye.
 const COLOR_SWATCH_CLASS: Record<(typeof COLOR_TOKENS)[number], string> = {
   background: 'bg-background',
   foreground: 'bg-foreground',

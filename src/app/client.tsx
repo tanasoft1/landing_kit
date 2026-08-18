@@ -7,18 +7,18 @@ import { pages } from '@/config/pages.config'
 import { site } from '@/config/site.config'
 import { normalizePath, resolveRequest } from '@/lib/pages/resolve-request'
 
-// Overrides `@tanstack/react-start`'s generated client entry (filename-convention override, see
-// `resolveEntry` in `@tanstack/start-plugin-core`). Same body as the default entry; the only
-// change is the `await` inserted below.
+// Replaces the client entry `@tanstack/react-start` would generate. Vite picks this file up by
+// name; `vite.config.ts` also names it explicitly. The body is the default entry's, with one
+// addition: the `await` below.
 
 /**
- * Which block modules does THIS url need? Knowable statically from pages.config.
- * An unresolvable path (404) needs none.
+ * Which block modules does THIS url need? `pages.config.ts` already knows, so no guessing.
+ * A path that resolves to nothing (a 404) needs none.
  */
 function blocksForCurrentUrl(): BlockId[] {
-  // `/docs` is absent from pages.config.ts (see src/routes/docs.tsx), so `resolveRequest` treats
-  // it like a 404 — but it renders every variant of every block and needs them all registered.
-  // Special-cased here rather than teaching `resolveRequest` about a route that isn't a page.
+  // `/docs` is not in pages.config.ts (see src/routes/docs.tsx), so `resolveRequest` treats it
+  // like a 404 — but it previews every variant of every block, so it needs them all. Handled
+  // here rather than teaching `resolveRequest` about a route that is not a page.
   if (normalizePath(window.location.pathname) === '/docs') {
     return Object.keys(blockModules) as BlockId[]
   }
@@ -28,19 +28,20 @@ function blocksForCurrentUrl(): BlockId[] {
 }
 
 async function hydrate() {
-  // Resolve chunks BEFORE hydrating, not via React.lazy: lazy suspends during hydration and
-  // forces React to discard the server-rendered subtree — measured CLS 0.000 -> 0.169.
+  // Load the chunks BEFORE hydrating, and never with React.lazy: lazy suspends during
+  // hydration, which makes React throw away the server-rendered HTML — measured CLS 0.000 to
+  // 0.169.
   //
-  // This resolves only the initial URL's blocks, once — nothing re-runs it on a later navigation.
-  // Safe only because every navigation here is a plain `<a href>` full page load, never a
-  // `@tanstack/react-router` `<Link>` (a client-side transition to a page whose blocks were never
-  // fetched). `check-conventions.mjs` enforces this: it fails the build on a `Link` import from
-  // `@tanstack/react-router` anywhere in `src/blocks`, `src/components` or `src/routes`.
+  // This runs once, for the first URL only. Nothing re-runs it when you navigate. That is safe
+  // only because every link here is a plain `<a href>` full page load, never a
+  // `@tanstack/react-router` `<Link>`, which would move to a page whose blocks were never
+  // fetched. `check-conventions.mjs` fails the build on any `Link` import from
+  // `@tanstack/react-router` inside `src/blocks`, `src/components` or `src/routes`.
   const ids = blocksForCurrentUrl()
   const results = await Promise.allSettled(ids.map((id) => blockModules[id]?.()))
 
-  // `allSettled`, not `all`, so a failure names every block that failed, not just whichever
-  // rejected first. Realistic trigger: stale cached HTML after a deploy purges old hashed assets.
+  // `allSettled`, not `all`, so the error names every block that failed instead of only the
+  // first. This really happens when cached HTML points at hashed assets a deploy has purged.
   const failed = ids.filter((_, i) => results[i]?.status === 'rejected')
   if (failed.length > 0) {
     const reasons = results
@@ -54,9 +55,9 @@ async function hydrate() {
         `HTML pointing at hashed assets a later deploy purged; a hard reload fetches HTML that ` +
         `references chunks which exist.\n${reasons.join('\n')}`,
     )
-    // Deliberately does NOT hydrate: a missing block module makes `getVariants` throw during
-    // hydration, and React's retry leaves a blank page. Keeping the prerendered HTML readable
-    // beats that. Nothing in this path may suspend — see the `React.lazy` note above.
+    // Deliberately does not hydrate. A missing block module makes `getVariants` throw during
+    // hydration, and React's retry leaves a blank page. A readable static page beats that.
+    // Nothing on this path may suspend — see the React.lazy note above.
     return
   }
 
@@ -70,8 +71,8 @@ async function hydrate() {
   })
 }
 
-// The `.catch` is the point: `void hydrate()` alone discarded the rejection, leaving a failed
-// chunk's page inert with no error and no signal at all.
+// The `.catch` is the point. A bare `void hydrate()` throws the rejection away, so a failed
+// chunk leaves a dead page with nothing in the console.
 void hydrate().catch((err) => {
   console.error(
     '[landing-kit] Hydration failed before it could start. The page is not interactive.',

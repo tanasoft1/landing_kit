@@ -5,16 +5,15 @@ import { HeroCentered } from './hero-centered'
 import { HeroSplit } from './hero-split'
 import type { HeroVariant } from './manifest'
 
-// The only static import of these components anywhere. `manifest.ts` no longer imports them —
-// see its header comment — so this module is reachable only via `block-modules.ts`'s dynamic
-// import (client) or `variants.all.ts` (server), which is what gives Vite its split point.
+// The only place these components are imported statically. `manifest.ts` must not import them
+// (see its header comment), so this module is reachable only through `block-modules.ts`'s
+// dynamic import on the client, or `variants.all.ts` on the server. That is Vite's split point.
 //
-// `satisfies Record<HeroVariant, …>` is the compile-time half of "every declared variant exists":
-// `HeroVariant` is derived from `manifest.ts`'s `variantNames`, so a name added there and not
-// here is a type error at this line rather than a variant that renders nothing on `/docs`.
-// `satisfies` rather than an annotation, so the inferred per-key component types survive for
-// `registerVariants`. The import is `import type`, so this stays a compile-time-only dependency
-// and manifest.ts does not join this chunk's runtime graph.
+// `satisfies Record<HeroVariant, …>` makes every declared variant exist. `HeroVariant` comes
+// from `manifest.ts`'s `variantNames`, so a name added there but not here is a type error on
+// this line instead of an empty preview on `/docs`. Use `satisfies`, not a type annotation, so
+// the per-key component types survive for `registerVariants`. The import is `import type`, so
+// manifest.ts stays out of this chunk at runtime.
 export const variants = {
   centered: HeroCentered,
   split: HeroSplit,

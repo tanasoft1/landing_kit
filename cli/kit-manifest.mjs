@@ -29,7 +29,6 @@ export const COPY_FILES = [
   'scripts/check-conventions.mjs',
   'scripts/verify-build.mjs',
   'components.json',
-  'tsr.config.json',
 ]
 
 // Chosen by answers; the unchosen half is never copied. A generated project ships exactly one

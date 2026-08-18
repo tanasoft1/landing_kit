@@ -1,18 +1,18 @@
 import { z } from 'zod'
 
 /**
- * Field validation only. Timing is checked separately, deliberately: folding both into one
- * schema would tell a genuinely fast human (autofill, password manager) their correct fields
- * are wrong — misattributing the cause loses the lead.
+ * Field validation only. Timing is checked separately on purpose: one combined schema would
+ * tell a fast but real human (autofill, password manager) that their correct fields are wrong,
+ * and that blames the wrong thing and loses the lead.
  */
 export const contactSchema = z.object({
   name: z.string().min(2).max(120),
   email: z.email(),
   message: z.string().min(10).max(4000),
   /**
-   * Honeypot — must stay empty. Named `honeypot_url` rather than a plausible real field like
-   * `company`, because autofill matches recognised field names even with `autoComplete="off"`,
-   * and an autofilled honeypot rejects a genuine submission.
+   * Honeypot. Must stay empty. Named `honeypot_url` and not something real-sounding like
+   * `company`, because autofill fills recognised field names even with `autoComplete="off"` —
+   * and a filled honeypot rejects a real person.
    */
   honeypot_url: z.string().max(0).optional().default(''),
 })
@@ -23,9 +23,9 @@ export const MIN_ELAPSED_MS = 2000
 /**
  * What goes over the wire, validated by both submit variants.
  *
- * `elapsedMs` required, deliberately: without it the timing guard would be client-only, and a bot
- * script POSTing straight at the endpoint would sail through with only the honeypot in its way. The
- * client computes it after waiting out any remainder, so a real fast submission still passes.
+ * `elapsedMs` is required on purpose. Without it the timing check would be client-only, and a
+ * bot POSTing straight at the endpoint would only have the honeypot in its way. The client
+ * waits out the remainder before sending, so a fast real submission still passes.
  */
 export const submissionSchema = contactSchema.extend({
   elapsedMs: z.number().int().min(MIN_ELAPSED_MS),
@@ -37,9 +37,8 @@ export type ContactInput = z.infer<typeof contactSchema>
 export type SubmitResult = { ok: true } | { ok: false; error: string }
 
 /**
- * Every `@/submit` variant must satisfy this exact surface. `tsconfig` `paths` names only one
- * variant, so without this the other is never type-checked and the swapped configuration
- * becomes the one nobody verifies. Same rule as `@/motion` and `@/theme`.
+ * The exact surface every `@/submit` variant must have. `tsconfig` names only one variant, so
+ * without this the other is never type-checked. Same rule as `@/motion` and `@/theme`.
  */
 export type SubmitModule = {
   submitContact: (input: SubmissionInput) => Promise<SubmitResult>

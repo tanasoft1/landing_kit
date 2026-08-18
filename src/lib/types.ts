@@ -57,11 +57,11 @@ export type BlockProps<C> = {
    */
   anchorId: string
   /**
-   * Assigned by the renderer, never chosen by the block: a block cannot know whether it opens
-   * the page. The first block on a page gets `1` and owns the page's single <h1>; every other
-   * block gets `2`. A block with a heading renders `const H = headingLevel === 1 ? 'h1' : 'h2'`
-   * and uses `<H>`, never a literal `<h1>`/`<h2>` — check-conventions forbids the literal tags
-   * outright, with no exceptions, because heading level is never the block's decision.
+   * Set by the renderer, never by the block, because a block cannot know if it opens the page.
+   * The first block on a page gets `1` and owns the page's single <h1>. Every other block gets
+   * `2`. A block with a heading writes `const H = headingLevel === 1 ? 'h1' : 'h2'` and renders
+   * `<H>`. Never write a literal `<h1>` or `<h2>` — check-conventions rejects both, with no
+   * exceptions, because the level is never the block's call.
    */
   headingLevel: 1 | 2
 }
@@ -73,19 +73,19 @@ export type BlockSchema<C> = (ctx: { copy: C; site: SiteConfig; page: PageConfig
 // biome-ignore lint/suspicious/noExplicitAny: any is the only default that keeps keyof C usable unparameterized.
 export type BlockManifest<C = any, V extends string = string> = {
   id: string
-  // Names only, not components: components live behind block-modules.ts's dynamic import, so
-  // Vite can split them from the main chunk. Use `as const` on the array so a `defaultVariant`
-  // not in the list stays a compile error.
+  // Names only, never components. Components stay behind block-modules.ts's dynamic import so
+  // Vite can split them out of the main chunk. Write the array `as const`, so a `defaultVariant`
+  // that is not in the list stays a compile error.
   variantNames: readonly V[]
   defaultVariant: V
   copy: Record<Locale, C>
   nav?: { labelKey: keyof C & string }
   schema?: BlockSchema<C>
-  // `blocks` lists the OTHER blocks this one's copy links to by `target`. Every one of them has to
-  // sit on some page in `pages.config.ts`, or the link resolves to nothing: `createResolver`
-  // (src/lib/pages/resolve-link.ts) throws during server rendering, the page prerenders blank, and
-  // `pnpm verify` reports "expected exactly 1 <h1>, found 0" without ever naming the link. So this
-  // is the list to read before dropping a block from a page. A block linking to itself is not a
-  // dependency — it is satisfied wherever the block is.
+  // `blocks` lists the OTHER blocks this one's copy links to by `target`. Each of them must sit
+  // on some page in `pages.config.ts`. If one does not, `createResolver`
+  // (src/lib/pages/resolve-link.ts) throws while rendering, the page comes out blank, and
+  // `pnpm verify` says "expected exactly 1 <h1>, found 0" without ever naming the link. So read
+  // this list before removing a block from a page. A block linking to itself is not a
+  // dependency: it is satisfied wherever the block is.
   requires?: { npm?: string[]; ui?: string[]; blocks?: string[] }
 }

@@ -5,15 +5,15 @@ import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import { site } from '@/config/site.config'
 
-// A stub, deliberately: nothing here should navigate. The real `resolve()` throws for any
-// target not on the current page, and every variant here is out of context by definition.
+// A stub on purpose: nothing on this page should navigate. The real `resolve()` throws for any
+// target that is not on the current page, and every preview here is out of context by design.
 const resolve = (t: string) => `#${t}`
 
 /**
- * No extra `<Section>`/`<Container>` wrapper around each block preview: every block already
- * renders its own, and wrapping again doubled the padding/gutters, showing blocks at geometry
- * no real page produces. The label strip above each preview gets its own `<Container>` instead,
- * so it lines up with the block's content edge without imposing anything on the block itself.
+ * Do not wrap a preview in another `<Section>` or `<Container>`. Every block already renders
+ * its own, and wrapping again doubles the padding and gutters, showing the block at a size no
+ * real page produces. The label strip above each preview gets its own `<Container>`, so it
+ * lines up with the block's content edge without changing the block itself.
  */
 export function BlockGallery() {
   const ids = Object.keys(registry) as BlockId[]
@@ -22,8 +22,8 @@ export function BlockGallery() {
       {ids.map((id) => {
         const manifest = registry[id]
         const variantNames = manifest.variantNames as readonly string[]
-        // Reading through the registry, not importing each block's `variants.ts` directly, is
-        // what keeps a new block or variant showing up with no edit to this file.
+        // Read through the registry instead of importing each block's `variants.ts`. That is
+        // what makes a new block or variant show up here with no edit to this file.
         const variants = getVariants(id)
         return (
           <div key={id}>
@@ -64,9 +64,9 @@ export function BlockGallery() {
                       headingLevel={2}
                     />
                   ) : (
-                    // Unreachable while each block's `variants.ts` keeps its
-                    // `satisfies Record<…Variant, …>` constraint. Backstop if that's ever lost —
-                    // loud on purpose, per variant-registry.ts's "fail loudly, don't render empty".
+                    // Unreachable while every block's `variants.ts` keeps its
+                    // `satisfies Record<…Variant, …>`. A backstop if that is ever dropped, and
+                    // loud on purpose — same rule as variant-registry.ts.
                     <Section density="compact" surface="accent">
                       <Container>
                         <p className="text-sm font-semibold">

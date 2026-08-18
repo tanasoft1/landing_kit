@@ -26,16 +26,16 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
 
     setState('sending')
 
-    // Timing guard, separate from field validation. If valid but too fast, wait out the
-    // remainder rather than rejecting: a bot won't stay for the promise to resolve, and a fast
-    // human should never be told their correct fields are wrong.
+    // Timing check, kept separate from field validation. If the fields are valid but the
+    // submission is too fast, wait out the rest instead of rejecting it: a bot will not stay
+    // for the promise, and a fast human should never be told their correct fields are wrong.
     const elapsed = Date.now() - mountedAt.current
     if (elapsed < MIN_ELAPSED_MS) {
       await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
     }
 
-    // Recomputed after the wait, so it reflects real time on screen and passes the
-    // server-side minimum `submissionSchema` enforces.
+    // Measured again after the wait, so it is real time on screen and clears the minimum
+    // `submissionSchema` enforces on the server.
     const payload = { ...parsed.data, elapsedMs: Date.now() - mountedAt.current }
     const result = await submitContact(payload)
     if (result.ok) {
@@ -101,11 +101,11 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
           <p
             role="status"
             aria-live="polite"
-            // Preset tokens, not stock Tailwind colours: a fixed colour wouldn't move with a
-            // preset swap, and Lighthouse never audits this (sr-only until resolved), so contrast
-            // was measured, not eyeballed — see `--c-destructive`/`--c-success` in each preset.
-            // The replaced class names aren't written out here: Tailwind's scanner is
-            // comment-blind, and naming them would keep the dead utilities in the built CSS.
+            // Preset tokens, not stock Tailwind colours. A fixed colour would not move when the
+            // preset changes. Contrast for these was measured, not eyeballed — see
+            // `--c-destructive` and `--c-success` in each preset. The old class names are not
+            // written out here: Tailwind's scanner cannot tell code from comments, so naming
+            // them would keep those dead utilities in the built CSS.
             className={
               !message
                 ? 'sr-only'

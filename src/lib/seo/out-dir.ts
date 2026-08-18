@@ -1,16 +1,14 @@
 /**
- * Where the client build lands — one definition, not restated in each consumer.
+ * Where the client build lands. Written once here, never repeated in the files that need it.
  *
- * Does not *set* the output dir; `tanstackStart` does (`dist/client` is its default). This is
- * what the rest of the kit uses to FIND that output, coupled by convention, not derivation —
- * `verify-build.mjs` catches a mismatch loudly, not silently. Three consumers must agree:
- * `vite.config.ts`, `emit-plugin.ts`, and `block-preloads.ts` (which used to hardcode
- * `'dist/client/.vite/manifest.json'` — a changed output dir would have left it silently
- * looking in the old place, since a missing manifest looks like the normal `pnpm dev` case).
+ * This does not SET the output dir — `tanstackStart` does, and `dist/client` is its default.
+ * This is how the rest of the kit FINDS that output. The two are matched by convention, and
+ * `verify-build.mjs` fails loudly if they stop matching. Three files must agree:
+ * `vite.config.ts`, `emit-plugin.ts` and `block-preloads.ts`.
  *
- * Its own module, not an `export` on `vite.config.ts`: `block-preloads.ts` is reachable from
- * `build-head.ts`, shared route code the client also bundles, and importing `vite.config.ts`
- * from there drags `@tailwindcss/vite`/`@vitejs/plugin-react` in and fails the client build
- * (measured). A bare string constant is safe in both environments.
+ * Its own module, not an export from `vite.config.ts`. `build-head.ts` imports
+ * `block-preloads.ts`, and that is shared route code the client bundles too — importing
+ * `vite.config.ts` from there pulls in `@tailwindcss/vite` and `@vitejs/plugin-react` and
+ * breaks the client build. A plain string constant is safe on both sides.
  */
 export const OUT_DIR = 'dist/client'

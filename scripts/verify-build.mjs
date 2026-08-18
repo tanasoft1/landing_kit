@@ -2,17 +2,15 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 // --- build freshness, before anything else ------------------------------------
-// Every check in this file is an assertion about the CONTENT of `dist/`, and a failed build does
-// not empty `dist/` — it leaves the previous successful output in place. So "build failed, verify
-// passed" is a real combination, observed once when a corrupted `vite.config.ts` broke the build
-// and this script still printed `✓ 4 pages` about artifacts nobody had just produced. Two of the
-// checks below (the block-chunk preload assertion, and the `/docs` prerender-exclusion check) are
-// pure statements about `dist/` state with no cross-check against source at all, so a stale
-// `dist/` false-greens them by construction.
+// Every check here reads the CONTENT of `dist/`, and a failed build does not empty `dist/` — it
+// leaves the last good output in place. So "build failed, verify passed" is a real combination:
+// a corrupted `vite.config.ts` once broke the build while this script still printed `✓ 4 pages`
+// about files nobody had just produced. Two checks below (block-chunk preloads, and the `/docs`
+// prerender exclusion) only look at `dist/` and never compare it against source, so a stale
+// `dist/` passes them by construction.
 //
-// The stamp is written by `src/lib/seo/emit-plugin.ts` as the last act of a build that ran to
-// completion, and deleted at that build's start — so its absence means exactly one thing, and
-// nothing this script could report afterwards would be meaningful.
+// `emit-plugin.ts` deletes the stamp when a build starts and writes it again only when that
+// build finishes. So a missing stamp means one thing, and nothing below it would be meaningful.
 const STAMP_PATH = '.kit/build-stamp.json'
 if (!existsSync(STAMP_PATH)) {
   console.error(
@@ -49,12 +47,11 @@ for (const entry of readdirSync(blocksDir)) {
 }
 
 // --- the scaffold placeholder must be replaced -------------------------------
-// A wrong domain is invisible on the page and poisons every canonical URL, hreflang tag and
-// sitemap entry — the site looks fine and ranks as a duplicate of a domain nobody owns.
-// One exact sentinel, not a fuzzy "looks like a placeholder" test: the kit's own site.config.ts
-// legitimately uses https://example.mn, and a heuristic that caught the sentinel would catch
-// that too and fail this repo's own verify. `.example` is IANA-reserved, so the sentinel can
-// never become a real site.
+// A wrong domain does not show on the page, but it poisons every canonical URL, hreflang tag
+// and sitemap entry: the site looks fine and ranks as a duplicate of a domain nobody owns.
+// One exact sentinel, not a "looks like a placeholder" guess. The kit's own site.config.ts uses
+// https://example.mn on purpose, and any heuristic wide enough to catch the sentinel would
+// catch that too. `.example` is reserved by IANA, so the sentinel can never become a real site.
 const URL_PLACEHOLDER = 'https://your-domain.example'
 if (site === URL_PLACEHOLDER) {
   fail(
@@ -65,11 +62,11 @@ if (site === URL_PLACEHOLDER) {
 }
 
 // --- route / config parity ----------------------------------------------------
-// Pages are defined ONLY in pages.config.ts, and prerendering is driven from that list
-// (autoStaticPathsDiscovery is off). So a stray route file is a page that is served but
+// Pages are defined ONLY in pages.config.ts, and prerendering works off that list
+// (autoStaticPathsDiscovery is off). So a stray route file is a page that gets served but is
 // never prerendered, never in the sitemap, and never checked by anything below.
-// No `routeTree.gen.ts` here: the generated file lives at `src/routeTree.gen.ts`, a sibling of
-// this directory, so listing it would be dead weight that reads as though it were expected here.
+// `routeTree.gen.ts` is not listed here: it is generated into `src/app/`, not this directory,
+// so naming it would read as if it were expected here.
 const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'docs.tsx'])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {
@@ -104,23 +101,20 @@ function expectedAlternateHref(pageId, hreflang) {
 }
 
 /**
- * Decode HTML entities generically, including NUMERIC references.
+ * Decode HTML entities, including numeric ones.
  *
- * This must be general rather than a list of the escapes we happen to have seen. React's
- * SSR serializer escapes an apostrophe as `&#x27;` (hex), while JSON-LD goes out through
- * `dangerouslySetInnerHTML` unescaped — so a title or description containing an apostrophe
- * ("Mongolia's", "we're") would compare unequal and fail a CORRECT build. A false failure in
- * the project's only machine gate is worse than a missing check: it teaches people to
- * distrust the gate.
+ * This has to be general, not a list of the escapes we happen to have hit. React's SSR escapes
+ * an apostrophe as `&#x27;`, while JSON-LD goes out through `dangerouslySetInnerHTML` with no
+ * escaping. So any title with an apostrophe ("Mongolia's", "we're") would compare unequal and
+ * fail a CORRECT build. A false failure in the only automatic gate is worse than a missing
+ * check, because it teaches people to ignore the gate.
  *
- * `&amp;` is decoded LAST so that `&amp;lt;` yields `&lt;` rather than `<`.
+ * `&amp;` is decoded LAST, so `&amp;lt;` gives `&lt;` and not `<`.
  *
- * A numeric reference outside the valid range (`> 0x10FFFF`, or a lone surrogate in
- * `0xD800`–`0xDFFF`) is not a codepoint `String.fromCodePoint` can produce — it throws
- * `RangeError`, and an uncaught throw here takes down the entire verify-build run with a raw
- * stack trace instead of a `✗ verify-build: N failure(s)` line. A real HTML parser leaves an
- * invalid numeric reference as literal text, so `decodeCodePoint` does the same: an out-of-range
- * reference is left untouched rather than converted.
+ * A numeric reference above `0x10FFFF`, or a lone surrogate in `0xD800`–`0xDFFF`, is not a
+ * codepoint `String.fromCodePoint` can make: it throws `RangeError`, which would end the whole
+ * run with a stack trace instead of a `✗ verify-build: N failure(s)` line. A real HTML parser
+ * leaves an invalid reference as plain text, so this does the same and returns it unchanged.
  */
 const isValidCodePoint = (cp) => cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)
 const decodeCodePoint = (cp, original) =>
@@ -137,10 +131,9 @@ const decodeEntities = (s) =>
     .replace(/&amp;/g, '&')
 
 /**
- * Balanced-brace extraction. A non-greedy `\{([\s\S]*?)\}` stops at the first inner `}`, so
- * one inline object literal in the registry would truncate the captured text and silently
- * stop checking every entry declared after it — reintroducing exactly the hole this check
- * was added to close.
+ * Reads to the matching brace. A non-greedy `\{([\s\S]*?)\}` stops at the first inner `}`, so a
+ * single inline object in the registry would cut the captured text short and silently skip
+ * every entry after it — reopening the exact hole this check was added to close.
  */
 function extractObjectLiteral(src, marker) {
   const start = src.indexOf(marker)
@@ -167,17 +160,16 @@ for (const u of urls) {
   const h1s = html.match(/<h1[\s>]/g) ?? []
   if (h1s.length !== 1) fail(u.path, `expected exactly 1 <h1>, found ${h1s.length}`)
 
-  // Nothing in the static HTML may be invisible. An entrance animation that ships
-  // `opacity:0` leaves a JS-less visitor staring at a blank hero, and defers LCP until the
-  // bundle hydrates and animates. See the FadeIn docstring.
+  // Nothing in the static HTML may be invisible. An entrance animation that ships `opacity:0`
+  // leaves a visitor with no JS looking at a blank hero, and delays LCP until the bundle
+  // hydrates. See the FadeIn docstring.
   //
-  // `transform: scale(0)` and `clip-path: inset(100%)` are checked alongside the original three
-  // because this scan is the only thing standing between a motion preset and invisible prerendered
-  // content, and it was matching by property name rather than by effect. `FadeIn`/`Reveal` already
-  // ship a legitimate `transform: translateY(12px)`, so `transform` is an expected property here —
-  // which means a future `initial={{ scale: 0 }}` would have shipped genuinely invisible content
-  // through a check that was looking right at it. The `(?!\.\d*[1-9])` guard mirrors the opacity
-  // rule so a real `scale(0.98)` entrance is not flagged.
+  // `transform: scale(0)` and `clip-path: inset(100%)` are checked too, because this scan
+  // matches by property name and `FadeIn`/`Reveal` already ship a legitimate
+  // `transform: translateY(12px)`. That makes `transform` an expected property here, so a
+  // future `initial={{ scale: 0 }}` would have slipped invisible content past a check looking
+  // straight at it. The `(?!\.\d*[1-9])` guard copies the opacity rule, so a real
+  // `scale(0.98)` entrance is not flagged.
   const HIDDEN_PATTERNS = [
     /opacity:\s*0(?!\.\d*[1-9])/,
     /visibility:\s*hidden/,
@@ -275,10 +267,10 @@ for (const u of urls) {
       fail(u.path, 'JSON-LD missing Organization or LocalBusiness')
     }
 
-    // @id reference integrity. A node carrying @type DEFINES its @id; a bare { '@id': … }
-    // REFERENCES one. A dangling reference parses fine, has all the right @types, and is
-    // silently broken for anything that actually resolves the graph — including Google's
-    // rich-results parser. This was previously only ever checked by hand.
+    // Check that every @id reference resolves. A node with an @type DEFINES its @id; a bare
+    // { '@id': … } REFERENCES one. A dangling reference still parses and still has the right
+    // @types, but it is broken for anything that actually walks the graph, including Google's
+    // rich-results parser.
     const defined = new Set()
     const referenced = []
     const walk = (node) => {
@@ -318,9 +310,9 @@ for (const u of urls) {
     }
   }
 
-  // Every page must preload the chunks for the blocks it renders. This is a fragile ordering
-  // dependency (see emit-plugin.ts) and its failure mode is silent: the build succeeds, the page
-  // works, and only a Lighthouse run weeks later shows the waterfall came back.
+  // Every page must preload the chunks for the blocks it renders. This depends on a fragile
+  // plugin ordering (see emit-plugin.ts) and it breaks silently: the build passes, the page
+  // works, and the only symptom is that chunks load one after another again instead of at once.
   const preloaded = [...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g)].map(
     (m) => m[1] ?? '',
   )
@@ -331,23 +323,20 @@ for (const u of urls) {
 }
 
 // --- the split actually held --------------------------------------------------
-// The preload check above is zero-vs-nonzero, and it is the only thing between a plugin reorder
-// and a silent waterfall regression — a build preloading 1 of the home page's 3 block chunks
-// passes it. An exact count is the wrong strengthening, because Vite may legitimately merge small
-// chunks. This asserts the property that actually matters instead: the contact form's form library
-// is NOT in the main entry chunk. That is the whole point of the split (99 KB raw / 30 KB gzip of
-// react-hook-form and zod, previously downloaded by every page including ones with no form), and
-// it is true or false regardless of how Vite chose to group anything else.
+// The preload check above only asks "more than zero", so a build that preloads 1 of the home
+// page's 3 block chunks passes it. Counting exactly is the wrong fix, because Vite is allowed to
+// merge small chunks. So check the thing that actually matters: the contact form's form library
+// is NOT in the main entry chunk. That is the whole point of the split — 99 KB raw, 30 KB
+// gzipped of react-hook-form and zod, which every page used to download, form or no form.
 //
-// Markers are react-hook-form's own public option names, not the string 'react-hook-form' — that
-// string legitimately appears in the entry chunk already, inside the contact manifest's
-// `requires: { npm: [...] }` metadata, which registry.ts imports eagerly on purpose. A check keyed
-// on the package name would have failed a correct build on day one.
+// The markers are react-hook-form's own public option names, not the string 'react-hook-form'.
+// That string is already in the entry chunk, inside the contact manifest's
+// `requires: { npm: [...] }`, which registry.ts imports eagerly on purpose. Keying on the
+// package name would have failed a correct build on day one.
 //
-// Self-validating, deliberately: the markers must be found SOMEWHERE outside the entry chunk as
-// well as being absent from it. Absence alone would quietly become a no-op the day react-hook-form
-// renames its internals or the block stops shipping — this project has already shipped assertions
-// that could never fire, and an assertion whose subject has vanished is exactly that.
+// This check also validates itself: the markers must be absent from the entry chunk AND present
+// somewhere else. Checking only for absence would quietly become a no-op the day react-hook-form
+// renames its internals, or the block stops shipping — an assertion that can never fail.
 const RHF_MARKERS = ['shouldUnregister', 'criteriaMode', 'reValidateMode', 'shouldFocusError']
 if (existsSync(join(blocksDir, 'contact'))) {
   const assetsDir = join(outDir, 'assets')
@@ -411,11 +400,11 @@ else {
     if (!xml.includes(`<loc>${site}${u.path}</loc>`)) fail('sitemap.xml', `missing ${u.path}`)
   }
 
-  // Exclusion, not just inclusion. The loop above proves every EXPECTED url is present and would
-  // pass just as happily with a `/docs` entry sitting alongside them — and a sitemap entry is an
-  // explicit request to index a URL, which is the opposite of what `/docs` is for. `/docs` is a
-  // developer surface with no localized copy, no `pages.config.ts` entry and no prerendered file;
-  // advertising it here would ask Google to index a URL that 404s on a static deploy.
+  // Checks what must NOT be here, not only what must. The loop above proves every expected url
+  // is present, and would pass just as happily with a `/docs` entry beside them. A sitemap entry
+  // asks Google to index a URL, which is the opposite of what `/docs` is for: it has no
+  // localized copy, no `pages.config.ts` entry and no prerendered file, so listing it would ask
+  // Google to index a URL that 404s on a static deploy.
   //
   // Compared as PARSED PATHS, not with a `/\/docs\b/` regex over the raw XML. That regex matched
   // the `//docs` inside any `site.url` on a host beginning `docs.` — `<loc>https://docs.example.mn/

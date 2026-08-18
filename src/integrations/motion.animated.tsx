@@ -4,11 +4,10 @@ import type { MotionModule } from '@/integrations/motion.types'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 
-// SSR has no `matchMedia`, so the server always renders the animated branch. A client render
-// that branches on the real OS preference right away would then mismatch the hydrated HTML —
-// React doesn't patch that kind of attribute mismatch, so the element freezes at `initial`
-// forever. Flipping only when `reduce` resolves `true` (never on a generic "mounted" flag) also
-// means the common case never re-renders after mount.
+// The server has no `matchMedia`, so it always renders the animated branch. If the client read
+// the real OS preference during hydration the HTML would mismatch, and React does not patch
+// that kind of mismatch — the element would freeze at `initial` forever. So flip only after
+// mount, and only when `reduce` is true, which means the common case never re-renders.
 function useReducedMotionAfterMount() {
   const reduce = useReducedMotion()
   const [committed, setCommitted] = useState(false)
@@ -21,12 +20,11 @@ function useReducedMotionAfterMount() {
 /**
  * On-load entrance for above-the-fold content, including the LCP element.
  *
- * Animates TRANSFORM ONLY, never opacity: `initial={{ opacity: 0 }}` ships `style="opacity:0"`
- * in the static HTML, so a visitor with no JS sees a blank hero and LCP becomes JS-dependent.
- * `transform` alone stays fully opaque and can't cause CLS, so the offset is free.
+ * Animates TRANSFORM ONLY, never opacity. `initial={{ opacity: 0 }}` puts `style="opacity:0"`
+ * into the static HTML, so a visitor with no JS sees a blank hero. A transform stays fully
+ * opaque and cannot shift the layout, so the offset is free.
  *
- * Want a real opacity fade above the fold? That's a deliberate LCP trade-off — re-check the
- * Lighthouse budget first.
+ * Want a real opacity fade above the fold? That is an LCP trade-off — measure LCP first.
  */
 export function FadeIn({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotionAfterMount()
@@ -44,10 +42,10 @@ export function FadeIn({ children, className, delay = 0 }: Props) {
 }
 
 /**
- * Scroll-triggered entrance. Same TRANSFORM-only rule as `FadeIn`, with no exception for being
- * below the fold — off-screen at load isn't the same as absent from the document, and a
- * crawler that doesn't scroll would index content the page marked invisible.
- * `verify-build.mjs` enforces this with a blanket scan for `opacity:0` in the built HTML.
+ * Scroll-triggered entrance. Same TRANSFORM-only rule as `FadeIn`, and being below the fold is
+ * not an exception: off-screen is not the same as absent, and a crawler that never scrolls
+ * would still read content the page marked invisible. `verify-build.mjs` scans the built HTML
+ * for `opacity:0` and fails on any match.
  */
 export function Reveal({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotionAfterMount()
@@ -65,8 +63,8 @@ export function Reveal({ children, className, delay = 0 }: Props) {
   )
 }
 
-// Same no-opacity rule as `FadeIn`/`Reveal`: giving `hidden`/`shown` an `opacity` value here
-// (or in a consumer's child variants) reintroduces the hidden-content problem those two avoid.
+// Same no-opacity rule as `FadeIn` and `Reveal`. Giving `hidden`/`shown` an `opacity` value
+// here, or in a caller's child variants, brings back the hidden-content problem.
 export function Stagger({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
@@ -83,8 +81,8 @@ export function Stagger({ children, className }: { children: ReactNode; classNam
   )
 }
 
-// Drift between the two `@/motion` variants is a type error here, not a runtime surprise —
-// tsconfig's `paths` only ever type-checks `@/motion` against this file, so `KIT_ANIMATION=off`
-// (motion.noop.tsx) would otherwise be the one configuration nothing type-checks.
+// Type-checks this file against the shared `@/motion` surface, so the two variants cannot drift
+// apart. `tsconfig` points `@/motion` at this file only, which is why motion.noop.tsx needs the
+// same line: without it, `KIT_ANIMATION=off` is the one setup nothing type-checks.
 const _contract: MotionModule = { FadeIn, Reveal, Stagger }
 void _contract
