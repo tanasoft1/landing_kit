@@ -1,17 +1,16 @@
 // The generate layer: the files a scaffold cannot inherit, written fresh from the answers.
 //
-// Everything here is a string template plus the `Answers` object. Nothing is copied — the copy
-// layer owns that, and the two lists are disjoint by construction (see `cli/kit-manifest.mjs`'s
-// header: `src/config/`, `registry.ts`, `block-modules.ts` and `variants.all.ts` are deliberately
-// absent from every COPY_* list precisely so this file can write them).
+// Everything here is a string template plus the `Answers` object. Nothing is copied — that is
+// the copy layer's job, and the two lists never overlap. `src/config/`, `registry.ts`,
+// `block-modules.ts` and `variants.all.ts` are left out of every COPY_* list on purpose, so this
+// file can write them.
 //
-// Two of the files below are generated from a template rather than read from the kit, and that is
-// forced rather than chosen: `tsconfig.json` and `pnpm-workspace.yaml` are NOT in `package.json`'s
-// `files` array, so under `pnpm dlx` they do not exist on disk at all. Reading them at runtime
-// would work in this repo and fail on every real install. Both therefore carry a drift assertion
-// that runs only when the kit's own copy IS present (a working copy, i.e. exactly where a change
-// to either file would be made), so an edit to one and not the other stops the CLI here.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+// `tsconfig.json` and `pnpm-workspace.yaml` are templated here because they have to be: neither
+// is in `package.json`'s `files`, so under `pnpm dlx` they are not on disk at all. Reading them
+// at runtime would work in this repo and fail on every real install. Both carry a drift check
+// that runs only when the kit's own copy IS present — a working copy, which is exactly where
+// someone would edit them — so changing one and not the other stops the CLI here.
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER } from './prompts.mjs'
 
@@ -37,7 +36,8 @@ const RUNTIME_DEPS = [
   'motion',
   'react',
   'react-dom',
-  // `src/submit-schema.ts` imports zod and is copied unconditionally, so this is never optional.
+  // `src/integrations/submit-schema.ts` imports zod and is always copied, so this is never
+  // optional.
   'zod',
 ]
 
@@ -107,20 +107,18 @@ function writeOut(outDir, rel, text, written) {
 
 // --- JSON, in Biome's formatting rather than JSON.stringify's ------------------------------------
 //
-// `biome ci .` is the generated project's `pnpm lint`, the FIRST gate of its `pnpm verify`, and it
-// formats every `.json` file this layer writes. `JSON.stringify(…, null, 2)` puts every array
-// element on its own line unconditionally; Biome collapses any array or object that fits inside the
-// 100-column line width. The two disagree, and the disagreement is a lint error.
+// `biome ci .` is the generated project's `pnpm lint` and the first gate of its `pnpm verify`,
+// and it formats every `.json` file written here. `JSON.stringify(…, null, 2)` always puts each
+// array element on its own line, while Biome collapses any array or object that fits in 100
+// columns. They disagree, and the disagreement is a lint error.
 //
-// Observed, not predicted: the first `pnpm verify` on a fresh scaffold failed on
-// `.kit/scaffold.json`, because `"blocks"` had four short strings on four lines. It is worth being
-// precise about why that file is even linted — the kit's own `.kit/` is hidden from Biome by
-// `useIgnoreFile: true` reading this repo's `.gitignore`, but a fresh scaffold has no `.git` for
-// that setting to consult, and the generated `.gitignore` deliberately un-ignores `scaffold.json`
-// anyway, so it stays linted after `git init` too.
+// This was seen, not guessed: the first `pnpm verify` on a fresh scaffold failed on
+// `.kit/scaffold.json`, because `"blocks"` held four short strings on four lines. That file is
+// linted because a fresh scaffold has no `.git` for Biome's `useIgnoreFile` to read, and the
+// generated `.gitignore` un-ignores `scaffold.json` anyway, so it stays linted after `git init`.
 //
-// Objects are safe either way (Biome, like Prettier, preserves an object the author expanded), but
-// the same fits-or-expands rule is applied to both so the output has one shape and no special case.
+// Objects would be safe either way, since Biome keeps an object the author expanded. The same
+// fits-or-expands rule is used for both so the output has one shape and no special cases.
 const LINE_WIDTH = 100
 
 const compactJson = (value) => {
@@ -306,11 +304,11 @@ import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { pages } from './src/config/pages.config'
-import { site } from './src/config/site.config'
-import { enumerateUrls } from './src/lib/pages/enumerate'
-import { emitSeoFiles } from './src/lib/seo/emit-plugin'
-import { OUT_DIR } from './src/lib/seo/out-dir'
+import { pages } from './src/config/pages.config.ts'
+import { site } from './src/config/site.config.ts'
+import { enumerateUrls } from './src/lib/pages/enumerate.ts'
+import { emitSeoFiles } from './src/lib/seo/emit-plugin.ts'
+import { OUT_DIR } from './src/lib/seo/out-dir.ts'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -332,10 +330,8 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart({
-      // Entries and the generated route tree resolve against \`src/\` by convention; they live in
-      // \`src/app/\` here, so each is named explicitly. \`generatedRouteTree\` is a tanstackStart
-      // option — setting it in tsr.config.json instead regenerates the tree at the default path
-      // while the app imports the configured one, and the build fails on stale relative imports.
+      // By default these are found by filename directly under \`src/\`. They live in \`src/app/\`
+      // here, so each one must be named. The paths are relative to \`src/\`.
       router: { entry: './app/router.tsx', generatedRouteTree: './app/routeTree.gen.ts' },
       client: { entry: './app/client.tsx' },
       server: { entry: './app/server.ts' },
@@ -378,6 +374,7 @@ function tsconfigJson(answers) {
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/motion": ["./src/integrations/motion.animated.tsx"],
       "@/theme": ["./src/integrations/${themeFile(answers)}"],
@@ -477,37 +474,34 @@ ${entries}
 
 // --- block-to-block links ---------------------------------------------------------------------
 //
-// Blocks link to each other by target id from inside their own bilingual copy: hero's and cta's
-// `primaryCta` both point at `contact`, and cta's `secondaryCta` points at `features`. Those are
-// required fields on `HeroCopy` and `CtaCopy`, rendered unconditionally by every variant, and the
-// copy files are copied verbatim — so selecting a block whose copy names an unselected block ships
-// a link to nothing.
+// Blocks link to each other by target id from inside their own copy files. Hero's and cta's
+// `primaryCta` both point at `contact`, and cta's `secondaryCta` points at `features`. Those
+// fields are required and every variant renders them, so picking a block whose copy names a
+// block you did not pick ships a link to nothing.
 //
-// The consequence is severe and says nothing about its cause. `createResolver`
-// (src/lib/pages/resolve-link.ts) throws at RENDER, inside SSR, so the whole page comes out as an
-// empty error boundary: `pnpm verify` then reports `expected exactly 1 <h1>, found 0` on every
-// page and never mentions a link. Reproduced with `--blocks=hero,features,cta`, which is an
-// entirely reasonable thing to ask for.
+// That failure is bad and tells you nothing about its cause. `createResolver`
+// (src/lib/pages/resolve-link.ts) throws while rendering on the server, so the page comes out as
+// an empty error boundary and `pnpm verify` reports `expected exactly 1 <h1>, found 0` on every
+// page without ever mentioning a link. Reproduced with `--blocks=hero,features,cta`, which is a
+// perfectly reasonable thing to ask for.
 //
-// Derived from the copy files rather than from a hardcoded "hero and cta need contact", for the
-// same reason `navTargets` reads the manifests: a block that gains or loses a link must not need
-// this file edited to stay correct. This is the static form of the check `createResolver` performs
-// at render, moved to the only point where the answer can still be changed.
+// Read from the copy files instead of hardcoding "hero and cta need contact", so a block that
+// gains or loses a link needs no edit here. This is the same check `createResolver` does at
+// render, moved to the last point where the answer can still change.
 //
-// Exported and called by `cli/index.mjs` BEFORE the copy layer runs, not from `generateFiles`.
-// That ordering is the whole point and it was wrong once: with the call inside `generateFiles`,
-// the copy layer had already written 60-odd files into the target by the time this threw, and
-// only the rollback made the end state right. The end state was correct either way; the claim
-// "refuses before anything is written" was not, and a claim is what the next person builds on.
+// `cli/index.mjs` calls this BEFORE the copy layer runs, not from inside `generateFiles`. That
+// order is the point: with the call inside `generateFiles`, the copy layer had already written
+// 60-odd files before this threw, and only the rollback cleaned up. The end state was fine
+// either way, but "refuses before anything is written" was not true, and that claim is what the
+// next person relies on.
 /**
- * Every `target: '…'` one block's bilingual copy names, with the file each came from.
+ * Every `target: '…'` a block's copy files name, with the file each one came from.
  *
- * The single place the copy files are read for links, so `assertBlockLinksResolve` below and
- * `readBlockDeps` further down cannot disagree about what the copy says — they are meant to be two
- * uses of one reading, not two readings.
+ * The only place the copy files are read for links, so `assertBlockLinksResolve` below and
+ * `readBlockDeps` further down cannot disagree about what the copy says.
  *
- * Comments are stripped first, as in `navTargets`: a commented-out `target: 'features'` in an
- * example would otherwise register as a real link.
+ * Comments are stripped first, like in `navTargets`, so a commented-out `target: 'features'` in
+ * an example does not count as a real link.
  */
 function copyLinkTargets(kitRoot, id) {
   const found = []
@@ -627,7 +621,36 @@ function manifestBlockDeps(kitRoot, id) {
  * `--yes`. A check that only ran on the path that consumes it would pass forever on CI, which only
  * ever runs `--yes`.
  */
+/**
+ * `BLOCK_ORDER` is hand-written, but `src/blocks/` is the real list. A block added to the kit and
+ * not to that array is simply never offered, and nothing else would say so: every gate below
+ * iterates `BLOCK_ORDER`, so the new block is invisible to all of them.
+ */
+function assertBlockOrderMatchesDisk(kitRoot) {
+  const onDisk = readdirSync(join(kitRoot, 'src/blocks'), { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+  const declared = [...BLOCK_ORDER].sort()
+  if (onDisk.join(',') === declared.join(',')) return
+  const missing = onDisk.filter((id) => !BLOCK_ORDER.includes(id))
+  const extra = BLOCK_ORDER.filter((id) => !onDisk.includes(id))
+  throw new Error(
+    `cli/prompts.mjs's BLOCK_ORDER does not match the blocks in src/blocks/.\n` +
+      (missing.length
+        ? `  on disk but not in BLOCK_ORDER: [${missing.map((d) => `'${d}'`).join(', ')}]\n`
+        : '') +
+      (extra.length
+        ? `  in BLOCK_ORDER but not on disk: [${extra.map((d) => `'${d}'`).join(', ')}]\n`
+        : '') +
+      '  A block missing from BLOCK_ORDER is never offered and never generated; one listed but\n' +
+      '  absent crashes the scaffold. Update BLOCK_ORDER (and BLOCK_VARIANTS and\n' +
+      '  BLOCK_DEFAULT_VARIANT beside it) in cli/prompts.mjs.',
+  )
+}
+
 export function readBlockDeps(kitRoot) {
+  assertBlockOrderMatchesDisk(kitRoot)
   const deps = {}
   for (const id of BLOCK_ORDER) {
     const declared = manifestBlockDeps(kitRoot, id)
@@ -702,13 +725,13 @@ import type { BlockId } from './registry'
 import { registerVariants } from './variant-registry'
 
 /**
- * Server-only: the prerenderer needs every block synchronously (one process, no per-page
- * dynamic import like \`src/client.tsx\`). Must stay unreachable from \`src/client.tsx\`, or every
- * component lands back in the client bundle.
+ * Server-only. The prerenderer runs in one process and needs every block at once, so it can't
+ * use the per-page dynamic import \`src/app/client.tsx\` uses. Keep this file unreachable from
+ * \`src/app/client.tsx\`, or every component lands back in the client bundle.
  *
- * \`Record<BlockId, …>\` catches a missing block at compile time. Bare \`registerVariants(…)\` calls
- * did not: omitting one still compiled, linted and passed \`check-conventions.mjs\`, and failed only
- * as a 500 from \`getVariants\` when the un-prerendered \`/docs\` gallery rendered it.
+ * \`Record<BlockId, …>\` makes a missing block a compile error. Plain \`registerVariants(…)\` calls
+ * would not: leaving one out still compiles and lints, and only fails as a 500 when \`/docs\`
+ * renders it.
  */
 const all: Record<BlockId, Parameters<typeof registerVariants>[1]> = {
 ${entries}

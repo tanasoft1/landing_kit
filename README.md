@@ -1,27 +1,28 @@
 # Landing Kit
 
-A bilingual (Mongolian / English) landing-page boilerplate built on TanStack Start. The premise:
-a scaffolding CLI (or a person copying this repo) should be able to produce a different site by
-**swapping config files and env flags — never by editing components**. Everything in this README
-exists to keep that true.
+A bilingual (Mongolian + English) landing page, prerendered to static HTML.
+
+You build a site by **editing config and copy files — not by rewriting components**. Everything
+below is written to keep that true.
 
 ## Contents
 
 - [Quick start](#quick-start)
-- [Scaffolding a new site](#scaffolding-a-new-site)
-- [Scripts](#scripts)
-- [Architecture in one page](#architecture-in-one-page)
-- [Adding a block](#adding-a-block)
-- [Adding a variant to an existing block](#adding-a-variant-to-an-existing-block)
+- [What you edit](#what-you-edit)
 - [Adding a page](#adding-a-page)
-- [Reskinning: the token surface](#reskinning-the-token-surface)
-- [`/docs`: the living developer reference](#docs-the-living-developer-reference)
+- [Adding a block](#adding-a-block)
+- [Adding a variant](#adding-a-variant)
+- [Changing the design](#changing-the-design)
+- [The contact form](#the-contact-form)
+- [Fonts and Mongolian Cyrillic](#fonts-and-mongolian-cyrillic)
+- [`/docs`: the live reference](#docs-the-live-reference)
 - [Removing the /docs page](#removing-the-docs-page)
-- [The Cyrillic font requirement](#the-cyrillic-font-requirement)
+- [Rules the build enforces](#rules-the-build-enforces)
+- [Gotchas](#gotchas)
+- [Scripts](#scripts)
+- [Scaffolding a new site](#scaffolding-a-new-site)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
-- [The contact form](#the-contact-form)
-- [Gotchas that cost real debugging time](#gotchas-that-cost-real-debugging-time)
 - [Lighthouse budget](#lighthouse-budget)
 - [Publishing](#publishing)
 
@@ -32,293 +33,38 @@ pnpm install
 pnpm dev
 ```
 
-## Scaffolding a new site
+Mongolian is at `/`, English at `/en`.
 
-You do not have to copy this repository by hand. The kit publishes a scaffolding CLI that writes
-a fresh project into a directory of your choosing:
+Before you deploy, set `url` in `src/config/site.config.ts` to your real domain. `pnpm verify`
+fails until you do.
 
-```bash
-pnpm dlx @dewsoft/landing-kit@latest frontend
-```
+## What you edit
 
-It asks five questions — pages, theme, preset, blocks, and a variant per selected block — and
-then writes `frontend/`. Every question has a flag, so a scripted run can skip the prompts
-entirely; `--yes` takes every default and asks nothing:
+Two words explain the whole model:
 
-```bash
-pnpm dlx @dewsoft/landing-kit@latest frontend --yes
-```
+- A **block** is one section of a page — hero, features, cta, contact.
+- A **page** is just an ordered list of blocks.
 
-| Flag | Values | Default |
-|---|---|---|
-| `--pages=` | `multi`, `one` | `multi` |
-| `--theme=` | `both`, `single` | `both` |
-| `--preset=` | `editorial`, `warm` | `editorial` |
-| `--blocks=` | comma-separated ids — `hero`, `features`, `cta`, `contact` | all four |
-| `--variant-<block>=` | per block, e.g. `--variant-hero=split` | that block's `defaultVariant` |
-| `-y`, `--yes` | — | off (prompts) |
-| `-h`, `--help` | — | — |
+So most work happens in four files:
 
-Variants per block: `hero` (`centered`, `split`), `features` (`grid`, `alternating`), `cta`
-(`banner`, `split`), `contact` (`default`). `--help` is the reference for all of this; the table
-above is orientation.
+| You want to | Edit |
+|---|---|
+| Change the words on the page | `src/blocks/<block>/copy.mn.ts` and `copy.en.ts` |
+| Add, remove or reorder sections | `src/config/pages.config.ts` |
+| Change the site name, menu or contact details | `src/config/site.config.ts` |
+| Change colours, fonts or spacing | `src/styles/presets/*.css` |
 
-**`--blocks` is not a free multi-select.** Blocks link to each other by target id from inside
-their own copy, and a link to a block you left out makes the page render blank rather than fail
-loudly. So a block that links out requires what it links to:
-
-| Block | Requires | Because |
-|---|---|---|
-| `hero` | `contact` | `primaryCta.target` is `'contact'`. |
-| `cta` | `contact`, `features` | `primaryCta.target` is `'contact'`, `secondaryCta.target` is `'features'`. |
-| `features` | — | links to nothing |
-| `contact` | — | links to nothing |
-
-That leaves 7 of the 15 non-empty subsets buildable; the other 8 are refused. The interactive
-prompt re-asks and names which block needs which; `--blocks` exits 1 with the same information
-before writing anything.
-
-**Set `url` before you verify.** The generated `src/config/site.config.ts` carries the
-placeholder `https://your-domain.example`, and `scripts/verify-build.mjs` fails on that exact
-string — so a new project's `pnpm verify` is red until you replace it with the real domain. That
-is deliberate: `site.url` is what the canonical tags, the `hreflang` set, the JSON-LD graph and
-`sitemap.xml` are all built from, and a placeholder domain shipped to production is silent.
-
-## Scripts
-
-| Script | What it does | What it verifies |
-|---|---|---|
-| `pnpm dev` | Starts the dev server (`vite dev`). | — |
-| `pnpm build` | Production build with prerendering (`vite build`). | — |
-| `pnpm typecheck` | `tsc --noEmit`. | The whole `src/` tree, `scripts/`, and `vite.config.ts` type-check, including `configs/` (added to `tsconfig.json`'s `include`). |
-| `pnpm lint` | `biome ci .` | Zero warnings (one known info about a deprecated `biome.json` field). |
-| `pnpm fix` | `biome check --write .` | Auto-fixes what `lint` would flag. |
-| `pnpm conventions` | `node scripts/check-conventions.mjs` | **Layout** (`src/blocks`, `src/routes`, `src/components`): use `<Section>`/`<Container>`, never raw spacing/width utilities, `min-h-screen`, a raw `<section>`, an arbitrary-value `[...]` escape, or an inline `style`. Only `src/components/layout/section.tsx` and `container.tsx` are exempt — they define the primitives. **Headings** (`src/blocks` only): no literal `<h1>`/`<h2>`; heading level is renderer-assigned (see below). A route owns its own outline, so it is not subject to this one. **`<Link>`** (everywhere): no `Link` import from `@tanstack/react-router` — see [Gotchas](#gotchas-that-cost-real-debugging-time). Plus: `/docs` keeps its `noindex` meta, and `/docs`'s recipe list names real README headings. Every `.ts`/`.tsx` check reads the TypeScript AST, never raw source text — class rules against resolved `className` contents, the rest against JSX elements, import declarations and object literals — so a comment can neither cause a violation nor hide one. (CSS is read textually with comments stripped; `README.md` is read as markdown.) |
-| `pnpm verify` | `lint && typecheck && conventions && build && verify-build` | The full default-config gate. This is what CI should run. |
-
-`node scripts/verify-build.mjs` (run by both `verify` and the two smoke scripts) reads
-`.kit/urls.json` — a manifest of exactly which pages *this* build produced — so it always checks
-whichever config just built, not a hardcoded page list. It asserts: exactly one `<h1>` per page,
-no hidden content (`opacity:0`, `visibility:hidden`, `display:none`) in the prerendered HTML, a
-complete `hreflang` set per page, JSON-LD `@id` reference integrity, and that the `<head>` and
-`sitemap.xml` agree on every page's alternates.
-
-## Architecture in one page
-
-The split follows one extension rule: **`.tsx` goes in `src/components/`, `.ts` goes in
-`src/lib/`.** Everything else in `src/` follows from what it is, not from that rule:
+The rest of `src/` you rarely open:
 
 | Path | Holds |
 |---|---|
-| `src/app/` | The framework entry points — `client.tsx`, `server.ts`, `router.tsx`, and the generated `routeTree.gen.ts`. Named explicitly in `vite.config.ts`, since TanStack Start otherwise looks for them directly under `src/`. |
-| `src/integrations/` | Alternate implementations behind an alias — `motion.animated.tsx`/`motion.noop.tsx`, `theme.both.tsx`/`theme.single.tsx`, `submit.rpc.ts`/`submit.endpoint.ts` — each pair a swap target for `vite.config.ts`'s `resolve.alias`, never a component or a lib, which is why neither half lives in either bucket. A generated project receives exactly one half of each pair. |
-| `src/blocks/` | One folder per block — `manifest.ts`, `variants.ts`, components — registered in `registry.ts`. |
-| `src/components/` | Shared `.tsx`: layout primitives, header/footer, theme toggle, `/docs`-only UI. |
-| `src/lib/` | Shared `.ts`: SEO emission, page enumeration/resolution, shared types. No JSX, ever. |
-| `src/routes/` | TanStack Start file routes — `__root.tsx`, `index.tsx`, `docs.tsx`, and the `$.tsx` catch-all that resolves `pages.config.ts`. |
-| `src/styles/` | `theme.css` (design tokens) and `presets/` (swappable token sets). |
-| `configs/` | Alternate `pages.config.ts`/`site.config.ts` pairs, e.g. `configs/smoke-onepage/`, selected by `KIT_CONFIG`. |
-| `tools/` | Maintainer commands for the kit itself (`node tools/kit.mjs`). Deliberately absent from `package.json`'s `files`, so it never ships to a generated project. |
-
-- **Blocks** live in `src/blocks/<id>/` and are registered once in `src/blocks/registry.ts`.
-  A block is deliberately split across two modules:
-  - `manifest.ts` — metadata only: `variantNames` (a `readonly` array of **names**, not
-    components), `defaultVariant`, `copy` per locale, optional `nav` and `schema`. It imports
-    **no components**.
-  - `variants.ts` — the name→component map, constrained by
-    `satisfies Record<XVariant, ComponentType<BlockProps<XCopy>>>`. Variant components have the
-    signature `(props: BlockProps<Copy>) => ReactNode`.
-
-  The split is what makes per-block code-splitting possible, and it is load-bearing rather than
-  stylistic. `registry.ts` imports every manifest **eagerly**, because the `<head>`, the JSON-LD
-  graph and the nav all need `copy`/`nav`/`schema` synchronously — so a component reachable from a
-  `manifest.ts` joins that eager chain and lands in the main chunk. It pulls **that block's own
-  components, plus anything they share**, not every block's: a `hero` manifest reaching
-  `HeroCentered` moves hero's components *and* the 123 KB `motion` chunk they import, while
-  `contact` keeps its own chunk. That is worse than it sounds, because it is silent — no build
-  error, and the machine gate stays green (see [Adding a block](#adding-a-block)). Components are
-  reached only through
-  `src/blocks/block-modules.ts` (dynamic `import()`, client) and `src/blocks/variants.all.ts`
-  (static, server). `React.lazy` was tried for this and reverted: a lazy component suspends during
-  hydration, so React discards the server-rendered subtree — measured CLS 0.000 → 0.169.
-- **Pages** are declared *only* in `pages.config.ts` (`configs/<name>/pages.config.ts` or
-  `src/config/pages.config.ts`) as an ordered list of block references. There is no manual
-  routing — `src/routes/$.tsx` is a catch-all that resolves any path against the page list.
-- **`BlockProps`** is `{ copy, site, resolve, surface, anchorId, headingLevel }`. Only `copy` is
-  block-specific; everything else is assigned by the renderer:
-  - `resolve(target)` turns a page id or block id into the right `href` — a page id becomes a
-    real path, a block id present on the *current* page becomes an in-page anchor (`#id`), and a
-    block id on *another* page becomes `path#id`. The same component, same copy, produces a page
-    link or an anchor link purely based on where the target block actually lives in the current
-    config — this is the mechanism the one-page smoke config exercises.
-  - `headingLevel` is `1` for the page's first block and `2` for every other block. A block never
-    decides this itself (it doesn't know if it opens the page); it renders
-    `const H = headingLevel === 1 ? 'h1' : 'h2'` and uses `<H>`. `check-conventions.mjs` forbids
-    a literal `<h1>`/`<h2>` anywhere in `src/blocks`, no exceptions.
-  - `surface` alternates `default`/`muted` automatically across blocks on a page (or is set
-    per-block-reference in `pages.config.ts`), and the block hands it straight to its own
-    `<Section surface={surface}>`.
-- **Three swappable boundaries**, each an import alias resolved in `vite.config.ts` based on an
-  env flag, never on an `if` inside a component: `@/motion`, `@/theme`, `@/submit`. See
-  [The three env flags](#the-three-env-flags).
-
-## Adding a block
-
-```bash
-landing-kit add-block testimonials                       # one variant, named `simple`
-landing-kit add-block pricing --variants=simple,detailed # two
-```
-
-That writes the folder and makes all three registrations for you, then formats the result with
-this project's own Biome, so `pnpm verify` passes with nothing else to run. It refuses to add a
-block that already exists, refuses a name that is not a valid identifier (no dashes — the name is
-also a TypeScript symbol), and refuses to run in the kit repository itself.
-
-Then write the copy in `copy.mn.ts` / `copy.en.ts`, put the block on a page, and run
-`pnpm verify`.
-
-The rest of this section is what the command does, for when you would rather do it by hand — or
-need to understand why a step exists. **Nothing here is optional if you skip the command.**
-
-Eight steps: **four** inside the block's own folder (steps 1-4 — the component `.tsx` files
-themselves are renamed and rewritten in step 1, then the copy files, the manifest and the
-variants map), **three** registration points outside it (steps 5-7), and **one** page reference
-(step 8). Copying `src/blocks/cta/` is the shortest route — it is the smallest complete block.
-
-1. **Copy a block folder**, e.g. `src/blocks/cta/` → `src/blocks/testimonials/`, and rename the
-   component files (`cta-banner.tsx` → `testimonials-grid.tsx`, …).
-2. **`copy.mn.ts`** — declare the copy type explicitly and export `mn`:
-   ```ts
-   export type TestimonialsCopy = { heading: string; items: { quote: string }[] }
-   export const mn: TestimonialsCopy = { heading: 'Сэтгэгдэл', items: [/* … */] }
-   ```
-   **`copy.en.ts`** imports that type and exports `en` against it:
-   ```ts
-   import type { TestimonialsCopy } from './copy.mn'
-   export const en: TestimonialsCopy = { heading: 'Testimonials', items: [/* … */] }
-   ```
-   Both locales, always — there is no fallback locale for block copy. Declare the type
-   explicitly; never infer it with `typeof mn`, which would make `copy.en.ts` conform to whatever
-   `copy.mn.ts` happens to say instead of to a shared contract. Written this way, locale parity is
-   a compile error, not a script's job.
-3. **`manifest.ts`** — metadata only, **no component imports**:
-   ```ts
-   import type { BlockManifest } from '@/lib/types'
-   import { en } from './copy.en'
-   import { type TestimonialsCopy, mn } from './copy.mn'
-
-   const variantNames = ['grid', 'single'] as const
-   export type TestimonialsVariant = (typeof variantNames)[number]
-
-   export const testimonials = {
-     id: 'testimonials',
-     variantNames,
-     defaultVariant: 'grid',
-     copy: { mn, en },
-     requires: { npm: [], ui: [] },
-   } satisfies BlockManifest<TestimonialsCopy, TestimonialsVariant>
-   ```
-   `as const` on the array is required: without it `defaultVariant` stops being checked against
-   the list. Derive the variant union from the array (`(typeof variantNames)[number]`) rather than
-   hand-writing `'grid' | 'single'` beside it — a hand-written union that lists a name the array
-   omits compiles cleanly and fails only at runtime, on whichever page asks for it.
-4. **`variants.ts`** — the name→component map, and the only place these components are statically
-   imported:
-   ```ts
-   import type { ComponentType } from 'react'
-   import type { BlockProps } from '@/lib/types'
-   import type { TestimonialsCopy } from './copy.mn'
-   import type { TestimonialsVariant } from './manifest'
-   import { TestimonialsGrid } from './testimonials-grid'
-   import { TestimonialsSingle } from './testimonials-single'
-
-   export const variants = {
-     grid: TestimonialsGrid,
-     single: TestimonialsSingle,
-   } satisfies Record<TestimonialsVariant, ComponentType<BlockProps<TestimonialsCopy>>>
-   ```
-   `satisfies Record<TestimonialsVariant, …>` is what makes a declared-but-unimplemented variant a
-   compile error here instead of an empty preview on `/docs`. Import the manifest with
-   `import type`, so the dependency stays compile-time only and `manifest.ts` never joins this
-   chunk's runtime graph. The direction is always `variants.ts → manifest.ts`, never the reverse.
-5. **`src/blocks/registry.ts`** — add the manifest to **both** the `manifests` and the `registry`
-   object literals. `BlockId` is derived from `manifests`' keys, and `registry` is annotated
-   `Record<BlockId, …>`, so adding it to one and not the other is a compile error.
-6. **`src/blocks/block-modules.ts`** — add a dynamic-import entry:
-   ```ts
-   testimonials: () =>
-     import('./testimonials/variants').then((m) => registerVariants('testimonials', m.variants)),
-   ```
-   This is the client's split point — one Vite chunk per entry. Point it at `variants.ts`, not
-   `manifest.ts`; the manifest imports no components, so importing it here would split nothing.
-7. **`src/blocks/variants.all.ts`** — import the variants and add them to the `all` map. This is
-   the server's synchronous path: the prerenderer renders every page in one process and cannot
-   await a per-page dynamic import before its first render.
-8. **`pages.config.ts`** — add the block's id (or `{ id, variant, surface }`) to a page's `blocks`
-   array. A block that is registered but on no page still renders on `/docs`.
-
-**What actually catches a half-finished block.** Step 5 is the pivot: once the manifest is in
-`registry.ts`, `BlockId` gains the new key and `tsc --noEmit` reports steps 6 and 7 as missing
-properties, by name. Concretely:
-
-| Missing | Caught by |
-|---|---|
-| Folder exists, not in `registry.ts` | `scripts/verify-build.mjs` (folder↔registry parity) |
-| In `registry.ts`'s `manifests` but not `registry` | `tsc` — `registry` is `Record<BlockId, …>` |
-| No `block-modules.ts` entry | `tsc` — `blockModules` is `Record<BlockId, …>` |
-| No `variants.all.ts` entry | `tsc` — `all` is `Record<BlockId, …>` |
-| Variant in `variantNames` with no component | `tsc` — `satisfies Record<XVariant, …>` in `variants.ts` |
-| Component in `variants.ts` that `variantNames` omits | `tsc` — `satisfies` rejects excess keys |
-| Putting components **in** the manifest object (`variants: { … }`, the pre-split shape) | `tsc` — `satisfies BlockManifest<…>` rejects the unknown property |
-| A `manifest.ts` whose components are reachable from an *eagerly imported* export | **Nothing.** See below. |
-
-Run `pnpm verify` when you are done; the folder↔registry half is a build-time check, the rest are
-type errors you will see in your editor first.
-
-**The one unguarded edit.** The last row is the only way to undo the split by accident, and it is
-worth knowing precisely, because the obvious mistakes are all caught and the remaining one is not.
-A bare re-export in a `manifest.ts` (`export { X } from './x'`) is harmless — Rollup tree-shakes
-it, measured at **zero** change to the main chunk. What is not harmless is a manifest export that
-*uses* a component value and is itself reachable from `registry.ts`'s eager import chain. That
-compiles cleanly, passes `pnpm conventions`, builds, and passes `verify-build.mjs`.
-
-What moves is **that block's own components and the chunks they share with others** — not every
-block's. Measured, making `hero`'s manifest reach `HeroCentered`:
-
-| | main chunk | `motion` chunk | `contact` chunk |
-|---|---|---|---|
-| split intact | 334,593 B | 123,303 B | 96,395 B |
-| `hero` manifest reaches a component | **459,705 B** | **absorbed into main** | 96,323 B (unaffected) |
-
-So one careless manifest costs the main chunk that block's components plus their shared
-dependencies — here 125 KB, most of it the `motion` library that hero, features and cta all use.
-Every other block keeps its own chunk, which is exactly why the gate does not notice: the
-`bundle-split` assertion in `verify-build.mjs` watches for `react-hook-form` reaching the entry
-chunk, and `contact` is untouched by a `hero` mistake. **`pnpm verify`, `pnpm conventions` and
-`tsc` all pass on the 459 KB build.** Keep `manifest.ts` free of component imports; that is the
-rule, and it is the rule *because* nothing below it will tell you.
-
-The per-block `variants-*.js` chunks all stay in the build, including the affected block's — they
-are just no longer where its weight is. Nothing looks obviously wrong.
-
-## Adding a variant to an existing block
-
-Two edits inside the block's folder, plus the page reference:
-
-1. Add a component with the `BlockProps<Copy>` signature, e.g. `src/blocks/hero/hero-poster.tsx`.
-2. Add its **name** to `variantNames` in that block's `manifest.ts`
-   (`const variantNames = ['centered', 'split', 'poster'] as const`).
-3. Map that name to the component in that block's `variants.ts`
-   (`poster: HeroPoster`).
-
-Then reference it from `pages.config.ts` as `{ id: 'hero', variant: 'poster' }`.
-
-No change to `registry.ts`, `block-modules.ts` or `variants.all.ts` — those are per-block, and the
-new variant travels inside the block's existing chunk. Steps 2 and 3 are both required and you
-cannot forget the second one: `HeroVariant` is derived from `variantNames`, and `variants.ts`
-constrains its map with `satisfies Record<HeroVariant, …>`, so a name added to the array with no
-component is a compile error at `variants.ts`. (The reverse — a component in the map that
-`variantNames` never declares — is also an error, since `satisfies` rejects excess keys.)
+| `src/blocks/` | One folder per block: its copy, its manifest, its components |
+| `src/components/` | Shared UI — layout, header, footer, theme toggle |
+| `src/lib/` | Shared logic — SEO, page resolution, types. No JSX, ever |
+| `src/routes/` | Four route files. You will not need a fifth — see [Adding a page](#adding-a-page) |
+| `src/styles/` | `theme.css` (the system) and `presets/` (the skin) |
+| `src/app/` | Framework entry points. Leave these alone |
+| `src/integrations/` | Motion, theme and submit implementations, chosen at build time |
 
 ## Adding a page
 
@@ -327,16 +73,8 @@ landing-kit add-page about --blocks=features,cta \
   --title-mn="Бидний тухай" --title-en="About us"
 ```
 
-A page is **one entry in `src/config/pages.config.ts`** — no new file under `src/routes/`. That is
-what `src/routes/$.tsx` is: a catch-all that resolves any path through `pages.config.ts`. The
-route files stay at four however many pages the site grows to.
-
-Both titles are required, and they must differ. `verify-build.mjs` fails a build where two locales
-share a `<title>` or a meta description, so a page generated with the same wording in both
-languages would hand you a project that cannot pass its own gate.
-
-Optional: `--path=/company` (defaults to `/<id>`), `--desc-mn=…`, `--desc-en=…` (default to the
-titles — worth replacing with real sentences before launch).
+A page is **one entry in `src/config/pages.config.ts`**. You never add a file to `src/routes/` —
+`$.tsx` is a catch-all that resolves any path against the page list.
 
 By hand, the same thing:
 
@@ -352,302 +90,258 @@ By hand, the same thing:
 },
 ```
 
-Every locale's URL, the sitemap entry and the prerendered file come from that one entry.
+That one entry produces both locales' URLs, the sitemap entries and the prerendered files.
 
-To put the page in the header menu, add `{ target: 'about' }` to `nav` in `site.config.ts`. The
-label is that page's `seo.title` for the language being rendered.
+Both titles are required and they must differ — the build rejects two locales sharing a `<title>`
+as duplicate content.
 
-**`nav` targets and copy `target`s accept a page id or a block id, and page ids win.** A block id
-resolves to an anchor on the page holding it — `#hero` on the current page, `/#hero` from another.
-If the same block sits on two pages, the link goes to whichever page is listed first in
-`pages.config.ts`. Linking by page id avoids the ambiguity. A target that matches neither is a
-build error, not a dead link.
+To put the page in the menu, add `{ target: 'about' }` to `nav` in `site.config.ts`. The label is
+that page's `seo.title` for the language being rendered.
 
-## Reskinning: the token surface
+> `nav` targets and link `target`s take a page id or a block id. A block id becomes an anchor on
+> whichever page holds it. A target matching neither fails the build, so you never ship a dead link.
 
-All visual identity lives in CSS custom properties, in two layers:
+## Adding a block
 
-- `src/styles/theme.css` — the **system**: the fixed type scale (`--text-display`, `--text-h2`,
-  ...), spacing rhythm, and the `@theme inline` block that maps token names to Tailwind utilities
-  (`--color-primary`, `--font-display`, `--radius-base`, `--shadow-card`, ...). Don't edit this to
-  reskin.
-- `src/styles/presets/*.css` — the **skin**: font pairing (`--face-display`, `--face-body`),
-  shape (`--radius`, `--section-y`, `--gutter`, `--width-page`, `--width-narrow`), elevation
-  (`--elevation-card`), and the actual light/dark palette values (`--c-background`,
-  `--c-primary`, ...) as OKLCH colors. This is what a new preset replaces wholesale — swap the
-  single `@import` at the top of `theme.css` to point at a different file in `presets/` to reskin
-  without touching any component or block.
+```bash
+landing-kit add-block testimonials                       # one variant, named `simple`
+landing-kit add-block pricing --variants=simple,detailed # two
+```
 
-Two presets exist today, and the swap between them is a one-line change:
+That writes the folder, makes all three registrations, and formats the result — so `pnpm verify`
+passes with nothing else to run. Then:
+
+1. Write the copy in `src/blocks/testimonials/copy.mn.ts` and `copy.en.ts`.
+2. Add `'testimonials'` to a page's `blocks` in `pages.config.ts`.
+3. Run `pnpm verify`.
+
+By hand, a block is four files in its own folder plus three registrations:
+
+| File | Holds |
+|---|---|
+| `copy.mn.ts` | The Mongolian copy, and the `Copy` type both locales share |
+| `copy.en.ts` | The English copy, typed against that same type |
+| `manifest.ts` | Variant **names**, default variant, copy. **No component imports** |
+| `variants.ts` | The name → component map |
+
+and then add it to `registry.ts`, `block-modules.ts` and `variants.all.ts`.
+
+Get the registrations wrong and TypeScript tells you by name — all three are typed
+`Record<BlockId, …>`, and `BlockId` comes from the registry. **One mistake is not caught:** a
+component imported into `manifest.ts`. The manifest is loaded eagerly for SEO, so a component
+reached from it lands in the main bundle. Measured cost: 334 KB → 459 KB, with every check still
+green. Keep `manifest.ts` free of components.
+
+## Adding a variant
+
+A variant is a different layout for the same block and copy. Three steps, all inside the block's
+folder:
+
+1. Add the component, e.g. `src/blocks/hero/hero-poster.tsx`.
+2. Add its name to `variantNames` in `manifest.ts` — `['centered', 'split', 'poster'] as const`.
+3. Map the name to the component in `variants.ts` — `poster: HeroPoster`.
+
+Then use it: `{ id: 'hero', variant: 'poster' }` in `pages.config.ts`.
+
+You cannot forget step 3 — a name with no component is a compile error, and so is a component the
+names never declare.
+
+## Changing the design
+
+All colour, type and spacing lives in CSS variables, in two layers:
+
+- **`src/styles/theme.css`** — the system: type scale, spacing rhythm, and the mapping from
+  variables to Tailwind utilities. Don't edit this to reskin.
+- **`src/styles/presets/*.css`** — the skin: fonts, radius, shadows, and the light/dark palette.
+  This is what you replace.
+
+Swapping the whole look is one line:
 
 ```css
 /* src/styles/theme.css */
 @import './presets/warm.css'; /* was './presets/editorial.css' */
 ```
 
-- **`editorial.css`** (default) — near-hueless neutrals with one blue accent, a small `0.5rem`
-  radius, no visible card shadow, and the most generous vertical rhythm (`--section-y` up to
-  `9.5rem`). Reads as a quiet, editorial/magazine layout. Its `--elevation-card` is
-  `0 0 #0000` — a legal, fully transparent shadow — and **not** `none`, which looks tidier and is
-  wrong: the generated `.shadow-card` utility substitutes the token into a comma-separated
-  `box-shadow` list, where `none` is not a legal item and invalidates the whole declaration. It
-  happens to render correctly anyway, by falling back to the initial value, which is why the bug
-  is invisible. The comment at `src/styles/presets/editorial.css:12-21` says the same thing at the
-  point of temptation; don't "tidy" either one.
-- **`warm.css`** — an amber/terracotta palette with chroma raised on purpose, a `1rem` radius
-  (visibly rounder corners), a real soft `--elevation-card` shadow, and a tighter `--section-y`
-  (up to `6.5rem`). Reads as a warmer, denser, more "product" layout. Its light-mode
-  `--c-primary`/`--c-ring` sit at `55%` lightness rather than the rounder `60%` a first pass
-  used — at `60%` both `--c-primary-foreground` on `--c-primary` (the CTA buttons) and
-  `--c-primary` as text on `--c-background` (the hero eyebrow label) measured **~4.1:1**, under
-  the 4.5:1 AA floor for normal-weight text; `55%` clears both at **~5.1:1** with the same hue and
-  chroma. Measured Lighthouse accessibility is **1.00** on both locales, both presets, mobile and
-  desktop.
+Two presets ship. `editorial.css` is quiet and neutral with a small radius and no card shadow.
+`warm.css` is amber and denser, with rounder corners and a real shadow. They differ in colour,
+radius, shadow and density on purpose, so a swap reads as a different design.
 
-Radius, shadow, colour temperature and density all differ between the two — deliberately, so a
-preset swap reads as a different design, not a recolour. A third preset slot is open: add a file
-under `presets/` with the same variable set and repeat the one-line `@import` swap.
+To add a third, copy a preset file and declare **the same variables**. That is checked, not
+advisory: `pnpm conventions` fails if a preset misses a variable the theme maps. Without the check
+the failure is invisible — a missing `--c-ring` just means no focus outline, and the build stays
+green.
 
-"The same variable set" is enforced, not advisory. `pnpm conventions` reads every `var(--…)`
-referenced inside `theme.css`'s `@theme inline` block and asserts that **every** file in
-`presets/` declares all of them in `:root` — including presets that are not the one currently
-imported. It checks the reverse direction too: a token a preset declares that `@theme inline`
-never maps, and that nothing else in the preset references, is reported as dead weight (a token
-built on internally, like a shared `--brand-hue`, is exempt because the preset itself uses it).
-This exists because the failure is otherwise invisible: `--color-ring: var(--c-ring)` with no
-`--c-ring` is invalid at computed-value time, so the focus outline silently does not render, and
-both `pnpm verify` and Lighthouse stay green — the accessibility audit measures contrast, not
-whether a focus ring resolved.
+The fastest way to see a preset is [`/docs`](#docs-the-live-reference), which renders every token
+live.
 
-The fastest way to see either preset is **`/docs`** (see below) — its Tokens section renders
-every colour and type token live from whichever preset is imported, and its Blocks section
-previews every block and variant at true page geometry (each preview supplies its own `Section`
-and `Container`, so it shows exactly what a real page renders).
+## The contact form
 
-## `/docs`: the living developer reference
+`src/blocks/contact/contact-form.tsx`, built on `react-hook-form` and `zod`. The schema lives in
+`src/integrations/submit-schema.ts`.
 
-`/docs` is a generated, English-only reference page — every design token, every block and its
-variants (rendered from the live registry, not a fixture), and the resolved
-`pages.config.ts`/`site.config.ts` for whichever config just built. It replaced an earlier
-`/debug` route and cannot drift from the code, because it reads the code directly rather than
-restating it.
+It has two spam defences you should know about before you test it:
 
-It is not part of the site a visitor sees, kept out by three separate mechanisms:
+- A **honeypot** field that must stay empty.
+- A **2 second minimum** on screen. Submit faster and it waits, it does not reject you.
 
-1. **Not prerendered.** `/docs` is absent from `pages.config.ts`, so `enumerateUrls` never emits
-   it and the `tanstackStart` plugin never builds it — it simply 404s on a static deploy.
-2. **Absent from the sitemap.** `sitemap.xml` is built from the same `enumerateUrls` call, so the
-   same absence keeps it out of that too.
-3. **`noindex, nofollow`**, for whichever deploy renders it live (an SSR deploy, since a static
-   one already 404s per (1)). This is the *only* mechanism on an SSR deploy, which is exactly why
-   `robots.txt` deliberately does **not** `Disallow: /docs`: a `Disallow` stops a crawler from
-   ever fetching the page, so it would never read the `noindex` meta either, and a URL linked from
-   elsewhere would still get indexed URL-only — precisely what the `noindex` exists to prevent.
-   `/docs` has to stay fetchable for its own exclusion to work. `scripts/verify-build.mjs` fails
-   the build if a `/docs` `Disallow` or sitemap entry reappears; `scripts/check-conventions.mjs`
-   fails if the `noindex` meta is removed.
+## Fonts and Mongolian Cyrillic
+
+Both fonts **must** cover Cyrillic Extended. Mongolian uses `ө` and `ү`, which sit outside the
+basic Cyrillic block.
+
+If you swap a preset's fonts, check the replacement ships both a `cyrillic` **and** a
+`cyrillic-ext` subset. A font with only `cyrillic` renders those two letters in a mismatched
+fallback font — easy to miss if you only proofread the English.
+
+This also means Mongolian pages load a little more font data than English ones. That is real and
+unavoidable, not a bug.
+
+## `/docs`: the live reference
+
+`/docs` is a generated, English-only page showing every design token, every block and variant, and
+the resolved config. It reads the real code, so it cannot go out of date.
+
+Visitors never see it: it is not prerendered, not in the sitemap, and carries `noindex`.
 
 ## Removing the /docs page
 
-`/docs` costs visitors nothing — it is `noindex`, absent from the sitemap, and never
-prerendered. Delete it when you no longer need the reference:
+It costs visitors nothing, but delete it whenever you like:
 
 ```bash
 rm src/routes/docs.tsx
 rm -rf src/components/docs
 ```
 
-Nothing else. `pnpm verify` passes with the route absent; it only insists on the
-`noindex` meta when the route is there.
+Nothing else. `pnpm verify` passes with the route gone.
 
-## The Cyrillic font requirement
+## Rules the build enforces
 
-Both font families (`@fontsource-variable/inter`, `@fontsource-variable/manrope`) **must** have
-Cyrillic coverage, because Mongolian Cyrillic uses letters (`ө`, `ү`) outside the basic Cyrillic
-Unicode block, in the "Cyrillic Extended" range. If you swap a preset's `--face-display`/
-`--face-body`, verify the replacement font ships a `cyrillic` *and* `cyrillic-ext` subset — a
-font that only covers `cyrillic` renders Mongolian text with `ө`/`ү` falling back to a
-mismatched system font, which is easy to miss if you only proofread the English copy.
+These are checked automatically, so you will hear about them early. Each exists because breaking
+it fails silently.
 
-This also means a Mongolian page genuinely ships more font-subset weight than the English one
-(extra network requests for `cyrillic`/`cyrillic-ext` files on top of `latin`) — real, unavoidable
-bytes, not a bug. `src/lib/seo/build-head.ts` preloads the current locale's critical
-(above-the-fold) font subset for this reason; see [Lighthouse budget](#lighthouse-budget) for why.
+- **Spacing and width come from `<Section>` and `<Container>`.** Don't write raw padding, width,
+  `min-h-screen`, a bare `<section>`, or an inline `style` in a block.
+- **Never write a literal `<h1>` or `<h2>` in a block.** A block cannot know if it opens the page.
+  Use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render `<H>`.
+- **Never import `Link` from `@tanstack/react-router`.** Every link is a plain `<a href>`. Blocks
+  are loaded once for the first URL, so a client-side jump would land on a page whose blocks were
+  never fetched. Full page loads are cheap here — every page is static HTML.
+- **Both locales, always.** There is no fallback language. Declare the copy type in `copy.mn.ts`
+  and import it into `copy.en.ts`, so a missing translation is a compile error.
+- **No components in `manifest.ts`.** See [Adding a block](#adding-a-block).
+
+## Gotchas
+
+- **The contact form's 2 second guard also applies to you** while testing by hand. Working as
+  intended.
+- **`<input type="email">` blocks submission before any handler runs**, so a malformed email never
+  reaches the schema. Don't hunt for a schema bug that isn't there.
+- **If the contact form "silently fails", check CORS first.** In endpoint mode the browser POSTs
+  cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight — and it
+  surfaces as the same generic error a real code bug would.
+- **React warns `Invalid DOM property 'hreflang'` in dev.** Expected. The lowercase spelling is
+  what SEO tools read from the built HTML. Renaming it to `hrefLang` would ship the wrong casing.
+- **A light-only or dark-only build ships no theme-switching code at all** — none of the
+  JavaScript, not just a hidden toggle.
+- **A page flashing to "Not Found" right after it loads** usually means the host serves
+  prerendered files by their literal `index.html` filename. `normalizePath` in
+  `src/lib/pages/resolve-request.ts` handles this; check there first.
+
+## Scripts
+
+| Script | What it does |
+|---|---|
+| `pnpm dev` | Dev server |
+| `pnpm build` | Production build, including prerendering |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` | `biome ci .` |
+| `pnpm fix` | Auto-fixes what `lint` reports |
+| `pnpm conventions` | The rules above, plus preset and docs checks |
+| `pnpm verify` | Everything, in order. **Run this before you deploy.** |
+
+`pnpm verify` ends with `verify-build.mjs`, which reads the pages the build actually produced and
+checks each one: exactly one `<h1>`, no hidden content in the HTML, a complete `hreflang` set,
+valid JSON-LD, and a sitemap that agrees with the `<head>`.
+
+## Scaffolding a new site
+
+You do not copy this repository by hand. The CLI writes a fresh project:
+
+```bash
+pnpm dlx @dewsoft/landing-kit@latest frontend --yes
+```
+
+It asks four questions — pages, theme, preset, blocks — and every answer has a flag, so
+`--yes` takes the defaults. Run `landing-kit --help` for the full list.
+
+Blocks are not freely combinable: some blocks' copy links to others, and a link to a block you
+left out would render a blank page. The CLI refuses those combinations at the question rather than
+letting the build fail later.
+
+The generated project has no dependency on this kit. It is a plain TanStack Start app.
 
 ## The three env flags
 
-Set as environment variables at build/dev time; each swaps a `@/motion`, `@/theme`, or `@/submit`
-import alias in `vite.config.ts` — never branched on inside a component.
+Set at build or dev time. Each swaps an import alias in `vite.config.ts` — never an `if` inside a
+component.
 
 | Flag | Values | Effect |
 |---|---|---|
-| `KIT_ANIMATION` | `on` (default), `off` | `on` aliases `@/motion` to `src/motion.animated.tsx` (real entrance/scroll animations via `motion/react`). `off` aliases it to `src/motion.noop.tsx` — plain passthrough components, and the `motion` library is not in the bundle at all (verified: 0 matches for `motion-dom`/`framer` in `dist/client/assets/` when off). |
-| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` aliases `@/submit` to `src/submit.endpoint.ts`, which POSTs to `VITE_CONTACT_ENDPOINT` (a client-side fetch to an external URL — set that env var). `server` aliases it to `src/submit.rpc.ts`, a TanStack Start server function (`createServerFn`) that runs on your own server. Both validate with the same `submissionSchema`, so neither mode is the "weaker" one. |
-| `KIT_CONFIG` | `default` (default), `onepage` | Selects which directory `@/config` resolves to: `default` → `src/config/`, `onepage` → `configs/smoke-onepage/`. Also selects which `pages.config`/`site.config` `vite.config.ts` itself reads to drive prerendering and SEO emission — the alias alone isn't enough, since the build driver needs the same page list to know what to prerender (see [Swapping the whole config](#swapping-the-whole-config-configs)). |
+| `KIT_ANIMATION` | `on` (default), `off` | `off` swaps `@/motion` to passthrough components, and the `motion` library leaves the bundle entirely. |
+| `KIT_SUBMIT` | `endpoint` (default), `server` | `endpoint` POSTs to `VITE_CONTACT_ENDPOINT`. `server` uses a TanStack Start server function. Both validate with the same schema. |
+| `KIT_CONFIG` | `default` (default), `onepage` | Selects which config directory the app and the build driver both read. |
 
-`site.theme.mode` (`'light' \| 'dark' \| 'both'`, set in `site.config.ts`, not an env flag) works
-the same way: `'both'` aliases `@/theme` to `src/theme.both.tsx` (toggle + no-flash script
-included), anything else aliases it to `src/theme.single.tsx` — a single-mode build ships **no**
-theme-switching code at all, not merely a hidden toggle.
+`site.theme.mode` in `site.config.ts` works the same way: `'both'` ships the toggle and the
+no-flash script, anything else ships no theme-switching code at all.
 
 ## Swapping the whole config: `configs/`
 
-`configs/smoke-onepage/` is a complete second config — `pages.config.ts` (one page holding every
-existing block) and `site.config.ts` (light-only) — used only to prove the config-swapping
-premise end to end. It contains **no components and no overrides**, only config, and requires
-zero edits under `src/blocks/`, `src/components/`, or `src/lib/` to work.
+`configs/smoke-onepage/` is a complete second config — one page holding every block, light only.
+It exists to prove the premise end to end: it contains **no components and no overrides**, and
+needs zero edits under `src/`.
 
 ```bash
-pnpm smoke:onepage   # KIT_CONFIG=onepage KIT_ANIMATION=off KIT_SUBMIT=endpoint
+node tools/kit.mjs smoke:onepage
 ```
 
-produces a working single-page, light-only, unanimated site: `hero` (`split` variant), `features`,
-`cta` and `contact`, all on one page, where the hero's primary CTA resolves to `#contact` (an
-in-page anchor) instead of `/contact` (a page link) — same components, same copy, different
-config.
+produces a working single-page, light-only, unanimated site — where the hero's CTA resolves to
+`#contact` (an anchor) instead of `/contact` (a page), from the same components and the same copy.
 
-If you add a real second scaffolded config, remember: **`vite.config.ts` itself must branch on
-`KIT_CONFIG` too**, not just the `@/config` alias. The alias only affects app code that Vite
-bundles; `vite.config.ts`'s own `pages`/`site` (used to build the TanStack Start `prerender.pages`
-list and to drive `emitSeoFiles`) are read directly by the config file at build-config-eval time,
-before any aliasing applies.
-
-## The contact form
-
-`src/blocks/contact/contact-form.tsx` uses `react-hook-form` + `zod` (`submissionSchema` in
-`src/submit-schema.ts`), shared by both `@/submit` variants.
-
-## Gotchas that cost real debugging time
-
-- **`VITE_CONTACT_ENDPOINT` must send CORS headers.** In `endpoint` mode the browser POSTs
-  cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight. The form
-  surfaces this as the same generic error a code bug would produce — it is not one. If a client's
-  contact form "silently fails," check this first.
-- **The contact form's 2-second timing guard rejects fast submissions** — including your own
-  while testing it manually. That's the spam check working as intended, not a bug.
-- **`<input type="email">` triggers native browser validation** that blocks submission before any
-  handler runs, so a malformed email never reaches the Zod schema — don't go looking for a schema
-  bug that isn't there.
-- **`submit.rpc.ts` is deliberately not named `submit.server.ts`.** TanStack Start's client-import
-  protection refuses to bundle any `**/*.server.*` file into the client by filename, regardless of
-  content. This file is the sanctioned client-safe `createServerFn` stub the client is meant to
-  import, so renaming keeps the protection intact for every *other* file instead of carving out an
-  exception that the next person copying this pattern could get wrong.
-- **React logs `Invalid DOM property 'hreflang'. Did you mean 'hrefLang'?` in `pnpm dev`.**
-  Expected and deliberate — the lowercase form is what SEO tooling reads from the built HTML, and
-  `scripts/verify-build.mjs` asserts on the lowercase attribute. Don't "fix" it by renaming to
-  `hrefLang`; that would just ship the wrong casing.
-- **A light-only or dark-only build ships no theme-switching code at all** — not a hidden toggle,
-  none of the JS. Same for `KIT_ANIMATION=off` and the `motion` library.
-- **Prerendered files are `<path>/index.html`, and some static hosts serve them by literal
-  filename** rather than rewriting `/` to `index.html` while keeping the browser's address bar at
-  `/` (Lighthouse CI's own static server, used by `pnpm lighthouse`, is exactly this). Without
-  care, that leaves `window.location.pathname` as `/index.html` on hydration, which the router
-  won't match to any page — `src/lib/pages/resolve-request.ts`'s `normalizePath` collapses a
-  trailing `/index.html` to `/` for exactly this reason. If you see a page flash to a "Not Found"
-  state right after hydrating, check this first.
+If you add another config, remember that **`vite.config.ts` must branch on `KIT_CONFIG` too**. The
+alias only affects app code Vite bundles; the config file reads its own `pages`/`site` directly to
+drive prerendering.
 
 ## Lighthouse budget
 
-`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) each assert on **all four**
-prerendered pages — `/index.html`, `/en/index.html`, `/contact/index.html` and
-`/en/contact/index.html` — against the **default** config's build (`KIT_ANIMATION=on`,
-`KIT_SUBMIT=endpoint`, `KIT_CONFIG=default`):
+`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) assert on all four
+prerendered pages of the default build.
 
-- `categories:seo` ≥ 1
-- `categories:accessibility` ≥ 0.95
-- `categories:performance` ≥ 0.85 (mobile) / ≥ 0.95 (desktop)
-- `cumulative-layout-shift` ≤ 0.01
+```bash
+node tools/kit.mjs lighthouse
+node tools/kit.mjs lighthouse:desktop
+```
 
-Every one of these is a hard `error`, on **both** Lighthouse presets — mobile and desktop — and
-on both token presets (`editorial`, `warm`). Nothing here is a `warn`.
-
-Including `/contact` matters because it is the page carrying the 96 KB form chunk and the kit's
-only interactive surface: until it was added, both its performance and its **form accessibility**
-were unmeasured by anything.
-
-`pnpm lighthouse` runs Lighthouse CI's default **mobile** preset (throttled CPU + network) — the
-harder, more representative run for these sites. `pnpm lighthouse:desktop` uses
-`lighthouserc.desktop.json`. Each runs 5 times per URL so the reported score is a stable median.
-Each script clears `.lighthouseci/` before running, so `pnpm lighthouse && pnpm lighthouse:desktop`
-is safe to chain — without that, the second run's assert step would pick up the first preset's
-leftover reports alongside its own and could fail on a URL that was never part of its own run.
-
-**Each script runs `pnpm build` first**, and that is load-bearing rather than tidy. `lhci` reads
-whatever is sitting in `dist/client`; the smoke scripts overwrite it with a *different* config's
-output. Run in the documented gate order (`… && pnpm smoke:onepage && pnpm lighthouse`), the
-Lighthouse step would otherwise measure the one-page, light-only, unanimated smoke build while
-reporting it against the default config's budget — and with `/contact` in the URL list it would
-simply fail, since that build has no contact page. The rebuild makes each script measure the build
-it says it measures.
-
-### Current status
-
-Measured on the default config's build with the **`editorial`** preset — the committed default,
-and the only preset any committed configuration has ever built. Task 6 measured `warm` through a
-temporary local `@import` swap and found the numbers unchanged within run-to-run noise, which is
-expected (a preset swap moves CSS variables and fonts, not the JavaScript the performance score is
-dominated by) but is not reproducible from anything in the repository. Treat the `warm` figures as
-inferred, not measured.
-
-Median of 5 runs per URL, all four pages:
-
-| Page | Mobile perf | Desktop perf | Accessibility | SEO | CLS |
-|---|---|---|---|---|---|
-| `/` (mn) | **0.90** | 1.00 | 1.00 | 1.00 | 0.000 |
-| `/en` | 0.94 | 1.00 | 1.00 | 1.00 | 0.000 |
-| `/contact` (mn) | 0.91 | 1.00 | 1.00 | 1.00 | 0.000 |
-| `/en/contact` | 0.95 | 1.00 | 1.00 | 1.00 | 0.000 |
-
-All comfortably clear their floor (mobile ≥ 0.85, desktop ≥ 0.95) and every assertion is a hard
-failure — there is no relaxed severity left on either preset. Accessibility is 1.00 on the contact
-pages too, which is the first machine check the form has ever had. Mongolian mobile is the harder case
-for one inherent, unavoidable reason: a bilingual page carries two font subsets. The chrome
-contains Latin text — the brand name, the email address, the phone number — while the content is
-Cyrillic, so `unicode-range` correctly fetches both subsets, roughly twice the English page's font
-payload. The Mongolian page will always be the harder one.
-
-The other original cause — blocks eagerly bundled into one 559 KB chunk that every page loaded,
-including the contact form's `react-hook-form` and `zod` on pages with no form — is fixed: block
-components are now resolved via dynamic `import()` and awaited *before* `hydrateRoot`, so the main
-chunk dropped to 333 KB raw (107 KB gzip) and each page's `<head>` carries a `modulepreload` for
-exactly the chunks it needs. `React.lazy` was tried first and reverted: it halved the bundle but
-regressed CLS to 0.169. CLS staying at 0 through this change was the real constraint, not raw
-bundle size.
+Both are maintainer commands and neither ships to a generated project.
 
 ## Publishing
 
+This package is published to npm as `@dewsoft/landing-kit`.
+
 ```bash
-# bump "version" in package.json
+npm version patch     # or minor / major
 npm publish
 ```
 
-`npm publish` packs the working tree, not the last commit. During Plan 2 a verification run
-rewrote `package.json` and `pnpm-lock.yaml` on its own, so publishing an unchecked tree is a
-live risk. **Rule: `git status` clean and `pnpm verify` green before publishing.**
-
-Every app package lives in `devDependencies`, which looks wrong and is not: this package is a
-generator that ships no runtime. Anything in `dependencies` would be downloaded on every
-`pnpm dlx`. The generated project gets the ordinary split, written fresh by the CLI.
+`files` in `package.json` is an allowlist — anything not named there never reaches the tarball,
+which is how `tools/`, `configs/` and the Lighthouse configs stay out of published installs.
 
 ### Maintainer commands
 
-Before publishing, run the checks that are not part of `pnpm verify`:
+`tools/kit.mjs` holds the commands that only make sense in this repository:
 
 ```bash
-node tools/kit.mjs smoke:full        # default config, every boundary "on"  → 4 pages
-node tools/kit.mjs smoke:onepage     # one-page config, every boundary flipped → 2 pages
-node tools/kit.mjs lighthouse        # mobile budget, hard fail under 0.85
-node tools/kit.mjs lighthouse:desktop # desktop budget, hard fail under 0.95
+node tools/kit.mjs smoke:full         # default config, animated, server submit
+node tools/kit.mjs smoke:onepage      # one-page config, no animation, endpoint submit
+node tools/kit.mjs lighthouse         # mobile budget
+node tools/kit.mjs lighthouse:desktop # desktop budget
 ```
-
-These are **not** `package.json` scripts, deliberately. `scripts` ships inside the tarball, so as
-entries there they gave every consumer four commands referencing `configs/` and `lighthouserc*` —
-neither of which is in `files`. Nothing ran them and nothing could. `tools/` is excluded from
-`files`, so moving them here removes them from the published package without a publish-time
-rewrite of `package.json`, which would edit the working tree during `npm publish` — the exact
-risk this section opens with.
-
-Run the two smoke builds before `lighthouse`, not after: `lhci` measures whatever is already in
-`dist/client`, and each smoke build leaves a *different* config's output there. `lighthouse`
-rebuilds first for that reason.

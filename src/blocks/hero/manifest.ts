@@ -2,22 +2,21 @@ import type { BlockManifest } from '@/lib/types'
 import { en } from './copy.en'
 import { type HeroCopy, mn } from './copy.mn'
 
-// No component import here — deliberately. This manifest is imported eagerly by `registry.ts`
-// (the SEO layer needs `copy`/`nav`/`schema` synchronously), so a component reachable from here
-// would join that eager chain and land in the main chunk. Measured cost of getting this wrong:
-// main chunk 334,593 -> 459,705 B, because hero's components drag in the shared `motion` chunk.
-// Nothing catches it automatically: verify-build.mjs's `bundle-split` assertion only detects this
-// for `contact`'s manifest, because it works by watching for react-hook-form markers in the entry.
+// Never import a component here. `registry.ts` imports every manifest eagerly, because the SEO
+// layer needs `copy`, `nav` and `schema` before anything renders. Any component reachable from
+// this file joins that eager chain and lands in the main chunk — measured at 334 KB -> 459 KB
+// when hero's components pulled in the shared `motion` chunk. Only `contact`'s manifest is
+// checked for this automatically, so on every other block the rule is yours to keep.
 //
-// `variantNames` below is the source of truth; the variant union is derived from it, not
-// hand-written alongside it — a hand-written union can list a variant this array omits and
-// compile anyway (arrays are covariant), failing only at runtime.
+// `variantNames` below is the source of truth. Derive the variant union from it; never write
+// that union by hand, because a hand-written one can name a variant this array leaves out and
+// still compile, then fail at runtime.
 const variantNames = ['centered', 'split'] as const
 
 /**
- * Exported so `./variants.ts` can constrain its component map to exactly these names — a variant
- * declared here but missing from that map is then a compile error, not a blank space on `/docs`.
- * `variants.ts` imports it with `import type`, so this stays out of the runtime graph.
+ * Exported so `./variants.ts` can pin its component map to exactly these names. A variant named
+ * here but missing there is then a compile error, not a blank space on `/docs`. `variants.ts`
+ * imports it with `import type`, so this never becomes a runtime dependency.
  */
 export type HeroVariant = (typeof variantNames)[number]
 
@@ -27,13 +26,14 @@ export const hero = {
   defaultVariant: 'centered',
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },
-  // No `schema`: `buildJsonLd` (src/lib/seo/json-ld.ts) already emits exactly one `WebPage`
-  // node per page, so a block re-describing the page would be a second, conflicting one.
-  // `schema` is for markup a block's own content earns (`FAQPage`, `Product`, …), never page identity.
-  // `blocks` mirrors the link targets in ./copy.mn.ts and ./copy.en.ts: `primaryCta.target` is
-  // 'contact'. Move this array whenever that copy field's target changes — it is the only written
-  // record that this block stops working if `contact` leaves `pages.config.ts`, and the failure it
-  // describes is a blank page that never names the link (see `requires` in @/lib/types).
-  // (`secondaryCta.target` is 'hero', this block itself, so it is always satisfied and not listed.)
+  // No `schema` here. `buildJsonLd` (src/lib/seo/json-ld.ts) already emits one `WebPage` node
+  // per page, so a block describing the page again would be a second, conflicting answer. Use
+  // `schema` only for markup a block's own content earns, like `FAQPage` or `Product`.
+  //
+  // `blocks` lists the link targets in ./copy.mn.ts and ./copy.en.ts — here, `primaryCta.target`
+  // is 'contact'. Update it whenever that target changes. It is the only written record that
+  // this block breaks if `contact` leaves `pages.config.ts`, and that break is a blank page that
+  // never names the link. See `requires` in @/lib/types. (`secondaryCta.target` is 'hero', this
+  // block itself, so it is always satisfied and not listed.)
   requires: { npm: [], ui: [], blocks: ['contact'] },
 } satisfies BlockManifest<HeroCopy, HeroVariant>

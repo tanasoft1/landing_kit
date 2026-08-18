@@ -7,16 +7,15 @@ export type ResolvedPage<Id extends string = string> = {
 }
 
 /**
- * The single canonical path normalization for the app: drop the query, collapse repeated
- * slashes, drop a trailing slash. Everything downstream must use this result, never a raw
- * pathname — two normalizations agreeing only on clean input is how `//en` becomes a
- * protocol-relative `href="//en"`.
+ * The one place paths get normalized: drop the query, collapse repeated slashes, drop a
+ * trailing slash, turn a trailing `/index.html` into `/`.
  *
- * Also collapses a trailing `/index.html` to `/`: a host serving prerendered files by literal
- * filename (Lighthouse CI's static server does) leaves `window.location.pathname` as
- * `/index.html` on hydration. Without this the client router matches only the `$` splat, and
- * the page silently swaps to "Not Found" right after hydrating — invisible on click-through but
- * it tanks LCP, since Lighthouse measures the post-hydration repaint.
+ * Always use this result, never a raw pathname. Two normalizations that only agree on clean
+ * input are how `//en` becomes a protocol-relative `href="//en"`.
+ *
+ * The `/index.html` rule is for hosts that serve prerendered files by their literal filename.
+ * Without it the router matches only the `$` splat and the page flips to "Not Found" right
+ * after it hydrates.
  */
 export function normalizePath(pathname: string): string {
   const withoutQuery = pathname.split('?')[0] ?? '/'

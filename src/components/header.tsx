@@ -83,10 +83,10 @@ export function Header({
           </summary>
           <nav
             aria-label={navLabel}
-            // `shadow-card`, not a stock Tailwind shadow: it maps to the preset's own
-            // `--elevation-card`, so it moves with a preset swap; a stock shadow is fixed and
-            // wouldn't. (The stock utility's name isn't written here — Tailwind's scanner is
-            // comment-blind, and naming it would keep it in the built CSS.)
+            // `shadow-card`, not a stock Tailwind shadow. It maps to the preset's own
+            // `--elevation-card`, so it changes when the preset does; a stock shadow is fixed.
+            // The stock class name is not written here, because Tailwind's scanner cannot tell
+            // code from comments and would keep that utility in the built CSS.
             className="border-border bg-background rounded-base shadow-card absolute right-0 z-50 mt-2 flex w-56 flex-col border p-3 text-sm"
           >
             {pageLinks}
@@ -103,8 +103,8 @@ export function Header({
 function switchLocale(path: string, from: Locale, to: Locale, site: SiteConfig): string {
   if (from === site.defaultLocale) return localePath(normalizePath(path), to, site)
 
-  // Strip the locale by segment, matching how resolveRequest reads it — not with a
-  // prefix regex, which silently fails to match on any non-canonical path.
+  // Strip the locale segment by segment, the same way resolveRequest reads it. A prefix regex
+  // would quietly fail to match on any path that is not already canonical.
   const segments = normalizePath(path).split('/').filter(Boolean)
   const bare = `/${segments.slice(1).join('/')}`
   return localePath(normalizePath(bare), to, site)

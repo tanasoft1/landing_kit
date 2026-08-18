@@ -2,29 +2,32 @@ import { pages } from '@/config/pages.config'
 import { site } from '@/config/site.config'
 import { enumerateUrls } from '@/lib/pages/enumerate'
 
-// Prose lives in the README, not here — this just names the headings, so nothing drifts.
+// The explanations live in the README. This list only names the headings, so the two cannot
+// drift apart.
 //
-// Plain text, not links: README.md ships in neither `public/` nor `dist/client/`, so
-// `<a href="/README.md#…">` 404s in every real deployment. Copying it into `public/` was
-// considered and rejected — that's a second copy, the thing this list exists to avoid.
+// Plain text, not links. README.md ships in neither `public/` nor `dist/client/`, so
+// `<a href="/README.md#…">` would 404 in every real deployment. Copying it into `public/` would
+// just create the second copy this list exists to avoid.
 const RECIPES = [
+  'Adding a page',
   'Adding a block',
-  'Adding a variant to an existing block',
-  'Reskinning: the token surface',
-  'The Cyrillic font requirement',
+  'Adding a variant',
+  'Changing the design',
+  'The contact form',
+  'Fonts and Mongolian Cyrillic',
+  'Rules the build enforces',
+  'Gotchas',
   'The three env flags',
   'Swapping the whole config: `configs/`',
-  'The contact form',
-  'Gotchas that cost real debugging time',
   'Lighthouse budget',
 ] as const
 
 export function ConfigReference() {
   const urls = enumerateUrls(pages, site)
   return (
-    // `min-w-0` on every row: without it, a grid track sizes to its widest item's min-content —
-    // the long unbroken JSON in `<pre>` below would stretch the column past the viewport, and
-    // `overflow-x-auto` on the `<pre>` never gets a chance to engage.
+    // `min-w-0` on every row. Without it a grid track grows to fit its widest item, so the long
+    // unbroken JSON in the `<pre>` below stretches the column past the viewport and the
+    // `overflow-x-auto` on that `<pre>` never gets a chance to work.
     <div className="grid gap-8">
       <div className="min-w-0">
         <h3 className="text-h3 font-semibold">Pages this config produces</h3>

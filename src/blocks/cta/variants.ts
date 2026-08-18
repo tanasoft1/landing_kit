@@ -5,9 +5,9 @@ import { CtaBanner } from './cta-banner'
 import { CtaSplit } from './cta-split'
 import type { CtaVariant } from './manifest'
 
-// The only static import of these components anywhere — see hero/variants.ts for why, and for
-// why `satisfies Record<CtaVariant, …>` (a variant declared in manifest.ts but missing here is a
-// compile error, not a silently empty preview on `/docs`).
+// The only place these components are imported statically — see hero/variants.ts for why, and
+// for why `satisfies Record<CtaVariant, …>`: a variant declared in manifest.ts but missing here
+// becomes a compile error instead of an empty preview on `/docs`.
 export const variants = {
   banner: CtaBanner,
   split: CtaSplit,

@@ -5,21 +5,21 @@ import { TokenGallery } from '@/components/docs/token-gallery'
 import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 
-// Deliberately absent from pages.config.ts: excludes it from the sitemap (`enumerateUrls`) and,
-// together with `autoStaticPathsDiscovery`/`crawlLinks` both false in vite.config.ts, from
-// prerendering. The `noindex, nofollow` meta below is the third mechanism.
+// Left out of pages.config.ts on purpose. That keeps it out of the sitemap (`enumerateUrls`),
+// and — with `autoStaticPathsDiscovery` and `crawlLinks` both false in vite.config.ts — out of
+// prerendering. The `noindex, nofollow` meta below is the third layer.
 //
-// No `Disallow: /docs` in robots.txt, deliberately: `Disallow` and `noindex` cancel each other —
-// a crawler that obeys `Disallow` never fetches the page, so it never sees the `noindex`, and an
-// external link still gets it indexed URL-only. `/docs` must stay fetchable so `noindex` is seen.
-// `verify-build.mjs` fails the build if `Disallow: /docs` reappears; `check-conventions.mjs`
-// fails if this meta tag is removed.
+// robots.txt has no `Disallow: /docs`, also on purpose. `Disallow` and `noindex` cancel each
+// other out: a crawler that obeys `Disallow` never fetches the page, so it never sees the
+// `noindex`, and an external link can still get it indexed by URL alone. `/docs` has to stay
+// fetchable for the `noindex` to be read. `verify-build.mjs` fails the build if
+// `Disallow: /docs` comes back, and `check-conventions.mjs` fails if this meta tag is removed.
 export const Route = createFileRoute('/docs')({
   // `<html lang>` comes from `useActiveLocale` in `__root.tsx`, which falls back to
-  // `site.defaultLocale` when no match declares one. Without this loader `/docs` fell back to
-  // `mn` and shipped `<html lang="mn">` for an English-only page — wrong `lang` makes a screen
-  // reader mispronounce the text. A loader here, not a special case in `__root.tsx`, which is
-  // meant to know about no specific route.
+  // `site.defaultLocale` when no route declares one. Without this loader `/docs` fell back to
+  // `mn` and shipped `<html lang="mn">` on an English-only page, which makes a screen reader
+  // mispronounce it. Handled with a loader here rather than a special case in `__root.tsx`,
+  // which is meant to know nothing about any particular route.
   loader: () => ({ locale: 'en' as const }),
   head: () => ({
     meta: [
@@ -32,8 +32,8 @@ export const Route = createFileRoute('/docs')({
 
 function DocsPage() {
   return (
-    // `density="compact"` throughout: `py-section`'s ~300px between sections is tuned for
-    // marketing pages, and works against quickly scanning a reference doc.
+    // `density="compact"` everywhere here. `py-section` leaves about 300px between sections,
+    // which suits a marketing page but slows down scanning a reference page.
     <main>
       <Section density="compact">
         <Container>

@@ -3,13 +3,13 @@ import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { pages as onepagePages } from './configs/smoke-onepage/pages.config'
-import { site as onepageSite } from './configs/smoke-onepage/site.config'
-import { pages as defaultPages } from './src/config/pages.config'
-import { site as defaultSite } from './src/config/site.config'
-import { enumerateUrls } from './src/lib/pages/enumerate'
-import { emitSeoFiles } from './src/lib/seo/emit-plugin'
-import { OUT_DIR } from './src/lib/seo/out-dir'
+import { pages as onepagePages } from './configs/smoke-onepage/pages.config.ts'
+import { site as onepageSite } from './configs/smoke-onepage/site.config.ts'
+import { pages as defaultPages } from './src/config/pages.config.ts'
+import { site as defaultSite } from './src/config/site.config.ts'
+import { enumerateUrls } from './src/lib/pages/enumerate.ts'
+import { emitSeoFiles } from './src/lib/seo/emit-plugin.ts'
+import { OUT_DIR } from './src/lib/seo/out-dir.ts'
 
 const animation = process.env.KIT_ANIMATION ?? 'on'
 const submit = process.env.KIT_SUBMIT ?? 'endpoint'
@@ -54,13 +54,9 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart({
-      // Entries resolve relative to `src/` by filename convention (`resolveEntry` in
-      // @tanstack/start-plugin-core). They live in `src/app/` here, so each must be named
-      // explicitly — the convention would otherwise look for `src/router.*` and fail the build.
-      // `generatedRouteTree` is a tanstackStart option resolved against srcDirectory — it is NOT
-      // read from tsr.config.json (that file feeds the standalone `tsr` CLI). Setting it only
-      // there regenerated the tree at the default `src/routeTree.gen.ts` while the app imported
-      // `src/app/routeTree.gen.ts`, and the build failed on stale relative imports.
+      // By default these are found by filename directly under `src/`. They live in `src/app/`
+      // here, so each one must be named. Without this the build looks for `src/router.*` and
+      // fails. The paths are relative to `src/`.
       router: { entry: './app/router.tsx', generatedRouteTree: './app/routeTree.gen.ts' },
       client: { entry: './app/client.tsx' },
       server: { entry: './app/server.ts' },

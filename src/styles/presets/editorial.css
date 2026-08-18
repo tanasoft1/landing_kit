@@ -27,11 +27,11 @@
   --c-primary-foreground: oklch(99.2% 0.002 260);
   --c-ring: oklch(52% 0.17 258);
 
-  /* Status, part of the preset surface, not a hardcoded stock colour — a fixed colour wouldn't
-     move with a preset swap. (Old class names deliberately not written out — Tailwind's scanner
-     is comment-blind.) Lighthouse never sees these (sr-only until a submission resolves), so
-     chosen by measurement: worst case over background/muted/accent — destructive 5.33:1,
-     success 5.42:1, both over the 4.5:1 AA floor. */
+  /* Status colours belong to the preset, so they move with it; a stock colour would not. The
+     old class names are not written out, because Tailwind's scanner cannot tell code from
+     comments. These are only on screen while a submission resolves, so contrast was measured
+     rather than eyeballed: worst case over background, muted and accent is 5.33:1 for
+     destructive and 5.42:1 for success, both above the 4.5:1 AA floor. */
   --c-destructive: oklch(52% 0.19 27);
   --c-success: oklch(48% 0.12 152);
 }
