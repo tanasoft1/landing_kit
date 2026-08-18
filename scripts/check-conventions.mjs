@@ -75,7 +75,8 @@ const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf))
  * `className={`${MAP[key]}`}` can be resolved to the class strings they actually produce.
  *
  * Flat and scope-blind, as the previous text-based version was: two `const field = …` in different
- * scopes of one file collide, last one winning. Recorded in known-limitations.
+ * scopes of one file collide, last one winning. The four blocks that copy this pattern should
+ * avoid reusing an identifier name across scopes in one file.
  */
 function collectConsts(sf) {
   const consts = new Map()
@@ -397,11 +398,9 @@ function hasNoindexRobotsMeta(sf) {
   return found
 }
 
-if (!existsSync(DOCS_ROUTE)) {
-  failures.push(
-    `${DOCS_ROUTE}  missing — the docs route is allow-listed in verify-build.mjs and expected here`,
-  )
-} else if (!hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
+// Absence is fine: a scaffolded project may delete /docs (README: "Removing the /docs page").
+// Presence is not negotiable — if the route is here it must carry the noindex meta.
+if (existsSync(DOCS_ROUTE) && !hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
   failures.push(
     `${DOCS_ROUTE}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
       `this tag is the ONLY thing keeping /docs out of the index on an SSR deploy (robots.txt ` +
@@ -538,42 +537,137 @@ function findRecipesArray(sf) {
   ts.forEachChild(sf, visit)
   return found
 }
-if (!existsSync(CONFIG_REFERENCE) || !existsSync(README)) {
-  failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
-} else {
-  // Read off the AST, not with a regex over the source text. The regex collected every quoted
-  // string between `const RECIPES = [` and `] as const`, which includes one written inside a
-  // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
-  // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
-  // failure in the only machine gate. Array elements are array elements; comments are trivia.
-  const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
-  if (!recipesArray) {
-    // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
-    // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
-    // something this lookup misses is exactly when the coupling stops being watched.
-    failures.push(
-      `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
-        `verifies every entry names a real README '## ' heading and cannot run without it`,
-    )
+// Absence is fine: a scaffolded project may delete /docs entirely (README: "Removing the /docs
+// page"), and config-reference.tsx goes with it — there is no RECIPES list left to check.
+// Presence is not negotiable — if the file is here, README.md must be too, and every entry must
+// still name a real heading.
+if (existsSync(CONFIG_REFERENCE)) {
+  if (!existsSync(README)) {
+    failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
   } else {
-    const recipes = recipesArray.elements
-      .filter((el) => ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el))
-      .map((el) => el.text)
-    if (recipes.length === 0) {
-      failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
+    // Read off the AST, not with a regex over the source text. The regex collected every quoted
+    // string between `const RECIPES = [` and `] as const`, which includes one written inside a
+    // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
+    // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
+    // failure in the only machine gate. Array elements are array elements; comments are trivia.
+    const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
+    if (!recipesArray) {
+      // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
+      // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
+      // something this lookup misses is exactly when the coupling stops being watched.
+      failures.push(
+        `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
+          `verifies every entry names a real README '## ' heading and cannot run without it`,
+      )
+    } else {
+      const recipes = recipesArray.elements
+        .filter((el) => ts.isStringLiteral(el) || ts.isNoSubstitutionTemplateLiteral(el))
+        .map((el) => el.text)
+      if (recipes.length === 0) {
+        failures.push(`${CONFIG_REFERENCE}  RECIPES is empty — it must name README '## ' headings`)
+      }
+      const headings = new Set(
+        readFileSync(README, 'utf8')
+          .split('\n')
+          .filter((l) => l.startsWith('## '))
+          .map((l) => l.slice(3).trim()),
+      )
+      for (const r of recipes) {
+        if (!headings.has(r)) {
+          failures.push(
+            `${CONFIG_REFERENCE}  RECIPES entry '${r}' is not a '## ' heading in ${README} — ` +
+              `/docs points developers at a README section that does not exist. Rename the entry ` +
+              `to match the heading, or restore the heading.`,
+          )
+        }
+      }
     }
-    const headings = new Set(
-      readFileSync(README, 'utf8')
-        .split('\n')
-        .filter((l) => l.startsWith('## '))
-        .map((l) => l.slice(3).trim()),
+  }
+}
+
+// --- README Contents list must mirror the '## ' headings, in both directions -------------------
+// The Contents block (README.md:8-23ish) is hand-maintained prose, not generated, so nothing kept
+// it honest — this file already parses README headings for the RECIPES check above; the same
+// parsing is reused here rather than re-implemented.
+//
+// Bidirectional on purpose, unlike the one-directional RECIPES check: RECIPES legitimately names
+// only a subset of headings (reference sections a task list has no reason to mention), but a table
+// of contents that omits a real section or links to a section that no longer exists is wrong by
+// definition either way. This is also why the CLI in a later task is expected to keep tripping this
+// check: when generated projects have a kit-only README section trimmed (e.g. "The three env
+// flags"), the dangling Contents entry it would otherwise leave behind fails loudly instead of
+// shipping a 404 anchor.
+//
+// Slugs are DERIVED with GitHub's own anchor rule rather than hand-listed, so a heading like
+// "`/docs`: the living developer reference" — whose backticks, slash and colon all vanish in the
+// real anchor — is handled the same way as every other heading, with no special case to rot.
+//
+// This mirrors github-slugger (the library GitHub's own renderer uses): lowercase, DELETE
+// punctuation and symbols, then replace each remaining space with one hyphen. Three details are
+// load-bearing and were each got wrong by an earlier, tighter `[^a-z0-9 -]` allowlist:
+//
+//   - Letters outside ASCII survive. This kit is bilingual, so "## Монгол хэл" is a heading a
+//     developer here will really write; GitHub anchors it #монгол-хэл, and an ASCII-only allowlist
+//     slugged it to the empty string and failed a correct README.
+//   - Underscores survive (GitHub strips connector punctuation's neighbours, not `_` itself), so
+//     "## site_config and env" anchors #site_config-and-env, not #siteconfig-and-env.
+//   - Each space is replaced INDIVIDUALLY, never collapsed as a run. "## Blocks & variants" loses
+//     the "&" but keeps both spaces around it, so the real anchor is #blocks--variants — two
+//     hyphens. The same goes for any " — " or " / " between words.
+//
+// Written as a deny-list over Unicode property escapes (keep letters, digits, combining marks,
+// `_`, `-` and space; delete the rest) so it stays dependency-free — this script has to run inside
+// a generated project, where adding an npm package is not an option.
+const githubSlug = (text) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}\-_ ]+/gu, '')
+    .replace(/ /g, '-')
+
+if (existsSync(README)) {
+  const readmeLines = readFileSync(README, 'utf8').split('\n')
+  const isH2 = (l) => l.startsWith('## ')
+  // The '## Contents' heading itself is the list, not an entry within it — a table of contents
+  // does not link to itself — so it is excluded from both directions of the comparison below.
+  const trackedHeadings = readmeLines
+    .filter(isH2)
+    .map((l) => l.slice(3).trim())
+    .filter((h) => h !== 'Contents')
+
+  const contentsStart = readmeLines.findIndex((l) => l.trim() === '## Contents')
+  if (contentsStart === -1) {
+    failures.push(`${README}  no '## Contents' heading found — cannot verify the Contents list`)
+  } else {
+    const nextHeading = readmeLines.findIndex((l, i) => i > contentsStart && isH2(l))
+    const contentsBlock = readmeLines.slice(
+      contentsStart + 1,
+      nextHeading === -1 ? readmeLines.length : nextHeading,
     )
-    for (const r of recipes) {
-      if (!headings.has(r)) {
+    const entries = contentsBlock
+      .map((l) => l.match(/^- \[(.+?)\]\(#([^)]+)\)/))
+      .filter((m) => m !== null)
+      .map((m) => ({ text: m[1], slug: m[2] }))
+
+    // Direction 1: every heading must be listed. Named by heading, not a generic "out of sync".
+    const entrySlugs = new Set(entries.map((e) => e.slug))
+    for (const heading of trackedHeadings) {
+      const slug = githubSlug(heading)
+      if (!entrySlugs.has(slug)) {
         failures.push(
-          `${CONFIG_REFERENCE}  RECIPES entry '${r}' is not a '## ' heading in ${README} — ` +
-            `/docs points developers at a README section that does not exist. Rename the entry ` +
-            `to match the heading, or restore the heading.`,
+          `${README}  Contents is missing an entry for '## ${heading}' (expected anchor ` +
+            `#${slug}) — every '## ' heading must be listed in Contents`,
+        )
+      }
+    }
+
+    // Direction 2: every entry must resolve to a real heading. Named by entry, not by slug alone,
+    // so the failure reads as something a person wrote rather than a hash to decode.
+    const headingSlugs = new Set(trackedHeadings.map(githubSlug))
+    for (const entry of entries) {
+      if (!headingSlugs.has(entry.slug)) {
+        failures.push(
+          `${README}  Contents entry '${entry.text}' points at #${entry.slug}, which is not a ` +
+            `'## ' heading — rename the entry to match a real heading, or restore the heading`,
         )
       }
     }
@@ -588,5 +682,5 @@ if (failures.length) {
 console.log(
   '✓ check-conventions: layout primitives in blocks/routes/components, no literal <h1>/<h2> in ' +
     'blocks, no client-side <Link> anywhere, src/lib is .tsx-free, /docs noindex intact, ' +
-    '/docs RECIPES match README headings',
+    '/docs RECIPES match README headings, README Contents matches headings',
 )

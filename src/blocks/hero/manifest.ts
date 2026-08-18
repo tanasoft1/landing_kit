@@ -6,7 +6,8 @@ import { type HeroCopy, mn } from './copy.mn'
 // (the SEO layer needs `copy`/`nav`/`schema` synchronously), so a component reachable from here
 // would join that eager chain and land in the main chunk. Measured cost of getting this wrong:
 // main chunk 334,593 -> 459,705 B, because hero's components drag in the shared `motion` chunk.
-// Nothing catches it automatically — see docs/superpowers/known-limitations.md.
+// Nothing catches it automatically: verify-build.mjs's `bundle-split` assertion only detects this
+// for `contact`'s manifest, because it works by watching for react-hook-form markers in the entry.
 //
 // `variantNames` below is the source of truth; the variant union is derived from it, not
 // hand-written alongside it — a hand-written union can list a variant this array omits and
@@ -29,5 +30,10 @@ export const hero = {
   // No `schema`: `buildJsonLd` (src/lib/seo/json-ld.ts) already emits exactly one `WebPage`
   // node per page, so a block re-describing the page would be a second, conflicting one.
   // `schema` is for markup a block's own content earns (`FAQPage`, `Product`, …), never page identity.
-  requires: { npm: [], ui: [] },
+  // `blocks` mirrors the link targets in ./copy.mn.ts and ./copy.en.ts: `primaryCta.target` is
+  // 'contact'. Move this array whenever that copy field's target changes — it is the only written
+  // record that this block stops working if `contact` leaves `pages.config.ts`, and the failure it
+  // describes is a blank page that never names the link (see `requires` in @/lib/types).
+  // (`secondaryCta.target` is 'hero', this block itself, so it is always satisfied and not listed.)
+  requires: { npm: [], ui: [], blocks: ['contact'] },
 } satisfies BlockManifest<HeroCopy, HeroVariant>
