@@ -211,13 +211,22 @@ async function askBlocks(rl, blockDeps) {
 
 /**
  * `blockDeps` is `readBlockDeps(KIT_ROOT)` from generate.mjs — the dependency graph the manifests
- * declare, already reconciled against the copy files. Required, not defaulted: a missing argument
- * would leave `missingBlockDeps` finding nothing and silently turn the prompt guard off, which is
- * the one failure this whole mechanism exists to prevent.
+ * declare, already reconciled against the copy files.
+ *
+ * Checked for a COMPLETE map, not merely for an object. `missingBlockDeps` reads `blockDeps[id] ??
+ * []`, so any block the map omits silently has no dependencies and the guard is off for it — and
+ * `{}` turns it off for every block while passing a `typeof === 'object'` test. That test was what
+ * this function shipped with, and it admitted `{}`: the exact value this paragraph claimed to
+ * reject. So the check now enforces what is actually required, which is what the caller is
+ * promising: an array for every id in `BLOCK_ORDER`.
  */
 export async function resolveAnswers(argv, blockDeps) {
-  if (blockDeps === null || typeof blockDeps !== 'object') {
-    throw new Error('resolveAnswers needs the block dependency map from readBlockDeps()')
+  const badDeps = BLOCK_ORDER.filter((id) => !Array.isArray(blockDeps?.[id]))
+  if (badDeps.length > 0) {
+    throw new Error(
+      'resolveAnswers needs the block dependency map from readBlockDeps(): an array for every ' +
+        `block. Missing or not an array for: ${badDeps.join(', ')}`,
+    )
   }
   const { dir, flags, yes } = parseArgs(argv)
   // An unset shell variable makes this `''`, which would scaffold over the repo root instead of
