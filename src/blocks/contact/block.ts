@@ -1,13 +1,12 @@
 import type { BlockManifest } from '@/lib/types'
-import { en } from './copy.en'
-import { type ContactCopy, mn } from './copy.mn'
+import { type ContactCopy, en, mn } from './copy'
 
-// No component import here — see hero/manifest.ts's header comment. This manifest matters most:
+// No component import here — see hero/block.ts's header comment. This manifest matters most:
 // without the cut, `ContactForm` keeps `react-hook-form` and `zod` reachable from `registry.ts`
 // and the whole split stops working.
 const variantNames = ['default'] as const
 
-/** See hero/manifest.ts: `./variants.ts` constrains its component map to exactly this union. */
+/** See hero/block.ts: `./variants.ts` constrains its component map to exactly this union. */
 export type ContactVariant = (typeof variantNames)[number]
 
 export const contact = {
