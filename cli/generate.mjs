@@ -12,7 +12,8 @@
 // someone would edit them — so changing one and not the other stops the CLI here.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER } from './prompts.mjs'
+import { blockFiles } from './add.mjs'
+import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER, CUSTOM_VARIANT } from './prompts.mjs'
 
 // --- the dependency split ----------------------------------------------------------------------
 //
@@ -447,11 +448,22 @@ function assertTsconfigMatchesKit(kitRoot, generated) {
 /** Biome's `organizeImports` sorts by module specifier, so emitting in that order lints clean. */
 const importOrder = (blocks) => [...blocks].sort()
 
+/**
+ * Every block the scaffold will hold: the kit's, then the ones typed at the block question.
+ *
+ * The three files below have to name all of them — they are what makes a block exist, and
+ * `verify-build.mjs` fails a folder in `src/blocks/` that no registry entry mentions. Only the
+ * things that read the KIT for a block (its copy links, its nav declaration, its npm dependencies)
+ * stay on `answers.blocks`, because a block the kit has never heard of has none of them.
+ */
+const allBlocks = (answers) => [...answers.blocks, ...(answers.custom ?? [])]
+
 function registryTs(answers) {
-  const imports = importOrder(answers.blocks)
+  const blocks = allBlocks(answers)
+  const imports = importOrder(blocks)
     .map((id) => `import { ${id} } from './${id}/block'`)
     .join('\n')
-  const entries = answers.blocks.map((id) => `  ${id},`).join('\n')
+  const entries = blocks.map((id) => `  ${id},`).join('\n')
   return `import type { BlockManifest } from '@/lib/types'
 ${imports}
 
@@ -703,7 +715,7 @@ function blockModulesTs(answers) {
   const weight = answers.blocks.includes('contact')
     ? "since that's the weight (contact alone: 99 KB raw / 30 KB gzip of\n * react-hook-form + zod). Loading registers components into `variant-registry.ts` so\n * `RenderBlocks` can read them back synchronously."
     : "since that's where the weight is. Loading registers components\n * into `variant-registry.ts` so `RenderBlocks` can read them back synchronously."
-  const entries = answers.blocks.map(blockModuleEntry).join('\n')
+  const entries = allBlocks(answers).map(blockModuleEntry).join('\n')
   return `import type { BlockId } from './registry'
 import { registerVariants } from './variant-registry'
 
@@ -719,13 +731,23 @@ ${entries}
 }
 
 function variantsAllTs(answers) {
-  const imports = importOrder(answers.blocks)
-    .map((id) => `import { variants as ${id} } from './${id}/variants'`)
+  const blocks = allBlocks(answers)
+  // Every relative import sorted together, `./registry` included. The block imports used to be
+  // emitted as a group above it, which is correct only while every block id sorts before the
+  // letter r: the kit's four do, so it held until the first block named `testimonials`.
+  const imports = [
+    ['./registry', `import type { BlockId } from './registry'`],
+    ['./variant-registry', `import { registerVariants } from './variant-registry'`],
+    ...blocks.map((id) => [
+      `./${id}/variants`,
+      `import { variants as ${id} } from './${id}/variants'`,
+    ]),
+  ]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, line]) => line)
     .join('\n')
-  const entries = answers.blocks.map((id) => `  ${id},`).join('\n')
+  const entries = blocks.map((id) => `  ${id},`).join('\n')
   return `${imports}
-import type { BlockId } from './registry'
-import { registerVariants } from './variant-registry'
 
 /**
  * Server-only. The prerenderer runs in one process and needs every block at once, so it can't
@@ -753,7 +775,10 @@ for (const [id, variants] of Object.entries(all)) registerVariants(id as BlockId
  */
 function blockRef(id, answers) {
   const variant = answers.variants[id]
-  return variant === BLOCK_DEFAULT_VARIANT[id]
+  // A block typed in at the block question has one layout and no entry in BLOCK_DEFAULT_VARIANT,
+  // so without the fallback every one of them would be written in the three-line object form to
+  // name the only layout it has.
+  return variant === (BLOCK_DEFAULT_VARIANT[id] ?? CUSTOM_VARIANT)
     ? `'${id}'`
     : `{ id: '${id}', variant: '${variant}' }`
 }
@@ -806,7 +831,10 @@ function assertSeoCopyMatchesKit(kitRoot) {
 
 function pagesConfigTs(answers) {
   const hasContact = answers.blocks.includes('contact')
-  const home = answers.pages === 'multi' ? answers.blocks.filter((id) => id !== 'contact') : []
+  // Blocks of your own go on the home page, after the kit's. Registering them without placing them
+  // would build and verify perfectly and show nothing — the developer types a name, runs `pnpm
+  // dev`, and finds the site unchanged.
+  const home = answers.pages === 'multi' ? allBlocks(answers).filter((id) => id !== 'contact') : []
   const literals = []
 
   // Multi-page splits contact onto its own route, matching the kit's own default — unless contact
@@ -819,7 +847,7 @@ function pagesConfigTs(answers) {
   } else if (answers.pages === 'multi' && !hasContact) {
     literals.push(pageLiteral('home', 'home', '/', home, answers))
   } else {
-    literals.push(pageLiteral('home', 'home', '/', answers.blocks, answers))
+    literals.push(pageLiteral('home', 'home', '/', allBlocks(answers), answers))
   }
 
   return `import type { BlockId } from '@/blocks/registry'
@@ -1003,6 +1031,15 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
     ['src/config/site.config.ts', siteConfigTs(kitRoot, answers)],
     ['.kit/scaffold.json', scaffoldJson(answers, kitVersion)],
   ]
+
+  // Blocks of your own, from the same templates `add-block` uses — so a block created at scaffold
+  // time and one added a month later are the same four files. The registry entries for them are
+  // already in the three files above; these are the folders those entries point at.
+  for (const id of answers.custom ?? []) {
+    for (const [name, body] of Object.entries(blockFiles(id, [CUSTOM_VARIANT]))) {
+      files.push([`src/blocks/${id}/${name}`, body])
+    }
+  }
 
   const written = []
   for (const [rel, text] of files) writeOut(outDir, rel, text, written)

@@ -35,8 +35,29 @@ npx --yes @dewsoft/landing-kit@latest my-site    # npm
 yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+  (on yarn 1, use the npx line)
 ```
 
-It asks you four short questions. Press Enter for each to take the default, or add `--yes` to the
-end to skip all of them.
+It asks four short questions. Use the **arrow keys** to move and **Enter** to choose — each option
+explains itself, so there is nothing to memorise. For the blocks question, **Space** toggles items
+on and off.
+
+That question also has an **add your own** row. Choose it, type a name like `pricing`, press Enter,
+and you get a real section of your own — as many as you like. Press Enter on an empty box when you
+are done:
+
+```
+? Blocks   (↑↓ move · Space toggle · Enter confirm)
+  [x] hero      The opening section
+  [x] features  What you offer
+  [x] cta       A call to action
+  [x] contact   Contact form
+  [x] pricing   yours — placeholder text to replace
+> +   add your own  a section the kit has no copy for (pricing, faq, …)
+```
+
+Each one arrives on the home page with placeholder text, ready for you to write. You still need at
+least one of the four the kit ships.
+
+Every question opens on a sensible default, so pressing Enter four times is a valid run. Add
+`--yes` to skip the questions entirely.
 
 Then start it:
 
@@ -195,7 +216,11 @@ that page's `seo.title` for the language being rendered.
 
 ## Adding a block
 
-A block is a new kind of section — testimonials, pricing, an FAQ. One command:
+A block is a new kind of section — testimonials, pricing, an FAQ. If you know you want one while
+you are still creating the site, type its name at the blocks question and it is made for you, on
+the home page, in one step — see [Create your site](#create-your-site).
+
+Afterwards, one command does the same thing:
 
 ```bash
 pnpm dlx @dewsoft/landing-kit add-block testimonials
@@ -391,9 +416,11 @@ Every question the CLI asks has a flag, so a scaffold can be fully scripted:
 
 ```bash
 pnpm dlx @dewsoft/landing-kit@latest frontend --yes
+pnpm dlx @dewsoft/landing-kit@latest frontend --yes --add-blocks=pricing,faq
 ```
 
-Run `pnpm dlx @dewsoft/landing-kit --help` for the full list.
+Run `pnpm dlx @dewsoft/landing-kit --help` for the full list. `--add-blocks` is the flag form of
+the picker's **add your own** row, and takes as many names as you want.
 
 Blocks are not freely combinable: some blocks' copy links to others, and a link to a block you
 left out would render a blank page. The CLI refuses those combinations at the question rather than
