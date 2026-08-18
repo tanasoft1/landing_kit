@@ -37,7 +37,7 @@ You do not have to copy this repository by hand. The kit publishes a scaffolding
 a fresh project into a directory of your choosing:
 
 ```bash
-pnpm dlx @dewdie/landing-kit@latest frontend
+pnpm dlx @dewsoft/landing-kit@latest frontend
 ```
 
 It asks five questions — pages, theme, preset, blocks, and a variant per selected block — and
@@ -45,7 +45,7 @@ then writes `frontend/`. Every question has a flag, so a scripted run can skip t
 entirely; `--yes` takes every default and asks nothing:
 
 ```bash
-pnpm dlx @dewdie/landing-kit@latest frontend --yes
+pnpm dlx @dewsoft/landing-kit@latest frontend --yes
 ```
 
 | Flag | Values | Default |

@@ -18,7 +18,7 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const HELP = `landing-kit — scaffold a bilingual landing site
 
-Usage:  pnpm dlx @dewdie/landing-kit@latest <dir> [options]
+Usage:  pnpm dlx @dewsoft/landing-kit@latest <dir> [options]
 
 Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
@@ -39,7 +39,7 @@ Blocks:   hero (centered|split)  features (grid|alternating)
             cta   requires  contact, features
           8 of the 15 possible combinations are refused for this reason.
 
-Example:  pnpm dlx @dewdie/landing-kit@latest frontend --yes
+Example:  pnpm dlx @dewsoft/landing-kit@latest frontend --yes
 `
 
 async function main() {
