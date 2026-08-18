@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "includes": ["**", "!src/routeTree.gen.ts"] },
+  "files": { "includes": ["**", "!src/app/routeTree.gen.ts"] },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "linter": {
     "enabled": true,
@@ -21,12 +21,12 @@
                 "paths": {
                   "motion": "Blocks must import animation presets from '@/motion', never 'motion' directly.",
                   "motion/react": "Blocks must import animation presets from '@/motion', never 'motion/react' directly.",
-                  "@/motion.animated": "Import '@/motion' — the alias selects the implementation.",
-                  "@/motion.noop": "Import '@/motion' — the alias selects the implementation.",
-                  "@/theme.both": "Import '@/theme' — the alias selects the implementation.",
-                  "@/theme.single": "Import '@/theme' — the alias selects the implementation.",
-                  "@/submit.rpc": "Import '@/submit' — the alias selects the implementation.",
-                  "@/submit.endpoint": "Import '@/submit' — the alias selects the implementation."
+                  "@/integrations/motion.animated": "Import '@/motion' — the alias selects the implementation.",
+                  "@/integrations/motion.noop": "Import '@/motion' — the alias selects the implementation.",
+                  "@/integrations/theme.both": "Import '@/theme' — the alias selects the implementation.",
+                  "@/integrations/theme.single": "Import '@/theme' — the alias selects the implementation.",
+                  "@/integrations/submit.rpc": "Import '@/submit' — the alias selects the implementation.",
+                  "@/integrations/submit.endpoint": "Import '@/submit' — the alias selects the implementation."
                 }
               }
             }
@@ -43,8 +43,8 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "@/theme.both": "Import '@/theme' — the alias selects the implementation.",
-                  "@/theme.single": "Import '@/theme' — the alias selects the implementation."
+                  "@/integrations/theme.both": "Import '@/theme' — the alias selects the implementation.",
+                  "@/integrations/theme.single": "Import '@/theme' — the alias selects the implementation."
                 }
               }
             }

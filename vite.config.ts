@@ -32,13 +32,21 @@ export default defineConfig({
   build: { manifest: true },
   resolve: {
     alias: {
-      '@/motion': animation === 'on' ? r('./src/motion.animated.tsx') : r('./src/motion.noop.tsx'),
+      '@/motion':
+        animation === 'on'
+          ? r('./src/integrations/motion.animated.tsx')
+          : r('./src/integrations/motion.noop.tsx'),
       '@/theme':
-        site.theme.mode === 'both' ? r('./src/theme.both.tsx') : r('./src/theme.single.tsx'),
+        site.theme.mode === 'both'
+          ? r('./src/integrations/theme.both.tsx')
+          : r('./src/integrations/theme.single.tsx'),
       // `submit.rpc.ts`, deliberately NOT `submit.server.ts`: TanStack Start's import protection
       // denies client bundling of any `**/*.server.*` file by FILENAME, regardless of content.
       // Renaming keeps that guard intact everywhere rather than excluding a file from it.
-      '@/submit': submit === 'server' ? r('./src/submit.rpc.ts') : r('./src/submit.endpoint.ts'),
+      '@/submit':
+        submit === 'server'
+          ? r('./src/integrations/submit.rpc.ts')
+          : r('./src/integrations/submit.endpoint.ts'),
       '@/config': config === 'onepage' ? r('./configs/smoke-onepage') : r('./src/config'),
       '@': r('./src'),
     },
@@ -46,6 +54,16 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart({
+      // Entries resolve relative to `src/` by filename convention (`resolveEntry` in
+      // @tanstack/start-plugin-core). They live in `src/app/` here, so each must be named
+      // explicitly — the convention would otherwise look for `src/router.*` and fail the build.
+      // `generatedRouteTree` is a tanstackStart option resolved against srcDirectory — it is NOT
+      // read from tsr.config.json (that file feeds the standalone `tsr` CLI). Setting it only
+      // there regenerated the tree at the default `src/routeTree.gen.ts` while the app imported
+      // `src/app/routeTree.gen.ts`, and the build failed on stale relative imports.
+      router: { entry: './app/router.tsx', generatedRouteTree: './app/routeTree.gen.ts' },
+      client: { entry: './app/client.tsx' },
+      server: { entry: './app/server.ts' },
       prerender: {
         enabled: true,
         // Both false is what keeps /docs (absent from pages.config.ts) out of prerendering —

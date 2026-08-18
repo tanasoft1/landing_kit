@@ -321,9 +321,9 @@ export default defineConfig({
   build: { manifest: true },
   resolve: {
     alias: {
-      '@/motion': r('./src/motion.animated.tsx'),
-      '@/theme': r('./src/${themeFile(answers)}'),
-      '@/submit': r('./src/submit.endpoint.ts'),
+      '@/motion': r('./src/integrations/motion.animated.tsx'),
+      '@/theme': r('./src/integrations/${themeFile(answers)}'),
+      '@/submit': r('./src/integrations/submit.endpoint.ts'),
       '@/config': r('./src/config'),
       // Must stay LAST: '@' is a catch-all and would shadow the specific aliases above.
       '@': r('./src'),
@@ -332,6 +332,13 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart({
+      // Entries and the generated route tree resolve against \`src/\` by convention; they live in
+      // \`src/app/\` here, so each is named explicitly. \`generatedRouteTree\` is a tanstackStart
+      // option — setting it in tsr.config.json instead regenerates the tree at the default path
+      // while the app imports the configured one, and the build fails on stale relative imports.
+      router: { entry: './app/router.tsx', generatedRouteTree: './app/routeTree.gen.ts' },
+      client: { entry: './app/client.tsx' },
+      server: { entry: './app/server.ts' },
       prerender: {
         enabled: true,
         // Both false is what keeps /docs (absent from pages.config.ts) out of prerendering —
@@ -372,9 +379,9 @@ function tsconfigJson(answers) {
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@/motion": ["./src/motion.animated.tsx"],
-      "@/theme": ["./src/${themeFile(answers)}"],
-      "@/submit": ["./src/submit.endpoint.ts"],
+      "@/motion": ["./src/integrations/motion.animated.tsx"],
+      "@/theme": ["./src/integrations/${themeFile(answers)}"],
+      "@/submit": ["./src/integrations/submit.endpoint.ts"],
       "@/*": ["./src/*"]
     }
   },

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { MotionModule } from '@/motion.types'
+import type { MotionModule } from '@/integrations/motion.types'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 

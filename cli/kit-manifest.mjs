@@ -19,12 +19,12 @@ export const COPY_DIRS = [
 
 // Copied verbatim, individually.
 export const COPY_FILES = [
-  'src/client.tsx',
-  'src/server.ts',
-  'src/router.tsx',
-  'src/routeTree.gen.ts',
-  'src/motion.types.ts',
-  'src/theme.types.ts',
+  'src/app/client.tsx',
+  'src/app/server.ts',
+  'src/app/router.tsx',
+  'src/app/routeTree.gen.ts',
+  'src/integrations/motion.types.ts',
+  'src/integrations/theme.types.ts',
   'src/blocks/variant-registry.ts',
   'scripts/check-conventions.mjs',
   'scripts/verify-build.mjs',
@@ -36,9 +36,10 @@ export const COPY_FILES = [
 // implementation per boundary, so `motion.noop.tsx` and friends are not merely unused — they are
 // not there. A value is either the path, or a function of the answers that returns it.
 export const BOUNDARY_FILES = {
-  motion: 'src/motion.animated.tsx', // deviation 5
-  submit: 'src/submit.endpoint.ts', // deviation 5
-  theme: (a) => (a.theme === 'both' ? 'src/theme.both.tsx' : 'src/theme.single.tsx'),
+  motion: 'src/integrations/motion.animated.tsx', // deviation 5
+  submit: 'src/integrations/submit.endpoint.ts', // deviation 5
+  theme: (a) =>
+    a.theme === 'both' ? 'src/integrations/theme.both.tsx' : 'src/integrations/theme.single.tsx',
 }
 
 // Copied with an edit, because the kit's own copy of each names things a generated project does
@@ -54,9 +55,9 @@ export const TRANSFORMED_FILES = [
   'src/styles/theme.css',
   'src/components/docs/config-reference.tsx',
   'src/components/docs/token-gallery.tsx',
-  'src/motion.animated.tsx',
-  'src/submit.endpoint.ts',
-  'src/submit-schema.ts',
+  'src/integrations/motion.animated.tsx',
+  'src/integrations/submit.endpoint.ts',
+  'src/integrations/submit-schema.ts',
   'biome.json',
 ]
 

@@ -2,9 +2,9 @@ import { useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
+import { contactSchema, MIN_ELAPSED_MS } from '@/integrations/submit-schema'
 import type { BlockProps } from '@/lib/types'
 import { submitContact } from '@/submit'
-import { contactSchema, MIN_ELAPSED_MS } from '@/submit-schema'
 import type { ContactCopy } from './copy.mn'
 
 type Fields = { name: string; email: string; message: string; honeypot_url: string }
