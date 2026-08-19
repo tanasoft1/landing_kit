@@ -430,6 +430,8 @@ The generated project has no dependency on this kit. It is a plain TanStack Star
 
 ## Working on the kit itself
 
-Contributing to the kit, rather than building a site with it? The env flags, the second config, the
-Lighthouse budgets and the publish steps are in [MAINTAINERS.md](./MAINTAINERS.md). None of it
-applies to a site you generate.
+Contributing to the kit, rather than building a site with it? The kit is a pnpm workspace: the
+template lives in `apps/web/` and the scaffolder in `cli/`. Run `pnpm verify` from the repo root;
+it drives both. The env flags, the second config, the Lighthouse budgets, the scaffold snapshots
+and the publish steps are in [MAINTAINERS.md](./MAINTAINERS.md). None of it applies to a site you
+generate.

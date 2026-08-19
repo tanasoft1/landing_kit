@@ -8,12 +8,61 @@ If you are building a site, everything you need is in [README.md](./README.md).
 
 ## Contents
 
+- [Repo layout](#repo-layout)
+- [Scaffold snapshots](#scaffold-snapshots)
 - [Maintainer commands](#maintainer-commands)
 - [The three env flags](#the-three-env-flags)
 - [Swapping the whole config: `configs/`](#swapping-the-whole-config-configs)
 - [Lighthouse budget](#lighthouse-budget)
 - [Publishing](#publishing)
 - [What ships and what does not](#what-ships-and-what-does-not)
+
+## Repo layout
+
+The kit is a pnpm workspace, with `apps/web/` as its only package today.
+
+| Path | What it is |
+|---|---|
+| `apps/web/` | The web template. This is what a scaffolded project becomes. |
+| `cli/` | The scaffolder. Never copied into a generated project. |
+| `tools/` | Maintainer commands: smoke builds, Lighthouse, scaffold snapshots. Not published. |
+
+The Lighthouse configs live in `apps/web/`, beside the app they measure. `tools/kit.mjs` runs
+every command with `apps/web` as its working directory, which is what makes their relative paths
+resolve.
+
+Paths in `cli/kit-manifest.mjs` are relative to **two** places at once: `apps/web/` in this repo,
+and the ROOT of a generated project. `WEB_ROOT` in that file is what reconciles them, and
+`kitPath()` is the only way kit files should be read. `ROOT_SOURCED` lists anything that should be
+read from the kit root instead of `WEB_ROOT`; it is empty today, kept as the seam for the next kit
+file that genuinely belongs at the root and still needs to land in a generated project's root too.
+A generated project is flat and stays flat.
+
+There are two READMEs and they are not copies. `apps/web/README.md` documents a generated site and
+is the file the scaffolder copies into one. The root `README.md` documents this repository and is
+what npm and GitHub display. The template's README used to be `ROOT_SOURCED` itself, kept at the
+kit root so npm's package page would show it there, and that split it from the tree it describes:
+`apps/web/scripts/check-conventions.mjs` cross-checks the README against the source tree and
+resolves every path, README included, against its own working directory, so it could no longer see
+the README sitting one level above. The template's README lives with the template now, and the kit
+root has its own, written for this repository rather than for a generated one.
+
+`apps/web/package.json`'s version is deliberately `0.0.0` while the root's is the real published
+version. `kitManifest` reads the version from the root `package.json` and the dependency ranges
+from `apps/web/package.json`; holding both at the same string would make swapping those two reads
+invisible to every check in this repo. Leave the mismatch alone.
+
+## Scaffold snapshots
+
+`tools/scaffold-snapshot.mjs` hashes the full output of four answer combinations and compares
+against `tools/__snapshots__/`. `pnpm verify` runs it.
+
+A failing snapshot means generated projects changed. That is often intended: re-record with
+`node tools/scaffold-snapshot.mjs record`, then **read the diff** before committing it. The
+snapshot's value is entirely in that read; re-recording without looking makes it decoration.
+
+The `.kit/scaffold.json` entry contains the kit version, so a version bump changes one hash in
+every variant. That is expected, and it is also the check that the version reached the file.
 
 ## Maintainer commands
 
@@ -110,3 +159,13 @@ and no publish-time rewriting of `package.json`:
 The README is trimmed on the way out too. `cli/copy.mjs` drops the sections a generated project
 should not claim to have, and the generated project's own `pnpm conventions` fails on a dangling
 table-of-contents entry — so a partial removal breaks loudly instead of shipping a dead anchor.
+
+`files` lists paths under `apps/web/` individually rather than shipping `apps/web` wholesale, which
+is the only reason `configs/` and `lighthouserc*.json` stay out of a consumer's install despite
+living right beside the code that does ship. `apps/web/package.json` has to be one of those
+individually listed paths: `generate.mjs` reads it at scaffold time, through `kitPath()` rather than
+through anything `files` mentions by name, to get the dependency ranges for the site it writes.
+Drop that one line from `files` and the published package still builds, still passes every check in
+this repo, and still installs; it just cannot scaffold a project, because the one file the CLI
+needs at scaffold time never made it into the tarball. Nothing but a real `npm pack`, a real
+install, and a real scaffold (see Publishing, above) would catch that.
