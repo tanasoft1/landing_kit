@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { blockFiles } from './add.mjs'
+import { kitPath } from './kit-manifest.mjs'
 import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER, CUSTOM_VARIANT } from './prompts.mjs'
 
 // --- the dependency split ----------------------------------------------------------------------
@@ -94,7 +95,7 @@ const URL_PLACEHOLDER = 'https://your-domain.example'
 // --- primitives ----------------------------------------------------------------------------------
 
 function readKitFile(kitRoot, rel) {
-  const src = join(kitRoot, rel)
+  const src = kitPath(kitRoot, rel)
   if (!existsSync(src)) throw new Error(`Kit is missing '${rel}' — cannot scaffold without it`)
   return readFileSync(src, 'utf8')
 }
@@ -261,6 +262,8 @@ function pnpmWorkspaceYaml(kitRoot, deps) {
 overrides:
   typescript: ${deps.typescript}
 `
+  // The kit's workspace file is a root file, not part of the web template, so this is a direct
+  // join rather than `kitPath`. There is one workspace per repository by definition.
   const kitFile = join(kitRoot, 'pnpm-workspace.yaml')
   if (existsSync(kitFile)) {
     const kitText = readFileSync(kitFile, 'utf8')
@@ -414,7 +417,7 @@ const sortedJson = (value) =>
  * the kit's tsconfig can only be made in a working copy, where the file is here.
  */
 function assertTsconfigMatchesKit(kitRoot, generated) {
-  const kitFile = join(kitRoot, 'tsconfig.json')
+  const kitFile = kitPath(kitRoot, 'tsconfig.json')
   if (!existsSync(kitFile)) return
   const kit = JSON.parse(readFileSync(kitFile, 'utf8'))
   const mine = JSON.parse(generated)
@@ -642,7 +645,7 @@ function manifestBlockDeps(kitRoot, id) {
  * iterates `BLOCK_ORDER`, so the new block is invisible to all of them.
  */
 function assertBlockOrderMatchesDisk(kitRoot) {
-  const onDisk = readdirSync(join(kitRoot, 'src/blocks'), { withFileTypes: true })
+  const onDisk = readdirSync(kitPath(kitRoot, 'src/blocks'), { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .sort()
