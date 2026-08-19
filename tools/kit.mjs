@@ -15,6 +15,13 @@
  * Usage:  node tools/kit.mjs <command>
  */
 import { spawnSync } from 'node:child_process'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Every command below drives the web app, which is no longer the repo root. `pnpm --filter`
+// would work for the pnpm steps but not for the bare `node` and `rm` ones, so the whole step
+// list runs with this as its cwd instead.
+const WEB = join(dirname(dirname(fileURLToPath(import.meta.url))), 'apps/web')
 
 const COMMANDS = {
   'smoke:full': {
@@ -70,6 +77,7 @@ if (!cmd) {
 
 for (const [bin, args] of cmd.steps) {
   const r = spawnSync(bin, args, {
+    cwd: WEB,
     stdio: 'inherit',
     env: { ...process.env, ...cmd.env },
   })

@@ -40,6 +40,7 @@
     "apps/web/public",
     "apps/web/biome.json",
     "apps/web/components.json",
+    "apps/web/package.json",
     "apps/web/README.md",
     "LICENSE"
   ],
