@@ -17,6 +17,7 @@ import {
   COPY_DIRS,
   COPY_FILES,
   IGNORED_NAMES,
+  kitPath,
   NEVER_COPY,
   NEVER_COPY_ANYWHERE,
   PRESET_DIR,
@@ -108,7 +109,7 @@ function assertCopyable(rel) {
 // --- primitives -------------------------------------------------------------------------------
 
 function readKitFile(kitRoot, rel) {
-  const src = join(kitRoot, rel)
+  const src = kitPath(kitRoot, rel)
   if (!existsSync(src)) throw new Error(`Kit is missing '${rel}' — cannot scaffold without it`)
   return readFileSync(src, 'utf8')
 }
@@ -122,7 +123,7 @@ function writeOut(outDir, rel, text, written) {
 
 function copyOne(kitRoot, outDir, rel, written) {
   assertCopyable(rel)
-  const src = join(kitRoot, rel)
+  const src = kitPath(kitRoot, rel)
   if (!existsSync(src)) throw new Error(`Kit is missing '${rel}' — cannot scaffold without it`)
   const dest = join(outDir, rel)
   mkdirSync(dirname(dest), { recursive: true })
@@ -135,7 +136,7 @@ function copyOne(kitRoot, outDir, rel, written) {
 // is the only filtered entry and it has no subdirectories.
 function copyTree(kitRoot, outDir, rel, written, keep) {
   assertCopyable(rel)
-  const src = join(kitRoot, rel)
+  const src = kitPath(kitRoot, rel)
   if (!existsSync(src)) throw new Error(`Kit is missing '${rel}/' — cannot scaffold without it`)
   const entries = readdirSync(src, { withFileTypes: true }).sort((a, b) =>
     a.name < b.name ? -1 : 1,

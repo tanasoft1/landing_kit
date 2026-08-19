@@ -7,6 +7,33 @@
 // `src/config/`, `src/blocks/registry.ts`, `src/blocks/block-modules.ts` and
 // `src/blocks/variants.all.ts` are deliberately missing: they are written fresh per-answers by the
 // generate layer, not copied. Copying them first would only mean overwriting them a moment later.
+import { join } from 'node:path'
+
+// Where the web template lives inside the kit. Every path in this file is relative to TWO
+// places: this directory in the kit, and the ROOT of a generated project. Those used to be the
+// same directory and are not any more, which is the entire reason this constant exists.
+//
+// A generated project stays flat. Only the kit's own copy moved, to make room for `apps/api`.
+export const WEB_ROOT = ''
+
+// Read from the kit ROOT instead of from WEB_ROOT.
+//
+// README.md alone: npm and GitHub both take the root README as the package's front page, so
+// moving it under `apps/web` would leave the published package documented by a redirect. It is
+// still the template's README and still copied to a generated project's root; only its home in
+// the kit is different from everything else's.
+export const ROOT_SOURCED = ['README.md']
+
+/**
+ * Where `rel` really is inside the kit.
+ *
+ * Every read of a kit file goes through this. A direct `join(kitRoot, rel)` anywhere would look
+ * in the kit root, find nothing, and fail with "Kit is missing 'src/...'", which reads like a
+ * broken tarball rather than a path that was never updated.
+ */
+export function kitPath(kitRoot, rel) {
+  return join(kitRoot, ROOT_SOURCED.includes(rel) ? '' : WEB_ROOT, rel)
+}
 
 // Copied verbatim, recursively.
 export const COPY_DIRS = [
