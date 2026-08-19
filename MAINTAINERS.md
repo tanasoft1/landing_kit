@@ -96,9 +96,9 @@ no-flash script, anything else ships no theme-switching code at all.
 
 ## Swapping the whole config: `configs/`
 
-`configs/smoke-onepage/` is a complete second config — one page holding every block, light only.
-It exists to prove the premise end to end: it contains **no components and no overrides**, and
-needs zero edits under `src/`.
+`apps/web/configs/smoke-onepage/` is a complete second config — one page holding every block, light
+only. It exists to prove the premise end to end: it contains **no components and no overrides**,
+and needs zero edits under `apps/web/src/`.
 
 ```bash
 node tools/kit.mjs smoke:onepage
@@ -113,8 +113,8 @@ drive prerendering.
 
 ## Lighthouse budget
 
-`lighthouserc.json` (mobile) and `lighthouserc.desktop.json` (desktop) assert on all four
-prerendered pages of the default build.
+`apps/web/lighthouserc.json` (mobile) and `apps/web/lighthouserc.desktop.json` (desktop) assert on
+all four prerendered pages of the default build.
 
 ```bash
 node tools/kit.mjs lighthouse
@@ -152,8 +152,8 @@ and no publish-time rewriting of `package.json`:
 | Not shipped | Why |
 |---|---|
 | `tools/` | Maintainer commands — see above |
-| `configs/` | The second config exists to test the kit, not to ship |
-| `lighthouserc*.json` | Performance budgets for this repo's own build |
+| `apps/web/configs/` | The second config exists to test the kit, not to ship |
+| `apps/web/lighthouserc*.json` | Performance budgets for this repo's own build |
 | `MAINTAINERS.md` | This file |
 
 The README is trimmed on the way out too. `cli/copy.mjs` drops the sections a generated project

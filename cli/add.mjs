@@ -86,19 +86,30 @@ const pascal = (s) => s[0].toUpperCase() + s.slice(1)
 /**
  * The project root the command is being run from, proved by the files it is about to edit.
  *
- * The kit is refused explicitly, and that check is not decoration: the kit has
- * `src/blocks/registry.ts` too, so a `src/blocks/` test alone happily adds a block to the
- * generator itself. Measured, by doing it — the block landed in the kit's own registry, from
- * where every future scaffold would have shipped it. `cli/kit-manifest.mjs` exists only in the
- * kit; it is not in the list of things a scaffold receives.
+ * This test is positive (proving a generated project) rather than negative (refusing the kit),
+ * and that is not a style choice: a negative test here already failed silently once. It used to
+ * check for `cli/kit-manifest.mjs` next to the cwd, which held only while the kit's own template
+ * was the repo root, so `cli/` sat beside `src/blocks/`. Once the template moved to `apps/web/`,
+ * that file was never in a generated project's ancestry to begin with, and the check kept
+ * "passing" (silently stopped guarding) while looking exactly as it did when it worked. Measured,
+ * by doing it: the block landed in the kit's own registry, from where every future scaffold would
+ * have shipped it. A guard that can go quiet like that is worse than no guard, because it looks
+ * present on every future read of this file.
+ *
+ * `.kit/scaffold.json` is written by `generateFiles` into every generated project unconditionally,
+ * and survives `git init` because the generated `.gitignore` un-ignores it specifically
+ * (`.kit/*` then `!.kit/scaffold.json`), so its absence proves "not a generated project" however
+ * the repo that holds the template is laid out today or gets laid out next. The kit's own
+ * `apps/web/.kit/` exists but holds only build artifacts (`build-stamp.json`, `urls.json`), never
+ * `scaffold.json`, so standing in the kit's template still refuses here.
  */
 function projectRoot() {
   const cwd = process.cwd()
-  if (existsSync(join(cwd, 'cli/kit-manifest.mjs'))) {
+  if (!existsSync(join(cwd, '.kit/scaffold.json'))) {
     throw new Error(
-      `this is the landing-kit repository itself, not a generated project — adding a block here ` +
-        `would ship it to every future scaffold. Run this from the project you scaffolded. ` +
-        `(Current directory: ${cwd})`,
+      `not a generated project: no .kit/scaffold.json here. If this is the landing-kit ` +
+        `repository, adding a block would ship it to every future scaffold; run this from a ` +
+        `project you scaffolded. (Current directory: ${cwd})`,
     )
   }
   if (!existsSync(join(cwd, 'src/blocks/registry.ts'))) {

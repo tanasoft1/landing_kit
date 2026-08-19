@@ -100,9 +100,19 @@ export const TRANSFORMED_FILES = [
 // stopping.
 //
 // Two lists because the entries mean two different things, and conflating them is wrong in both
-// directions. These are ROOT paths — `docs/` the plan folder, `configs/` the alternate-config
-// tree. Matching them at any depth would reject `src/components/docs/`, a directory the kit really
-// does ship.
+// directions. These are REPO-ROOT paths, not `WEB_ROOT`-relative, even though every `rel` that
+// reaches `assertCopyable` today is `WEB_ROOT`-relative. Matching them at any depth would reject
+// `src/components/docs/`, a directory the kit really does ship.
+//
+// That root split makes the entries here reachable by two different routes. `configs` and
+// `lighthouserc*.json` moved into `apps/web/` with the template, so a `WEB_ROOT`-relative `rel`
+// can still name them, and they are live: try to copy either and this list is what stops it.
+// `cli`, `docs`, `.superpowers` and `pnpm-lock.yaml` did not move; they name things that only ever
+// existed at the repo root, so no `WEB_ROOT`-relative `rel` can reach them and they are currently
+// unreachable dead code, kept anyway. They become reachable again the moment `ROOT_SOURCED` gains
+// an entry pointing above `WEB_ROOT`, which is exactly the case this list exists to stop, so
+// deleting the currently-unreachable half would remove the guard for the day it starts mattering
+// again.
 export const NEVER_COPY = [
   'cli',
   'docs',
