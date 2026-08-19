@@ -35,42 +35,25 @@
   "license": "MIT",
   "files": [
     "cli",
-    "src",
-    "scripts",
-    "public",
-    "README.md",
-    "LICENSE",
-    "biome.json",
-    "components.json"
+    "apps/web/src",
+    "apps/web/scripts",
+    "apps/web/public",
+    "apps/web/biome.json",
+    "apps/web/components.json",
+    "apps/web/README.md",
+    "LICENSE"
   ],
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
-    "@fontsource-variable/inter": "^5.3.0",
-    "@fontsource-variable/manrope": "^5.3.0",
-    "@lhci/cli": "^0.15.1",
-    "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/react-router": "^1.170.29",
-    "@tanstack/react-start": "^1.168.46",
-    "@types/node": "^26.2.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.5",
-    "motion": "^13.1.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "react-hook-form": "^7.85.0",
-    "tailwindcss": "^4.3.3",
-    "typescript": "6.0.3",
-    "vite": "^8.2.1",
-    "zod": "^4.4.3"
+    "@biomejs/biome": "^2.5.8"
   },
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome ci .",
-    "fix": "biome check --write .",
-    "conventions": "node scripts/check-conventions.mjs",
-    "verify": "biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && node scripts/verify-build.mjs"
+    "dev": "pnpm --filter @dewsoft/landing-kit-web dev",
+    "build": "pnpm --filter @dewsoft/landing-kit-web build",
+    "typecheck": "pnpm --filter @dewsoft/landing-kit-web typecheck",
+    "lint": "biome ci . && pnpm --filter @dewsoft/landing-kit-web lint",
+    "fix": "biome check --write . && pnpm --filter @dewsoft/landing-kit-web fix",
+    "conventions": "pnpm --filter @dewsoft/landing-kit-web conventions",
+    "snapshot": "node tools/scaffold-snapshot.mjs check",
+    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && pnpm --filter @dewsoft/landing-kit-web verify:build && pnpm snapshot"
   }
 }
