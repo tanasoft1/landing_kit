@@ -418,8 +418,18 @@ function transformBiomeJson(text, answers) {
   const file = 'biome.json'
   const keep = answers.theme === 'both' ? 'both' : 'single'
 
+  // `vcs.root` points Biome at the repo root, where the kit keeps its `.gitignore`, two levels up
+  // from `apps/web/biome.json`. A generated project is flat, so its `.gitignore` sits beside this
+  // file and the same key would send Biome outside the project. Removed rather than rewritten:
+  // the default is already correct once the two files are siblings.
   let out = replaceExactText(
     text,
+    `${file} (vcs root)`,
+    ', "useIgnoreFile": true, "root": "../.." }',
+    ', "useIgnoreFile": true }',
+  )
+  out = replaceExactText(
+    out,
     `${file} (motion.noop entry)`,
     `${BIOME_INDENT}"@/integrations/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
     '',

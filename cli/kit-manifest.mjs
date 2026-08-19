@@ -14,15 +14,19 @@ import { join } from 'node:path'
 // same directory and are not any more, which is the entire reason this constant exists.
 //
 // A generated project stays flat. Only the kit's own copy moved, to make room for `apps/api`.
-export const WEB_ROOT = ''
+export const WEB_ROOT = 'apps/web'
 
-// Read from the kit ROOT instead of from WEB_ROOT.
+// Paths read from the kit ROOT rather than from WEB_ROOT.
 //
-// README.md alone: npm and GitHub both take the root README as the package's front page, so
-// moving it under `apps/web` would leave the published package documented by a redirect. It is
-// still the template's README and still copied to a generated project's root; only its home in
-// the kit is different from everything else's.
-export const ROOT_SOURCED = ['README.md']
+// Empty, and that is the design rather than an oversight. README.md was here once, to keep npm's
+// package page at the repo root, and that split it from the tree that validates it:
+// `scripts/check-conventions.mjs` resolves every path against its working directory, because it
+// also has to run inside a flat generated project, so it could see `src/` and not the README it
+// cross-checks. The template's README lives with the template; the kit root has its own.
+//
+// Kept as the seam: a kit file that genuinely belongs at the root, and is still copied to a
+// generated project's root, goes here.
+export const ROOT_SOURCED = []
 
 /**
  * Where `rel` really is inside the kit.

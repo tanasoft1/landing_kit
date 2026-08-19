@@ -162,13 +162,20 @@ const themeFile = (answers) => (answers.theme === 'both' ? 'theme.both.tsx' : 't
 // --- package.json ---------------------------------------------------------------------------------
 
 function kitManifest(kitRoot) {
-  const pkg = JSON.parse(readKitFile(kitRoot, 'package.json'))
-  if (typeof pkg.version !== 'string' || pkg.version === '') {
+  // The version is the ROOT package's: that is what npm publishes and what `.kit/scaffold.json`
+  // records. `readKitFile` would look under WEB_ROOT and find the private web package, whose
+  // version nobody outside this repo ever sees.
+  const rootPkg = JSON.parse(readFileSync(join(kitRoot, 'package.json'), 'utf8'))
+  if (typeof rootPkg.version !== 'string' || rootPkg.version === '') {
     throw new Error(
       "Kit package.json has no 'version' — `.kit/scaffold.json` records which kit version " +
         'generated a project, and a scaffold that cannot say so is not worth writing',
     )
   }
+  // The dependency ranges are the web template's, and only the web template's. The root package
+  // depends on Biome to lint `cli/`, which no generated project needs and which would fail the
+  // CLASSIFIED check below if it were mixed in here.
+  const pkg = JSON.parse(readKitFile(kitRoot, 'package.json'))
   // Both groups, because which group the kit uses is Task 1's business and could change again;
   // what this layer needs is the version range, whichever side it is filed under.
   const deps = { ...pkg.dependencies, ...pkg.devDependencies }
@@ -176,22 +183,23 @@ function kitManifest(kitRoot) {
   for (const name of CLASSIFIED) {
     if (!Object.hasOwn(deps, name)) {
       throw new Error(
-        `Kit package.json has no '${name}', but cli/generate.mjs classifies it. A rename or ` +
-          'removal upstream would otherwise drop it from every generated project with no other ' +
-          'signal — update the dependency lists in cli/generate.mjs',
+        `Kit apps/web/package.json has no '${name}', but cli/generate.mjs classifies it. A ` +
+          'rename or removal upstream would otherwise drop it from every generated project ' +
+          'with no other signal — update the dependency lists in cli/generate.mjs',
       )
     }
   }
   for (const name of Object.keys(deps)) {
     if (!CLASSIFIED.includes(name)) {
       throw new Error(
-        `Kit package.json lists '${name}', which cli/generate.mjs does not classify as runtime, ` +
-          'build or excluded. Add it to RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, BUILD_DEPS or ' +
-          'EXCLUDED_DEPS — otherwise every generated project silently goes without it',
+        `Kit apps/web/package.json lists '${name}', which cli/generate.mjs does not classify ` +
+          'as runtime, build or excluded. Add it to RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, ' +
+          'BUILD_DEPS or EXCLUDED_DEPS — otherwise every generated project silently goes ' +
+          'without it',
       )
     }
   }
-  return { version: pkg.version, deps }
+  return { version: rootPkg.version, deps }
 }
 
 /**
@@ -266,7 +274,11 @@ overrides:
   // join rather than `kitPath`. There is one workspace per repository by definition.
   const kitFile = join(kitRoot, 'pnpm-workspace.yaml')
   if (existsSync(kitFile)) {
-    const kitText = readFileSync(kitFile, 'utf8')
+    // The kit declares `packages:` because it holds two workspace packages; a generated project
+    // holds one and declares none. That is the only difference allowed. Everything below it,
+    // the pnpm settings a generated project inherits, must still match exactly, so the key is
+    // stripped rather than the comparison loosened.
+    const kitText = readFileSync(kitFile, 'utf8').replace(/^packages:\n(?:[ \t]+-.*\n)+/m, '')
     if (kitText !== text) {
       throw new Error(
         "The kit's own pnpm-workspace.yaml is no longer what the CLI generates, so generated " +
