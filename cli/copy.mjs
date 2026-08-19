@@ -553,7 +553,8 @@ function copyInto(kitRoot, outDir, answers) {
   // Every copy path is composed with `keep`, not just the tree walk. A transformed file reached
   // through any of them would be copied verbatim and then rewritten a moment later, leaving
   // correctness to depend on which write lands last. `src/integrations/submit.endpoint.ts`
-  // arrives via BOUNDARY_FILES and `biome.json` via COPY_FILES, so this is not hypothetical.
+  // arrives via BOUNDARY_FILES, so this is not hypothetical. (`biome.json` is TRANSFORMED_FILES
+  // only, never COPY_FILES, so it never reaches this loop at all.)
   for (const rel of COPY_FILES) {
     if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
   }
