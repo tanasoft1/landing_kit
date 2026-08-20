@@ -34,6 +34,7 @@ Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
   --theme=both|single        Light + dark, or a single mode  (default: both)
   --preset=editorial|warm    Token preset                    (default: editorial)
+  --backend=none|api         Static site, or +Go service     (default: none)
   --blocks=a,b,c             Blocks to include               (default: all four)
                              Not a free choice — see Blocks below
   --add-blocks=a,b           Blocks of your own, any number  (default: none)
