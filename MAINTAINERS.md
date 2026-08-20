@@ -19,11 +19,12 @@ If you are building a site, everything you need is in [README.md](./README.md).
 
 ## Repo layout
 
-The kit is a pnpm workspace, with `apps/web/` as its only package today.
+The kit is a pnpm workspace, with `apps/web/` and `apps/api/` as its two packages.
 
 | Path | What it is |
 |---|---|
-| `apps/web/` | The web template. This is what a scaffolded project becomes. |
+| `apps/web/` | The web template. This is what a scaffolded project's frontend becomes. |
+| `apps/api/` | The Go service. Copied into a scaffold only when a backend is requested. |
 | `cli/` | The scaffolder. Never copied into a generated project. |
 | `tools/` | Maintainer commands: smoke builds, Lighthouse, scaffold snapshots. Not published. |
 
@@ -37,6 +38,15 @@ and the ROOT of a generated project. `WEB_ROOT` in that file is what reconciles 
 read from the kit root instead of `WEB_ROOT`; it is empty today, kept as the seam for the next kit
 file that genuinely belongs at the root and still needs to land in a generated project's root too.
 A generated project is flat and stays flat.
+
+`apps/api/` gets the same two-constant treatment, in the same file: `API_ROOT` (`apps/api`, where
+the service lives in this repo) and `API_DEST` (`api`, where it lands in a scaffold), reconciled by
+`apiPath()`. Two constants for the same reason as `WEB_ROOT`: the kit is a pnpm workspace, so its
+own packages sit under `apps/`, but a generated project is not a workspace at all — it is one flat
+app with the service beside it. That flatness is deliberate, not a simplification still to be
+undone: it is what lets `cli/add.mjs` stay unaware a backend exists, so `add-block` and `add-page`
+need no branch for "does this project have `apps/api`?" A generated project with a backend is
+`web-stuff/` plus `api/`, never `apps/web/` plus `apps/api/`.
 
 There are two READMEs and they are not copies. `apps/web/README.md` documents a generated site and
 is the file the scaffolder copies into one. The root `README.md` documents this repository and is
@@ -54,7 +64,7 @@ invisible to every check in this repo. Leave the mismatch alone.
 
 ## Scaffold snapshots
 
-`tools/scaffold-snapshot.mjs` hashes the full output of four answer combinations and compares
+`tools/scaffold-snapshot.mjs` hashes the full output of five answer combinations and compares
 against `tools/__snapshots__/`. `pnpm verify` runs it.
 
 A failing snapshot means generated projects changed. That is often intended: re-record with
@@ -169,6 +179,15 @@ Drop that one line from `files` and the published package still builds, still pa
 this repo, and still installs; it just cannot scaffold a project, because the one file the CLI
 needs at scaffold time never made it into the tarball. Nothing but a real `npm pack`, a real
 install, and a real scaffold (see Publishing, above) would catch that.
+
+`apps/api` ships as one whole-directory entry, unlike `apps/web`'s per-directory listing above.
+There is nothing under `apps/api` that must stay out of a consumer's install — no second config, no
+Lighthouse budget — so there is no reason to enumerate its contents one by one, and no drift for a
+new file under `apps/api` to fall through: it is in `files` automatically, where a new top-level
+directory under `apps/web` would not be. This exact class of bug — a file the CLI needs at scaffold
+time missing from `files` — is what shipped once already, which is why `apps/api`'s entry is the
+whole tree rather than a second hand-maintained list to keep in sync with `API_COPY_DIRS` and
+`API_COPY_FILES` in `cli/kit-manifest.mjs`.
 
 ## The Go API
 
