@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,12 +12,16 @@ import (
 
 	"landing-api/conf"
 	"landing-api/internal/db/dbsetup"
+	"landing-api/internal/db/sqlc"
 	"landing-api/internal/http/handlers"
 	"landing-api/internal/http/routes"
 	"landing-api/internal/service"
 	"landing-api/internal/service/notify"
+	"landing-api/internal/utils"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // main does nothing but map run's error to an exit code.
@@ -90,6 +95,16 @@ func run() error {
 	// This defer is the reason main is split into main plus run. os.Exit skips deferred calls,
 	// so returning an error is what lets the pool close on every failure path below.
 	defer pool.Close()
+
+	// Dispatched before the notifier or the HTTP server are built, following habido-back's
+	// `./cmd cron` pattern of branching on os.Args[1] in the same entrypoint rather than
+	// shipping a second binary. seed-admin needs nothing past this point: it reuses conf.Load
+	// and this pool so it can never disagree with the server about which database it writes to,
+	// then returns before a port is ever bound or the "database connection established" line
+	// below is logged -- so its stdout carries exactly one line, the created email.
+	if len(os.Args) > 1 && os.Args[1] == "seed-admin" {
+		return runSeedAdmin(context.Background(), pool, os.Args[2:])
+	}
 
 	slog.Info("database connection established")
 
@@ -173,5 +188,49 @@ func run() error {
 	if failure != nil {
 		return fmt.Errorf("listen on %s: %w", addr, failure)
 	}
+	return nil
+}
+
+// minSeedAdminPasswordLen is the floor `./cmd seed-admin` enforces on the password it is given.
+// A different concern from conf.minJWTSecretLen: this is a human-chosen login password, not a
+// generated HMAC key, so the floor is a password-strength minimum rather than a
+// brute-force-resistance one.
+const minSeedAdminPasswordLen = 12
+
+// runSeedAdmin hashes and inserts one admin_users row. It reuses the pool run built from
+// conf.Load, rather than opening its own connection from separately parsed flags, specifically so
+// this can never point at a different database than the server this admin will log into.
+//
+// Prints nothing but the created email: not the password, not its hash, not the row's id. A
+// seeded password must never reach a terminal scrollback or a CI log, so nothing else is written
+// anywhere on the success path.
+func runSeedAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error {
+	if len(args) != 2 {
+		return errors.New("usage: seed-admin <email> <password>")
+	}
+	email, password := args[0], args[1]
+
+	if len(password) < minSeedAdminPasswordLen {
+		return fmt.Errorf("password is %d characters, want at least %d", len(password), minSeedAdminPasswordLen)
+	}
+
+	hash, err := utils.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	// The unique constraint on admin_users.email, not a pre-check here, is what stops a second
+	// seed of the same email from silently creating a duplicate: CreateAdmin returns this
+	// service's error unchanged, so a repeat seed fails loudly instead of succeeding twice.
+	admin, err := sqlc.New(pool).CreateAdmin(ctx, sqlc.CreateAdminParams{
+		ID:           uuid.New(),
+		Email:        email,
+		PasswordHash: hash,
+	})
+	if err != nil {
+		return fmt.Errorf("create admin: %w", err)
+	}
+
+	fmt.Fprintln(os.Stdout, admin.Email) //nolint:errcheck // stdout write on a CLI's success path; nothing meaningful to do if it fails
 	return nil
 }
