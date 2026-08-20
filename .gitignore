@@ -23,3 +23,11 @@ todos.json
 # pattern silently drops the /docs gallery's classes from the stylesheet (measured: 24,595 ->
 # 23,275 bytes) and the page renders unstyled with every gate still green.
 /docs/
+
+# Agent tool state, same category as .superpowers/ above. Only the local-only file, so a
+# project-level .claude/ config can still be committed if the team ever wants one.
+#
+# This is ignored by many developers' global git excludes already, but Biome's `useIgnoreFile`
+# reads THIS file and not the global one, and the root biome.json lints `**`. Without the entry
+# here, `pnpm verify` fails on a file the harness rewrites whenever a permission is granted.
+.claude/settings.local.json
