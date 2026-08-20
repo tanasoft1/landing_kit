@@ -55,6 +55,10 @@
     "fix": "biome check --write . && pnpm --filter @dewsoft/landing-kit-web fix",
     "conventions": "pnpm --filter @dewsoft/landing-kit-web conventions",
     "snapshot": "node tools/scaffold-snapshot.mjs check",
-    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && pnpm --filter @dewsoft/landing-kit-web verify:build && pnpm snapshot"
+    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && pnpm --filter @dewsoft/landing-kit-web verify:build && pnpm api:sqlc && pnpm api:build && pnpm api:lint && pnpm api:test && pnpm snapshot",
+    "api:sqlc": "cd apps/api && sqlc diff",
+    "api:build": "cd apps/api && go build ./...",
+    "api:lint": "cd apps/api && golangci-lint run",
+    "api:test": "cd apps/api && go test ./..."
   }
 }

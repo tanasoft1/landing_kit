@@ -169,3 +169,77 @@ Drop that one line from `files` and the published package still builds, still pa
 this repo, and still installs; it just cannot scaffold a project, because the one file the CLI
 needs at scaffold time never made it into the tarball. Nothing but a real `npm pack`, a real
 install, and a real scaffold (see Publishing, above) would catch that.
+
+## The Go API
+
+`apps/api` is a GoFiber service on PostgreSQL, laid out like `psyfint_v2_back` and `habido-back`:
+`cmd/` for the entry point, `conf/` for typed config, and `internal/{http,service,db,utils}`.
+
+### Running it
+
+```bash
+docker compose up -d db     # Postgres, on host port 5433
+cd apps/api && make dev     # air, on PORT (default 3000)
+```
+
+Migrations run at startup, as in `habido-back`. The host port is 5433 rather than 5432 so the
+compose service does not collide with a Postgres already running on the developer's machine; see the
+comment in `docker-compose.yml`. `DB_PORT` defaults to 5433 to match, and `apps/api/conf/config.go`
+holds that number in one named constant so the code default and compose cannot drift.
+
+`DB_USER`, `DB_PASSWORD` and `DB_NAME`'s defaults mirror `docker-compose.yml`'s `POSTGRES_USER`,
+`POSTGRES_PASSWORD` and `POSTGRES_DB`, and must be changed together. That is a documented coupling
+rather than a shared constant on purpose: the duplication is between Go and YAML, so a Go constant
+would look like a fix without being one. `DB_PORT` was different and did get a constant, because
+that value is also compared inside Go.
+
+A mismatch in the user or password fails loudly with an authentication error. `DB_NAME` is the one
+worth care: if a developer's own Postgres happens to hold a database of the same name, a mismatch
+connects successfully to the wrong one.
+
+### Prerequisites
+
+`sqlc` and `golangci-lint`, both used by `pnpm verify`. `sqlc` is needed to RUN verify, not only to
+regenerate, because `pnpm api:sqlc` runs `sqlc diff`. `air` is optional, for hot reload.
+
+Generated SQLC code under `internal/db/sqlc/` is committed, so a first run needs no codegen. Run
+`make sqlc` only after editing a query or a migration. Never hand-edit the generated files:
+`pnpm api:sqlc` fails if the committed output does not match what generation would produce, which
+catches both a hand-edit and a forgotten regeneration, and it needs no database because it reads the
+migration files as its schema.
+
+### Notifications
+
+`NOTIFY_DRIVER` selects how a new lead reaches the site owner: `log` writes a line, `ses` sends mail
+through AWS SES following `habido-back`. It defaults to `log` so `pnpm dev` works with no AWS
+account, and `conf.Load` refuses `log` when `APP_ENV=production`, because that combination stores
+every lead and tells nobody.
+
+`NOTIFY_DRIVER=ses` additionally requires `NOTIFY_TO` and `SES_FROM`, both checked at the config
+boundary. The region is checked differently: `NewSES` errors when the **resolved**
+`aws.Config.Region` is empty rather than requiring `AWS_REGION` to be set, so a shared config profile
+or an explicit variable both satisfy it. Note EC2 instance metadata does not, deliberately; the
+comment in `ses.go` explains why enabling it would make startup hang on non-EC2 hosts.
+
+The asymmetry with the CORS guard is intentional. `CORS_ORIGINS` is refused for any environment that
+is not `development`, because a wrong origin is simply broken everywhere. `NOTIFY_DRIVER=log` is
+refused only in `production`, because a staging site emailing a real client is worse than a staging
+site not emailing.
+
+### Go tests
+
+```bash
+cd apps/api && go test ./...
+```
+
+Integration tests use `github.com/tanasoft1/testkit/pgkit` and need Docker. Set environment values
+with `t.Setenv`, never by writing a scratch `.env`: `conf.LoadEnvFile` is `sync.Once` guarded, so the
+first read wins for the whole test binary and a second `.env` is silently ignored rather than
+erroring. Measured with two directories whose `.env` files set different values; the second read
+returned the first directory's.
+
+Migrations are safe to run from more than one replica. golang-migrate's Postgres driver takes a real
+session-level `pg_advisory_lock`, so a second replica blocks, then sees `ErrNoChange` and boots, and
+Postgres releases the lock if a backend dies. The one caveat: the library wraps acquisition in a 15
+second `DefaultLockTimeout`, so a migration slower than that makes other replicas exit non-zero for
+an orchestrator to retry. Harmless today, worth knowing before writing a heavy backfill.
