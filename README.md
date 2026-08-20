@@ -9,7 +9,7 @@ npx --yes @dewsoft/landing-kit@latest my-site    # npm
 yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+
 ```
 
-It asks four short questions, then writes a standalone TanStack Start project. The generated
+It asks five short questions, then writes a standalone TanStack Start project. The generated
 project has no dependency on this package.
 
 **Full documentation for a generated site is [apps/web/README.md](./apps/web/README.md)**, which is
