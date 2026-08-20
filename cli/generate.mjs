@@ -228,6 +228,20 @@ function packageJson(outDir, answers, { deps }) {
   for (const [block, extra] of Object.entries(BLOCK_RUNTIME_DEPS)) {
     if (answers.blocks.includes(block)) runtime.push(...extra)
   }
+  const hasBackend = (answers.backend ?? 'none') !== 'none'
+  // Chains the binaries directly rather than `pnpm lint && pnpm typecheck && …`. Naming the
+  // package manager here would hard-require pnpm: `npm run verify` would die on
+  // `pnpm: command not found`, which is a miserable first experience for anyone who installed
+  // with npm. Every package manager puts `node_modules/.bin` on PATH for a script, so this
+  // form works under all three. The Go steps are appended the same way, not via the `api:*`
+  // script names below — `cd api` is the last thing this chain does, and nothing runs after it,
+  // so there is nothing to `cd` back to.
+  const verify =
+    'biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && ' +
+    'node scripts/verify-build.mjs' +
+    (hasBackend
+      ? ' && cd api && sqlc diff && go build ./... && golangci-lint run && go test ./...'
+      : '')
   return json({
     name: packageName(outDir),
     private: true,
@@ -239,13 +253,18 @@ function packageJson(outDir, answers, { deps }) {
       lint: 'biome ci .',
       fix: 'biome check --write .',
       conventions: 'node scripts/check-conventions.mjs',
-      // Chains the binaries directly rather than `pnpm lint && pnpm typecheck && …`. Naming the
-      // package manager here would hard-require pnpm: `npm run verify` would die on
-      // `pnpm: command not found`, which is a miserable first experience for anyone who installed
-      // with npm. Every package manager puts `node_modules/.bin` on PATH for a script, so this
-      // form works under all three.
-      verify:
-        'biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && node scripts/verify-build.mjs',
+      verify,
+      // Runnable on their own, matching the kit's own script names and bodies (apps/api's path
+      // becomes `api`, not `apps/api`, since a generated project is flat). Not referenced from
+      // `verify` above by name — see the comment there for why.
+      ...(hasBackend
+        ? {
+            'api:sqlc': 'cd api && sqlc diff',
+            'api:build': 'cd api && go build ./...',
+            'api:lint': 'cd api && golangci-lint run',
+            'api:test': 'cd api && go test ./...',
+          }
+        : {}),
     },
     dependencies: pickDeps(runtime, deps),
     devDependencies: pickDeps(BUILD_DEPS, deps),
@@ -312,6 +331,64 @@ __unconfig*
 .kit/*
 !.kit/scaffold.json
 `
+
+// --- docker-compose.yml ---------------------------------------------------------------------------
+
+/**
+ * Templated rather than copied, only when a backend is included: `docker-compose.yml` is a root
+ * file that belongs to neither template tree (`WEB_ROOT` nor the API tree in `kit-manifest.mjs`),
+ * and it is not in `package.json`'s `files`, so it does not exist on disk at all under `pnpm dlx`.
+ */
+function dockerComposeYml() {
+  return `services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: landing
+    ports:
+      # 5433 on the host, not 5432. A developer machine very often already runs Postgres on
+      # 5432 (Homebrew, Postgres.app, another project's container), and binding it makes
+      # \`docker compose up -d db\` fail on a fresh clone with "port is already allocated". The
+      # container's own port stays 5432, so nothing inside the container or in any connection
+      # string built from DB_PORT changes shape. Measured on a machine running
+      # postgresql@16 locally: 5432 failed to bind, 5433 worked.
+      - '5433:5432'
+    volumes:
+      - landing-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d landing']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  landing-db:
+`
+}
+
+/**
+ * Same reason and same shape as `pnpmWorkspaceYaml`'s and `tsconfigJson`'s drift checks: the kit's
+ * own `docker-compose.yml` is not readable at scaffold time (it is not in `files`), so this is the
+ * one place a change to it can be caught — and only when the kit's own copy IS on disk, which is
+ * every working copy, which is exactly where someone would edit it.
+ */
+function assertDockerComposeMatchesKit(kitRoot, generated) {
+  const kitFile = join(kitRoot, 'docker-compose.yml')
+  if (!existsSync(kitFile)) return
+  const kitText = readFileSync(kitFile, 'utf8')
+  if (kitText !== generated) {
+    throw new Error(
+      "The kit's own docker-compose.yml is no longer what the CLI generates, so a scaffolded " +
+        'backend would get compose settings this repo does not use. That file is not in ' +
+        "package.json's `files`, so it cannot simply be read at scaffold time — update " +
+        `dockerComposeYml in cli/generate.mjs to match.\n` +
+        `  kit:       ${JSON.stringify(kitText)}\n` +
+        `  generated: ${JSON.stringify(generated)}`,
+    )
+  }
+}
 
 // --- vite.config.ts -------------------------------------------------------------------------------
 
@@ -1033,6 +1110,12 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const tsconfig = tsconfigJson(answers)
   assertTsconfigMatchesKit(kitRoot, tsconfig)
 
+  // `?? 'none'` for the same reason as `cli/copy.mjs`: belt-and-braces for a caller that builds
+  // an `answers` object by hand rather than through `resolveAnswers`.
+  const hasBackend = (answers.backend ?? 'none') !== 'none'
+  const dockerCompose = hasBackend ? dockerComposeYml() : null
+  if (hasBackend) assertDockerComposeMatchesKit(kitRoot, dockerCompose)
+
   const files = [
     ['package.json', packageJson(outDir, answers, manifest)],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
@@ -1046,6 +1129,10 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
     ['src/config/site.config.ts', siteConfigTs(kitRoot, answers)],
     ['.kit/scaffold.json', scaffoldJson(answers, kitVersion)],
   ]
+
+  // Only when a backend was asked for, and generated at the project root, not under `api/`:
+  // `docker-compose.yml` runs Postgres for the whole project, not just the Go service.
+  if (hasBackend) files.push(['docker-compose.yml', dockerCompose])
 
   // Blocks of your own, from the same templates `add-block` uses — so a block created at scaffold
   // time and one added a month later are the same four files. The registry entries for them are
