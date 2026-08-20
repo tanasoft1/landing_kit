@@ -11,7 +11,10 @@ import (
 
 	"landing-api/conf"
 	"landing-api/internal/db/dbsetup"
+	"landing-api/internal/http/handlers"
 	"landing-api/internal/http/routes"
+	"landing-api/internal/service"
+	"landing-api/internal/service/notify"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -90,6 +93,22 @@ func run() error {
 
 	slog.Info("database connection established")
 
+	// conf.Load already refuses NOTIFY_DRIVER values other than "ses" and "log" (and refuses
+	// "log" in production), so the only two cases reachable here are the two switch handles.
+	var notifier notify.Notifier
+	switch cfg.Notify.Driver {
+	case "ses":
+		notifier, err = notify.NewSES(context.Background(), cfg.Notify)
+		if err != nil {
+			return fmt.Errorf("build ses notifier: %w", err)
+		}
+	default:
+		notifier = notify.NewLogger()
+	}
+
+	services := service.New(pool, notifier, cfg)
+	h := handlers.New(services)
+
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",
 		// BodyLimit is 1 MB, not psyfint's 10 MB: the largest request this service accepts is
@@ -99,7 +118,7 @@ func run() error {
 		ProxyHeader: cfg.Server.ProxyHeader,
 	})
 
-	routes.Setup(app, cfg.Server.CORSOrigins)
+	routes.Setup(app, h, cfg.Server.CORSOrigins)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
