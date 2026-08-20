@@ -1,6 +1,7 @@
 package conf
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
+	Notify   NotifyConfig
 }
 
 type ServerConfig struct {
@@ -44,6 +46,29 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  string
+}
+
+// NotifyConfig drives internal/service/notify. Driver is "ses" or "log".
+//
+// It defaults to "log" so `pnpm dev` runs with no AWS account and no credentials. That default is
+// also the trap: a production deploy that forgets NOTIFY_DRIVER stores every lead correctly and
+// tells nobody, with no error anywhere. Load therefore refuses to start when AppEnv is
+// "production" and the driver is still "log".
+type NotifyConfig struct {
+	Driver    string
+	To        string
+	From      string
+	AWSRegion string
+	AWSKeyID  string
+	AWSSecret string
+	// SiteName prefixes the subject line, so an owner whose inbox receives leads from several
+	// sites this template built can tell them apart. Optional: empty means the subject carries
+	// just the visitor's name. Deliberately NOT the source path, which belongs in the body;
+	// "New lead from /contact" names a route rather than a site.
+	//
+	// Duplicated from site.config.ts's `name` rather than shared, because the API is a separate
+	// process from the web build and has no way to read a TypeScript file.
+	SiteName string
 }
 
 // DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
@@ -89,6 +114,15 @@ func Load() (*Config, error) {
 			DBName:   getEnv("DB_NAME", "landing"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
+		Notify: NotifyConfig{
+			Driver:    getEnv("NOTIFY_DRIVER", notifyDriverLog),
+			To:        getEnv("NOTIFY_TO", ""),
+			From:      getEnv("SES_FROM", ""),
+			AWSRegion: getEnv("AWS_REGION", ""),
+			AWSKeyID:  getEnv("AWS_ACCESS_KEY_ID", ""),
+			AWSSecret: getEnv("AWS_SECRET_ACCESS_KEY", ""),
+			SiteName:  getEnv("NOTIFY_SITE_NAME", ""),
+		},
 	}
 
 	// Validated here, at the config boundary, so service wiring can never see a value that
@@ -104,6 +138,35 @@ func Load() (*Config, error) {
 			devCORSOrigins, cfg.Server.AppEnv)
 	}
 
+	if cfg.Notify.Driver != notifyDriverLog && cfg.Notify.Driver != notifyDriverSES {
+		return nil, fmt.Errorf("invalid NOTIFY_DRIVER %q: want \"ses\" or \"log\"", cfg.Notify.Driver)
+	}
+	// Only "production", unlike the CORS check above which fires for anything that is not
+	// "development". The asymmetry is deliberate: a staging deploy SHOULD keep the log driver,
+	// because a staging site emailing a real client is worse than a staging site not emailing.
+	// A staging deploy with the wrong CORS origin, by contrast, is simply broken.
+	if cfg.Server.AppEnv == "production" && cfg.Notify.Driver == notifyDriverLog {
+		return nil, errors.New("NOTIFY_DRIVER=log in production: leads would be stored and never delivered")
+	}
+	// Both required at this boundary, not just checked lazily inside NewSES: Notifier.Lead's
+	// error is deliberately never allowed to fail the request it notifies about (see
+	// notify.Notifier), so a deploy missing either of these boots cleanly, reports Driver=ses,
+	// stores every lead, and notifies nobody from the first lead onward, discoverable only by
+	// reading logs. Same trap as NOTIFY_DRIVER=log in production, through a different door.
+	//
+	// AWS_REGION is deliberately NOT required here alongside them: it has a legitimate ambient
+	// source (an EC2 or EKS role's resolved region) that NOTIFY_TO and SES_FROM do not, so
+	// requiring the variable would break that case. See the resolved-Region check in
+	// notify.NewSES instead.
+	if cfg.Notify.Driver == notifyDriverSES {
+		if cfg.Notify.To == "" {
+			return nil, errors.New("NOTIFY_DRIVER=ses requires NOTIFY_TO")
+		}
+		if cfg.Notify.From == "" {
+			return nil, errors.New("NOTIFY_DRIVER=ses requires SES_FROM")
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -112,6 +175,13 @@ func Load() (*Config, error) {
 const devCORSOrigins = "http://localhost:5173"
 
 const defaultAppEnv = "development"
+
+// notifyDriverLog and notifyDriverSES are the only two valid NOTIFY_DRIVER values. Named once so
+// the default, the "invalid driver" check and the production guard cannot drift from each other.
+const (
+	notifyDriverLog = "log"
+	notifyDriverSES = "ses"
+)
 
 // defaultDBPort matches the HOST port in docker-compose.yml, deliberately not Postgres's usual
 // 5432. See the comment there for why compose avoids 5432.
