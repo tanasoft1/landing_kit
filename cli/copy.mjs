@@ -623,11 +623,11 @@ function copyInto(kitRoot, outDir, answers) {
     writeOut(outDir, rel, transform(readKitFile(kitRoot, rel), answers), written)
   }
 
-  // Only when a backend was asked for: `--backend=none` must stay byte-identical to today's
-  // output, so this whole tree is absent rather than filtered down to nothing. `?? 'none'` matters
-  // right now, ahead of Task 2: `cli/prompts.mjs` does not set `answers.backend` yet, and every
-  // existing snapshot scaffolds with no such flag — treating an absent answer as anything but
-  // 'none' would grow an `api/` tree into all four baselines this same task must leave untouched.
+  // Only when a backend was asked for: with no backend, this whole tree is absent rather than
+  // filtered down to nothing. `?? 'none'` is belt-and-braces: `cli/prompts.mjs` always sets
+  // `answers.backend` now, so this only matters for a caller that builds an `answers` object by
+  // hand rather than through `resolveAnswers` — which is exactly how this function's own tests do
+  // it, and how a future one might too.
   if ((answers.backend ?? 'none') !== 'none') copyApiTree(kitRoot, outDir, written)
 
   return written

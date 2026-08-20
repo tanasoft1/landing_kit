@@ -19,14 +19,16 @@ export const BLOCK_DEFAULT_VARIANT = {
   contact: 'default',
 }
 
-// The three single-choice questions. Order here is the order they are asked in.
+// The four single-choice questions. Order here is the order they are asked in.
 const CHOICES = {
   pages: ['multi', 'one'],
   theme: ['both', 'single'],
   preset: ['editorial', 'warm'],
+  // 'none' first: `pickChoice` opens on DEFAULTS, and the default must be the first option shown.
+  backend: ['none', 'api'],
 }
-const DEFAULTS = { pages: 'multi', theme: 'both', preset: 'editorial' }
-const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset' }
+const DEFAULTS = { pages: 'multi', theme: 'both', preset: 'editorial', backend: 'none' }
+const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset', backend: 'Backend' }
 
 // One short line per choice, shown beside it in the arrow-key picker. Someone scaffolding their
 // first site has no idea what `editorial` or `alternating` looks like, and the whole point of a
@@ -38,6 +40,8 @@ const HINTS = {
   single: 'One mode only, no toggle',
   editorial: 'Quiet and neutral, small radius',
   warm: 'Amber and rounder, with a soft shadow',
+  none: 'Static site only',
+  api: 'Go service and Postgres, stores contact form submissions',
 }
 
 const VARIANT_HINTS = {
@@ -140,8 +144,8 @@ function checkFlagNames(flags) {
     if (name === 'blocks' || name === 'add-blocks') continue
     if (name.startsWith('variant-')) continue
     throw new Error(
-      `Unknown flag --${name}. Allowed: --pages, --theme, --preset, --blocks, --add-blocks, ` +
-        '--variant-<block>, --yes, --help',
+      `Unknown flag --${name}. Allowed: --pages, --theme, --preset, --backend, --blocks, ` +
+        '--add-blocks, --variant-<block>, --yes, --help',
     )
   }
 }
