@@ -83,7 +83,7 @@ func Load() (*Config, error) {
 		},
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnv("DB_PORT", "5432"),
+			Port:     getEnv("DB_PORT", defaultDBPort),
 			User:     getEnv("DB_USER", "postgres"),
 			Password: getEnv("DB_PASSWORD", "postgres"),
 			DBName:   getEnv("DB_NAME", "landing"),
@@ -112,6 +112,15 @@ func Load() (*Config, error) {
 const devCORSOrigins = "http://localhost:5173"
 
 const defaultAppEnv = "development"
+
+// defaultDBPort matches the HOST port in docker-compose.yml, deliberately not Postgres's usual
+// 5432. See the comment there for why compose avoids 5432.
+//
+// Kept in step with compose on purpose. A default of 5432 makes a fresh clone with no .env
+// connect to whatever Postgres the developer already runs, which is a silently wrong database.
+// A default of 5433 with no compose service running is a connection refused, which says what is
+// wrong. Prefer the loud failure.
+const defaultDBPort = "5433"
 
 var (
 	envFileOnce sync.Once

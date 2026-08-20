@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: landing
+    ports:
+      # 5433 on the host, not 5432. A developer machine very often already runs Postgres on
+      # 5432 (Homebrew, Postgres.app, another project's container), and binding it makes
+      # `docker compose up -d db` fail on a fresh clone with "port is already allocated". The
+      # container's own port stays 5432, so nothing inside the container or in any connection
+      # string built from DB_PORT changes shape. Measured on a machine running
+      # postgresql@16 locally: 5432 failed to bind, 5433 worked.
+      - '5433:5432'
+    volumes:
+      - landing-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d landing']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  landing-db:
