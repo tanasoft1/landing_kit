@@ -32,10 +32,10 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
 
 /**
- * Four answer sets, chosen to reach every branch the copy and generate layers have:
+ * Five answer sets, chosen to reach every branch the copy and generate layers have:
  * both `theme` halves (which picks a boundary file AND edits biome.json and token-gallery),
- * both presets (which filters `src/styles/presets`), a block subset, and custom blocks
- * (which runs the add-block templates at scaffold time).
+ * both presets (which filters `src/styles/presets`), a block subset, custom blocks
+ * (which runs the add-block templates at scaffold time), and a backend.
  *
  * `--yes` is on every set, including the ones that pass explicit flags. Not redundant: this runs
  * non-interactively, so a question left unanswered exits with "Input ended before every question
@@ -46,12 +46,17 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
  * `hero` requires `contact` and `cta` requires `contact` + `features`, so a subset that leaves
  * a link unresolved is refused by the CLI before it writes anything. The two subsets below are
  * both legal combinations.
+ *
+ * `backend` is the only variant not covered by `default`, `onepage`, `custom` or `subset`: all
+ * four of those take the default `--backend=none`, so this is the one exercising the API tree,
+ * `docker-compose.yml` and the Go scripts in `package.json`.
  */
 const VARIANTS = {
   default: ['--yes'],
   onepage: ['--yes', '--pages=one', '--theme=single', '--preset=warm', '--blocks=hero,contact'],
   custom: ['--yes', '--add-blocks=pricing,faq'],
   subset: ['--yes', '--blocks=features,contact', '--theme=single'],
+  backend: ['--yes', '--backend=api'],
 }
 
 /**

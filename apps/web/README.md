@@ -35,7 +35,7 @@ npx --yes @dewsoft/landing-kit@latest my-site    # npm
 yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+  (on yarn 1, use the npx line)
 ```
 
-It asks four short questions. Use the **arrow keys** to move and **Enter** to choose — each option
+It asks five short questions. Use the **arrow keys** to move and **Enter** to choose — each option
 explains itself, so there is nothing to memorise. For the blocks question, **Space** toggles items
 on and off.
 
@@ -417,10 +417,13 @@ Every question the CLI asks has a flag, so a scaffold can be fully scripted:
 ```bash
 pnpm dlx @dewsoft/landing-kit@latest frontend --yes
 pnpm dlx @dewsoft/landing-kit@latest frontend --yes --add-blocks=pricing,faq
+pnpm dlx @dewsoft/landing-kit@latest frontend --yes --backend=api
 ```
 
 Run `pnpm dlx @dewsoft/landing-kit --help` for the full list. `--add-blocks` is the flag form of
-the picker's **add your own** row, and takes as many names as you want.
+the picker's **add your own** row, and takes as many names as you want. `--backend=api` adds a Go
+service in `api/` and a `docker-compose.yml` for Postgres, storing the contact form's submissions;
+`--backend=none` is the default, and stays a static site with nothing to run besides `pnpm dev`.
 
 Blocks are not freely combinable: some blocks' copy links to others, and a link to a block you
 left out would render a blank page. The CLI refuses those combinations at the question rather than
