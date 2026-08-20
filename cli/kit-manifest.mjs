@@ -167,6 +167,7 @@ export const API_COPY_FILES = [
   '.air.toml',
   '.golangci.yml',
   '.env.example',
+  'README.md',
 ]
 
 /** Where `rel` is inside the kit's API tree. */
