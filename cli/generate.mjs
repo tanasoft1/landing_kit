@@ -240,7 +240,7 @@ function packageJson(outDir, answers, { deps }) {
     'biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && ' +
     'node scripts/verify-build.mjs' +
     (hasBackend
-      ? ' && cd api && sqlc diff && go build ./... && golangci-lint run && go test ./...'
+      ? ' && npm run api:sqlc && npm run api:build && npm run api:lint && npm run api:test'
       : '')
   return json({
     name: packageName(outDir),

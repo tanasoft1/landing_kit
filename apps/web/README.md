@@ -56,7 +56,7 @@ are done:
 Each one arrives on the home page with placeholder text, ready for you to write. You still need at
 least one of the four the kit ships.
 
-Every question opens on a sensible default, so pressing Enter four times is a valid run. Add
+Every question opens on a sensible default, so pressing Enter five times is a valid run. Add
 `--yes` to skip the questions entirely.
 
 Then start it:
