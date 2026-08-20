@@ -7,31 +7,34 @@ import (
 
 	"landing-api/conf"
 	"landing-api/internal/db/sqlc"
+	"landing-api/internal/service/auth"
 	"landing-api/internal/service/lead"
 	"landing-api/internal/service/notify"
+	"landing-api/internal/utils/secure"
 )
 
 // Services holds every domain service plus the shared handles they were built from, so main
 // registers one struct instead of threading each dependency through its own call site.
 type Services struct {
 	Lead    *lead.Service
+	Auth    *auth.Service
 	Queries *sqlc.Queries
 	Pool    *pgxpool.Pool
+	// TokenService is exposed separately from Auth because AuthMiddleware needs it too, on
+	// every route behind it, not only on the login and refresh handlers Auth itself serves.
+	TokenService *secure.TokenService
 }
 
 // New wires every service from the pool, the chosen notifier and config.
-//
-// cfg is currently unused: task 5 wires only lead.Service, which needs nothing from it beyond
-// what the caller already resolved into notifier. It stays in this signature because task 6's
-// admin endpoint is the reason New takes it at all, and changing a constructor's signature once
-// every caller already depends on it is a larger diff than carrying an unused parameter for one
-// task.
 func New(pool *pgxpool.Pool, notifier notify.Notifier, cfg *conf.Config) *Services {
 	q := sqlc.New(pool)
+	tokenService := secure.NewTokenService(cfg.JWT.Secret, cfg.JWT.AccessExpireHours, cfg.JWT.RefreshExpireDays)
 
 	return &Services{
-		Lead:    lead.New(q, notifier),
-		Queries: q,
-		Pool:    pool,
+		Lead:         lead.New(q, notifier),
+		Auth:         auth.New(q, tokenService),
+		Queries:      q,
+		Pool:         pool,
+		TokenService: tokenService,
 	}
 }

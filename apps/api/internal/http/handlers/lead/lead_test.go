@@ -12,13 +12,29 @@ import (
 
 	"landing-api/internal/db/sqlc"
 	"landing-api/internal/http/handlers"
+	authhandler "landing-api/internal/http/handlers/auth"
 	leadhandler "landing-api/internal/http/handlers/lead"
 	"landing-api/internal/http/models"
 	"landing-api/internal/http/routes"
+	"landing-api/internal/service/auth"
 	"landing-api/internal/service/lead"
 	"landing-api/internal/service/notify"
 	"landing-api/internal/testsupport"
+	"landing-api/internal/utils/secure"
 )
+
+// testTokenService is shared by every test in this package that needs a token: same secret and
+// expiries throughout, so a token minted with it in one test file validates in another. Never
+// used for anything but tests.
+const (
+	testJWTSecret         = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
+	testAccessExpireHours = 1
+	testRefreshExpireDays = 7
+)
+
+func newTestTokenService() *secure.TokenService {
+	return secure.NewTokenService(testJWTSecret, testAccessExpireHours, testRefreshExpireDays)
+}
 
 // validRequest clears every check this handler applies: field shape, the honeypot, and the
 // timing floor. Each case below starts here and breaks exactly one property.
@@ -37,17 +53,21 @@ func validRequest() models.CreateLeadRequest {
 // exercised too, not just Handler.Create in isolation. notify.NewLogger is used instead of SES:
 // no AWS account is available here, and the log driver's Lead never returns an error, so it
 // never masks a real failure the way a misconfigured SES client's silence would.
-func newApp(t *testing.T) (*fiber.App, *testsupport.DB) {
+func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	t.Helper()
 
 	db := testsupport.Fresh(t)
 	svc := lead.New(db.Queries, notify.NewLogger())
-	h := &handlers.Handlers{Lead: leadhandler.New(svc)}
+	tokenService := newTestTokenService()
+	h := &handlers.Handlers{
+		Lead: leadhandler.New(svc),
+		Auth: authhandler.New(auth.New(db.Queries, tokenService)),
+	}
 
 	app := fiber.New()
-	routes.Setup(app, h, "http://localhost:5173")
+	routes.Setup(app, h, "http://localhost:5173", tokenService)
 
-	return app, db
+	return app, db, tokenService
 }
 
 func leadCount(t *testing.T, db *testsupport.DB) int {
@@ -63,7 +83,7 @@ func leadCount(t *testing.T, db *testsupport.DB) int {
 func TestCreateAcceptsAValidSubmission(t *testing.T) {
 	t.Parallel()
 
-	app, db := newApp(t)
+	app, db, _ := newApp(t)
 	client := testkit.NewClient(t, fiberkit.Doer(app))
 
 	client.PostJSON("/api/leads", validRequest()).Status(http.StatusOK)
@@ -80,7 +100,7 @@ func TestCreateAcceptsAValidSubmission(t *testing.T) {
 func TestCreateRejectsHoneypotAndTimingWithTheSameMessage(t *testing.T) {
 	t.Parallel()
 
-	honeypotApp, honeypotDB := newApp(t)
+	honeypotApp, honeypotDB, _ := newApp(t)
 	honeypotReq := validRequest()
 	honeypotReq.HoneypotURL = "x"
 	honeypotRes := testkit.NewClient(t, fiberkit.Doer(honeypotApp)).
@@ -90,7 +110,7 @@ func TestCreateRejectsHoneypotAndTimingWithTheSameMessage(t *testing.T) {
 		t.Fatalf("honeypot case: rows = %d, want 0", got)
 	}
 
-	timingApp, timingDB := newApp(t)
+	timingApp, timingDB, _ := newApp(t)
 	timingReq := validRequest()
 	timingReq.ElapsedMs = 500
 	timingRes := testkit.NewClient(t, fiberkit.Doer(timingApp)).
@@ -116,7 +136,7 @@ func TestCreateRejectsHoneypotAndTimingWithTheSameMessage(t *testing.T) {
 func TestCreateRejectsInvalidEmailAndNamesTheField(t *testing.T) {
 	t.Parallel()
 
-	app, db := newApp(t)
+	app, db, _ := newApp(t)
 	req := validRequest()
 	req.Email = "nope"
 

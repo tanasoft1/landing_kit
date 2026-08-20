@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"landing-api/internal/db/sqlc"
+	"landing-api/internal/http/models"
 	"landing-api/internal/service/notify"
 )
 
@@ -79,4 +80,38 @@ func (s *Service) Create(ctx context.Context, in Input) error {
 		slog.Error("lead notification failed", slog.Any("err", err), slog.String("email", in.Email))
 	}
 	return nil
+}
+
+// List returns leads newest-first as models.RsLead. limit and offset are used exactly as given:
+// capping the page size is the caller's job (see the clamp in
+// internal/http/handlers/lead.Handler.List), because only the caller knows whether limit arrived
+// from a trusted source or an admin-supplied query string.
+func (s *Service) List(ctx context.Context, limit, offset int32) ([]models.RsLead, error) {
+	rows, err := s.q.ListLeads(ctx, sqlc.ListLeadsParams{Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, fmt.Errorf("list leads: %w", err)
+	}
+
+	leads := make([]models.RsLead, 0, len(rows))
+	for _, row := range rows {
+		lead := models.RsLead{
+			ID:        row.ID,
+			Name:      row.Name,
+			Email:     row.Email,
+			Message:   row.Message,
+			Locale:    row.Locale,
+			CreatedAt: row.CreatedAt,
+		}
+		if row.SourcePage != nil {
+			lead.SourcePage = *row.SourcePage
+		}
+		if row.Ip != nil {
+			lead.IP = row.Ip.String()
+		}
+		if row.UserAgent != nil {
+			lead.UserAgent = *row.UserAgent
+		}
+		leads = append(leads, lead)
+	}
+	return leads, nil
 }

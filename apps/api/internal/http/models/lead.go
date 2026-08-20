@@ -1,5 +1,11 @@
 package models
 
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
 // CreateLeadRequest is the contact form's wire shape. It matches
 // apps/web/src/integrations/submit-schema.ts field for field, including the two anti-spam fields,
 // because the client can be bypassed and this is the only check that cannot be.
@@ -38,3 +44,19 @@ type CreateLeadRequest struct {
 // changing one means changing the other, and the integration test in
 // internal/http/handlers/lead/lead_test.go is what fails if they drift.
 const MinElapsedMS = 2000
+
+// RsLead is one row of GET /api/admin/leads. A separate type from sqlc.Lead, not that struct
+// reused directly, so the wire shape (source_page, ip and user_agent as plain strings, empty
+// rather than null when unset) stays stable even if the storage layer's optional-column
+// representation changes.
+type RsLead struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	Email      string    `json:"email"`
+	Message    string    `json:"message"`
+	Locale     string    `json:"locale"`
+	SourcePage string    `json:"source_page,omitempty"`
+	IP         string    `json:"ip,omitempty"`
+	UserAgent  string    `json:"user_agent,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}

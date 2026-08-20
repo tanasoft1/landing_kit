@@ -8,13 +8,15 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"landing-api/internal/http/handlers"
+	"landing-api/internal/utils/secure"
 )
 
 // Setup mounts the global middleware chain and every route group.
 //
-// No global rate limiter. The only limited route is POST /api/leads, and its limiter needs a key
-// generator that cannot collapse callers into one bucket (see internal/http/routes/public.go).
-func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string) {
+// No global rate limiter. The limited routes are POST /api/leads and the two /api/auth routes,
+// and each needs a key generator that cannot collapse callers into one bucket (see
+// internal/http/routes/public.go).
+func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService) {
 	app.Use(recover.New())
 	app.Use(logger.New())
 	app.Use(helmet.New())
@@ -32,4 +34,5 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string) {
 	})
 
 	setupPublicRoutes(api, h)
+	setupAdminRoutes(api, h, tokenService)
 }
