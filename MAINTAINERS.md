@@ -245,6 +245,45 @@ is not `development`, because a wrong origin is simply broken everywhere. `NOTIF
 refused only in `production`, because a staging site emailing a real client is worse than a staging
 site not emailing.
 
+### Admin authentication
+
+`internal/service/auth`, `internal/utils/secure` and `internal/http/handlers/middleware.go` mirror
+`psyfint_v2_back`'s login/refresh service and Bearer-token middleware: HS256, one secret, and the
+same Mongolian 401 messages. One deliberate difference: `Login` always runs bcrypt, even when the
+email does not exist, comparing against a fixed dummy hash instead of returning early on
+`pgx.ErrNoRows`. Returning early is faster, and that speed difference is itself an oracle — bcrypt
+is deliberately slow, so a request that skips it answers measurably sooner than one that ran it,
+letting a caller enumerate registered emails by timing alone even though both cases return the
+identical error message.
+
+`JWT_SECRET` has no default outside development. `conf.Load` refuses to start when
+`APP_ENV` is anything but `development` and the secret is empty or shorter than 32 characters:
+HS256 with a short secret is brute-forceable offline once an attacker holds one token to check
+guesses against, and an empty secret makes every admin token forgeable by anyone. Development gets
+a documented, obviously-a-placeholder default so `pnpm dev` runs with no `.env` at all.
+
+Access and refresh tokens are not interchangeable. `secure.Claims.TokenType` is checked on every
+validation, not only at issue time, because a refresh token lives far longer (days, versus an
+hour for an access token) — accepting one as the other would silently extend a stolen or leaked
+token's usefulness to the longer of the two lifetimes. `ValidateAccessToken` and
+`ValidateRefreshToken` each reject the other token type, and the keyfunc in `parseToken` asserts
+`*jwt.SigningMethodHMAC` so a token signed with a different algorithm is rejected before its
+signature is even checked.
+
+`POST /api/auth/login` and `POST /api/auth/refresh` are public and rate limited, reusing
+`leadLimiter`'s `KeyGenerator` shape (factored out as `clientKeyGenerator` in
+`internal/http/routes/public.go`): an unresolvable `c.IP()` gets a unique key rather than joining
+every other caller's bucket, for the same reason documented there.
+
+`./cmd seed-admin <email> <password>` creates an admin account, following `habido-back`'s
+`./cmd cron` pattern of dispatching on `os.Args[1]` in the same binary rather than shipping a
+second one. It reuses `conf.Load` and the already-migrated pool, so it can never disagree with the
+server about which database it writes to, and it refuses a password under 12 characters. It prints
+nothing but the created email on success: not the password, not the hash, not the row's id, so a
+seeded password never reaches a terminal scrollback or a CI log. `make seed-admin email=... password=...`
+wraps it. A second seed of the same email fails on `admin_users`'s unique constraint on `email`
+rather than silently creating a duplicate.
+
 ### Go tests
 
 ```bash

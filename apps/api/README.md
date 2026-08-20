@@ -1,9 +1,10 @@
 # The Go API
 
-`api/` is a GoFiber service on PostgreSQL. Today it does one thing: accept and store this site's
-contact form submissions, with a honeypot and a timing floor as spam defences and an email
-notification on every new lead. It is not a CMS — the marketing pages stay static, prerendered at
-build time, and this service never touches them.
+`api/` is a GoFiber service on PostgreSQL. It accepts and stores this site's contact form
+submissions, with a honeypot and a timing floor as spam defences and an email notification on
+every new lead, and it gives an admin a way to read them back: log in, then list leads over
+`GET /api/admin/leads`. It is not a CMS — the marketing pages stay static, prerendered at build
+time, and this service never touches them.
 
 ## Running it
 
@@ -48,6 +49,42 @@ migration files as its schema. `air` is optional, for hot reload.
 account; `ses` sends mail through AWS SES and additionally requires `NOTIFY_TO` and `SES_FROM`.
 Startup refuses `NOTIFY_DRIVER=log` when `APP_ENV=production`, because that combination stores
 every lead and tells nobody.
+
+## Admin access
+
+Create an admin account, then log in:
+
+```bash
+cd api && make seed-admin email=owner@example.mn password=at-least-12-characters
+```
+
+`seed-admin` refuses a password under 12 characters and prints nothing but the created email —
+never the password, never its hash. A second seed of the same email fails rather than creating a
+duplicate.
+
+```
+POST /api/auth/login    {"email": "...", "password": "..."}  -> access_token, refresh_token
+POST /api/auth/refresh  {"refresh_token": "..."}              -> a fresh access_token, refresh_token
+GET  /api/admin/leads   Authorization: Bearer <access_token>
+```
+
+`access_token` and `refresh_token` are not interchangeable: `GET /api/admin/leads` rejects a
+refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token
+everywhere else, and only call `/api/auth/refresh` with the refresh token to get a new pair once
+the access token expires (`JWT_ACCESS_EXPIRE_HOURS`, default 1 hour; the refresh token lasts
+`JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
+
+`JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to
+anything but `development` when the secret is empty or shorter than 32 characters, because a short
+or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example
+`openssl rand -base64 32`.
+
+`POST /api/auth/login` and `POST /api/auth/refresh` are rate limited, same as the contact form, so
+repeated wrong guesses get throttled rather than retried without limit.
+
+`GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
+capped at 200 regardless of what is requested, so one request can't pull every lead the site has
+ever received.
 
 ## Tests
 
