@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -15,6 +16,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Notify   NotifyConfig
+	JWT      JWTConfig
 }
 
 type ServerConfig struct {
@@ -71,6 +73,18 @@ type NotifyConfig struct {
 	SiteName string
 }
 
+// JWTConfig drives internal/utils/secure.TokenService. Secret is validated below, at the config
+// boundary: HS256 with a short secret is brute-forceable offline once an attacker holds one
+// token to check guesses against, and an empty secret makes every token forgeable by anyone who
+// can compute an HMAC. Load refuses to start on either problem outside development, the same
+// asymmetry the CORS_ORIGINS check above documents: a staging deploy has real admins and the
+// same forgeable-token failure mode a production deploy has.
+type JWTConfig struct {
+	Secret            string
+	AccessExpireHours int
+	RefreshExpireDays int
+}
+
 // DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
 //
 // psyfint_v2_back has two methods here: DSN() returning a URL for golang-migrate, which accepts
@@ -99,6 +113,18 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	// Parsed here, not left as strings for a caller to convert: a bad value fails Load itself
+	// rather than reaching secure.NewTokenService, which has no way to report it beyond a panic
+	// or a silently wrong duration.
+	accessExpireHours, err := strconv.Atoi(getEnv("JWT_ACCESS_EXPIRE_HOURS", "1"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_ACCESS_EXPIRE_HOURS: %w", err)
+	}
+	refreshExpireDays, err := strconv.Atoi(getEnv("JWT_REFRESH_EXPIRE_DAYS", "7"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_REFRESH_EXPIRE_DAYS: %w", err)
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Port:        getEnv("PORT", "3000"),
@@ -123,6 +149,22 @@ func Load() (*Config, error) {
 			AWSSecret: getEnv("AWS_SECRET_ACCESS_KEY", ""),
 			SiteName:  getEnv("NOTIFY_SITE_NAME", ""),
 		},
+		JWT: JWTConfig{
+			// No blanket default, deliberately unlike CORS_ORIGINS above: that default is safe
+			// to apply in every environment because the check right below catches it still
+			// being in effect outside development. A default JWT secret cannot work that way,
+			// because a shared, publicly-readable-in-this-repo string would make every deployed
+			// instance's tokens forgeable by anyone who cloned the repo. So the default is
+			// applied only when AppEnv is development (right after this literal), and every
+			// other environment must set JWT_SECRET or fail the validation below.
+			Secret:            getEnv("JWT_SECRET", ""),
+			AccessExpireHours: accessExpireHours,
+			RefreshExpireDays: refreshExpireDays,
+		},
+	}
+
+	if cfg.JWT.Secret == "" && cfg.Server.AppEnv == defaultAppEnv {
+		cfg.JWT.Secret = devJWTSecret
 	}
 
 	// Validated here, at the config boundary, so service wiring can never see a value that
@@ -167,6 +209,24 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Same asymmetry as the CORS_ORIGINS check above and for the same reason: anything that is
+	// not development gets a real admin login, so anything that is not development gets this
+	// guard. devJWTSecret is long enough to pass the length check itself, but the check still
+	// runs on it here rather than being skipped by construction, so a copy-pasted "just set
+	// APP_ENV=development in prod to make the error go away" cannot silently work either.
+	if cfg.Server.AppEnv != defaultAppEnv {
+		if cfg.JWT.Secret == "" {
+			return nil, errors.New("JWT_SECRET is required outside development: " +
+				"an empty secret makes every admin token forgeable by anyone")
+		}
+		if len(cfg.JWT.Secret) < minJWTSecretLen {
+			return nil, fmt.Errorf(
+				"JWT_SECRET is %d characters, want at least %d: "+
+					"HS256 with a short secret is brute-forceable offline once an attacker holds one token",
+				len(cfg.JWT.Secret), minJWTSecretLen)
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -191,6 +251,18 @@ const (
 // A default of 5433 with no compose service running is a connection refused, which says what is
 // wrong. Prefer the loud failure.
 const defaultDBPort = "5433"
+
+// devJWTSecret is the JWT_SECRET applied only when AppEnv is development and nothing else set
+// one, so `pnpm dev` runs with no .env at all. It is long enough to pass minJWTSecretLen itself,
+// but that is incidental, not load-bearing: the validation below never runs against it, because
+// it only runs outside development.
+const devJWTSecret = "development-only-secret-do-not-use-in-prod"
+
+// minJWTSecretLen is the floor Load enforces on JWT_SECRET outside development. HS256 with a
+// secret shorter than this is brute-forceable offline once an attacker holds one token to check
+// guesses against; 32 bytes matches the guidance for HMAC-SHA256 keys (RFC 2104's "at least as
+// long as the hash output", 32 bytes for SHA-256).
+const minJWTSecretLen = 32
 
 var (
 	envFileOnce sync.Once
