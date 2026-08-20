@@ -118,7 +118,7 @@ func run() error {
 		ProxyHeader: cfg.Server.ProxyHeader,
 	})
 
-	routes.Setup(app, h, cfg.Server.CORSOrigins)
+	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -5,6 +5,7 @@ package leadhandler
 
 import (
 	"log/slog"
+	"math"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -84,4 +85,47 @@ func (h *Handler) Create(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true})
+}
+
+// DefaultListLimit and MaxListLimit bound GET /api/admin/leads. An uncapped limit would let one
+// request pull every lead the site has ever received; MaxListLimit is the ceiling List clamps to
+// regardless of what the query string asks for.
+const (
+	DefaultListLimit = 50
+	MaxListLimit     = 200
+)
+
+// List returns leads newest-first, behind AuthMiddleware. limit and offset come from the query
+// string: limit defaults to DefaultListLimit when absent or non-positive, and is clamped to
+// MaxListLimit no matter how large a value is requested.
+func (h *Handler) List(c *fiber.Ctx) error {
+	limit := c.QueryInt("limit", DefaultListLimit)
+	if limit <= 0 {
+		limit = DefaultListLimit
+	}
+	if limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+
+	offset := c.QueryInt("offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+	// Clamped before the int32 conversion below, not after: sqlc generated an int32 offset
+	// param (see ListLeadsParams), and converting an int larger than that range wraps rather
+	// than erroring, which would otherwise turn a huge offset into an unpredictable small or
+	// negative one instead of the largest offset this query can express.
+	if offset > math.MaxInt32 {
+		offset = math.MaxInt32
+	}
+
+	leads, err := h.svc.List(c.Context(), int32(limit), int32(offset))
+	if err != nil {
+		slog.Error("list leads failed", slog.Any("err", err))
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error: "internal error", Message: "Дотоод алдаа гарлаа. Дараа дахин оролдоно уу.",
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: leads})
 }
