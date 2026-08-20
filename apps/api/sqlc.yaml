@@ -1,0 +1,86 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/db/queries/"
+    schema: "internal/db/migrations/"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/db/sqlc"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_json_tags: true
+        json_tags_case_style: snake
+        # SQLC matches db_type by exact string, and its Postgres parser normalises only SOME type
+        # aliases to their pg_catalog name. Measured against sqlc v1.30.0 with a scratch schema:
+        #
+        #   normalised, a pg_catalog override matches:  boolean, integer, varchar,
+        #                                              character varying, decimal, numeric,
+        #                                              timestamp, timestamp with time zone,
+        #                                              timestamp without time zone,
+        #                                              time with time zone
+        #   NOT normalised, the same override misses:  bool, int4, timetz, timestamptz
+        #
+        # So an override on a type that has a short alias may need BOTH spellings, and the symptom
+        # is silent: the column comes back as a pgtype wrapper and only the call site notices. That
+        # is why "timestamptz" appears below in addition to pg_catalog.timestamptz. If you add an
+        # override, check the shorthand your migrations actually use.
+        overrides:
+          - db_type: pg_catalog.timestamp
+            nullable: false
+            go_type:
+              import: time
+              type: Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            nullable: false
+            go_type:
+              import: time
+              type: Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: "date"
+            nullable: false
+            go_type:
+              import: time
+              type: Time
+          - db_type: "date"
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+              pointer: true
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "timestamptz"
+            nullable: false
+            go_type:
+              import: time
+              type: Time
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
