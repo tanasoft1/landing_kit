@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"landing-api/conf"
+	"landing-api/internal/db/dbsetup"
 	"landing-api/internal/http/routes"
 
 	"github.com/gofiber/fiber/v2"
@@ -74,6 +75,20 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	if err := dbsetup.RunMigrations(cfg.Database.DSN()); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
+	pool, err := dbsetup.NewPool(cfg.Database.DSN())
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	// This defer is the reason main is split into main plus run. os.Exit skips deferred calls,
+	// so returning an error is what lets the pool close on every failure path below.
+	defer pool.Close()
+
+	slog.Info("database connection established")
 
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",
