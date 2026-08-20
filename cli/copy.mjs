@@ -12,6 +12,10 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
+  API_COPY_DIRS,
+  API_COPY_FILES,
+  API_DEST,
+  apiPath,
   BOUNDARY_FILES,
   blockDir,
   COPY_DIRS,
@@ -147,6 +151,54 @@ function copyTree(kitRoot, outDir, rel, written, keep) {
     if (entry.isDirectory()) copyTree(kitRoot, outDir, childRel, written, keep)
     else if (keep(childRel)) copyOne(kitRoot, outDir, childRel, written)
   }
+}
+
+// --- the API tree -------------------------------------------------------------------------------
+//
+// Mirrors copyOne/copyTree above, with two differences: the source root is apiPath, not kitPath,
+// and every destination is joined under API_DEST. Kept as separate functions rather than an extra
+// parameter on copyOne/copyTree, because those two are also called for the web tree with `rel`
+// used unmodified as the destination — threading a dest-prefix through them would make every call
+// site carry a value that is empty except here.
+
+function copyOneApi(kitRoot, outDir, rel, written) {
+  assertCopyable(rel)
+  const src = apiPath(kitRoot, rel)
+  if (!existsSync(src)) {
+    throw new Error(`Kit is missing 'apps/api/${rel}' — cannot scaffold a backend without it`)
+  }
+  const destRel = `${API_DEST}/${rel}`
+  const dest = join(outDir, destRel)
+  mkdirSync(dirname(dest), { recursive: true })
+  // Byte copy, not a read-and-write: matches copyOne, and nothing in the API tree is transformed.
+  copyFileSync(src, dest)
+  written.push(destRel)
+}
+
+function copyTreeApi(kitRoot, outDir, rel, written) {
+  assertCopyable(rel)
+  const src = apiPath(kitRoot, rel)
+  if (!existsSync(src)) {
+    throw new Error(`Kit is missing 'apps/api/${rel}/' — cannot scaffold a backend without it`)
+  }
+  const entries = readdirSync(src, { withFileTypes: true }).sort((a, b) =>
+    a.name < b.name ? -1 : 1,
+  )
+  for (const entry of entries) {
+    if (IGNORED_NAMES.includes(entry.name)) continue
+    const childRel = `${rel}/${entry.name}`
+    if (entry.isDirectory()) copyTreeApi(kitRoot, outDir, childRel, written)
+    // No `keep` filter here, unlike copyTree: nothing under API_COPY_DIRS is answer-filtered or
+    // transformed, so every file the kit ships in cmd/, conf/ and internal/ ships to the scaffold,
+    // *_test.go and internal/testsupport included — see the plan's note on why tests ship.
+    else copyOneApi(kitRoot, outDir, childRel, written)
+  }
+}
+
+/** Copies apps/api into `outDir/api`. Only called when `answers.backend !== 'none'`. */
+function copyApiTree(kitRoot, outDir, written) {
+  for (const dir of API_COPY_DIRS) copyTreeApi(kitRoot, outDir, dir, written)
+  for (const rel of API_COPY_FILES) copyOneApi(kitRoot, outDir, rel, written)
 }
 
 // --- README.md --------------------------------------------------------------------------------
@@ -570,6 +622,13 @@ function copyInto(kitRoot, outDir, answers) {
     assertCopyable(rel)
     writeOut(outDir, rel, transform(readKitFile(kitRoot, rel), answers), written)
   }
+
+  // Only when a backend was asked for: `--backend=none` must stay byte-identical to today's
+  // output, so this whole tree is absent rather than filtered down to nothing. `?? 'none'` matters
+  // right now, ahead of Task 2: `cli/prompts.mjs` does not set `answers.backend` yet, and every
+  // existing snapshot scaffolds with no such flag — treating an absent answer as anything but
+  // 'none' would grow an `api/` tree into all four baselines this same task must leave untouched.
+  if ((answers.backend ?? 'none') !== 'none') copyApiTree(kitRoot, outDir, written)
 
   return written
 }
