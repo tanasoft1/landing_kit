@@ -142,3 +142,34 @@ export const PRESET_DIR = 'src/styles/presets'
 
 /** Each selected block copies its folder in full; unselected block folders are not copied. */
 export const blockDir = (id) => `src/blocks/${id}`
+
+// --- the API tree ------------------------------------------------------------------------------
+//
+// Where the Go service lives inside the kit, and where it lands in a generated project. Two
+// constants because they differ: the kit is a pnpm workspace whose packages sit under apps/, and a
+// generated project is a flat web app with the service beside it. Keeping the generated project
+// flat is what lets cli/add.mjs stay unaware that a backend exists at all.
+export const API_ROOT = 'apps/api'
+export const API_DEST = 'api'
+
+// Copied verbatim, recursively, only when the backend is included. `internal/db/sqlc` is in here on
+// purpose: the generated code is committed in both reference repos, so a scaffolded project builds
+// without anyone running sqlc first.
+export const API_COPY_DIRS = ['cmd', 'conf', 'internal']
+
+// Individually. `.env.example` is the file a developer copies to `.env`, so it is the one piece of
+// config the scaffold must carry.
+export const API_COPY_FILES = [
+  'go.mod',
+  'go.sum',
+  'sqlc.yaml',
+  'makefile',
+  '.air.toml',
+  '.golangci.yml',
+  '.env.example',
+]
+
+/** Where `rel` is inside the kit's API tree. */
+export function apiPath(kitRoot, rel) {
+  return join(kitRoot, API_ROOT, rel)
+}
