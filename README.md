@@ -46,4 +46,6 @@ The kit is a pnpm workspace and a generated project is not. `apps/web` becomes t
 backend exists at all. `WEB_ROOT` and `API_DEST` in `cli/kit-manifest.mjs` are what reconcile the
 two shapes.
 
+Diagrams of all three, and of the one exchange between the site and the API: [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 Working on the kit itself? See [MAINTAINERS.md](./MAINTAINERS.md).
