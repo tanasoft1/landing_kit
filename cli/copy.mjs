@@ -15,6 +15,8 @@ import {
   API_COPY_DIRS,
   API_COPY_FILES,
   API_DEST,
+  API_STATIC_DIST,
+  API_STATIC_PLACEHOLDER,
   apiPath,
   BOUNDARY_FILES,
   blockDir,
@@ -98,7 +100,13 @@ function assertEmptyTarget(outDir, label) {
 // The manifest says what to copy; this says what may never be copied whatever the manifest says.
 // NEVER_COPY is anchored at the root and NEVER_COPY_ANYWHERE matches any segment — see the
 // manifest for why the two cannot be one list.
+//
+// API_STATIC_DIST and API_STATIC_PLACEHOLDER are checked first and by exact match, not by segment:
+// the walk needs to descend into internal/static/dist (so the directory path itself must clear this
+// check) and then copy exactly one file out of it. Everything else in that directory still falls
+// through to the NEVER_COPY_ANYWHERE loop below and is refused, same as any other stray `dist`.
 function assertCopyable(rel) {
+  if (rel === API_STATIC_DIST || rel === API_STATIC_PLACEHOLDER) return
   const segments = rel.split('/')
   if (NEVER_COPY.includes(segments[0])) {
     throw new Error(`Refusing to copy '${rel}': '${segments[0]}' is in NEVER_COPY`)

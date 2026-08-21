@@ -174,3 +174,14 @@ export const API_COPY_FILES = [
 export function apiPath(kitRoot, rel) {
   return join(kitRoot, API_ROOT, rel)
 }
+
+// The one place under API_COPY_DIRS where a `dist` segment must be copyable anyway:
+// internal/static/dist/.placeholder is what keeps `//go:embed all:dist`
+// (apps/api/internal/static/static.go) compilable on a fresh clone, and a generated project needs
+// that exact same guarantee to run `go build` before anyone has built its web app. NEVER_COPY_ANYWHERE
+// below still refuses every OTHER path under internal/static/dist: if one reaches assertCopyable, a
+// real web build was sitting there when the scaffold ran (most likely a leftover `make build`), and
+// copying it would bake one maintainer's local build into every scaffold instead of the placeholder
+// every one is supposed to get. Two exact paths, not a prefix match, so that safety net stays intact.
+export const API_STATIC_DIST = 'internal/static/dist'
+export const API_STATIC_PLACEHOLDER = `${API_STATIC_DIST}/.placeholder`

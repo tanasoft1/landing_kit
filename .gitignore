@@ -31,3 +31,17 @@ todos.json
 # reads THIS file and not the global one, and the root biome.json lints `**`. Without the entry
 # here, `pnpm verify` fails on a file the harness rewrites whenever a permission is granted.
 .claude/settings.local.json
+
+# The web build embedded into the Go binary (see apps/api/internal/static/static.go). Everything
+# in it is a build artifact except dist/.placeholder, which is committed so `//go:embed all:dist`
+# has something to match on a fresh clone.
+#
+# Three lines, not the two this looks like it should need. The bare `dist` rule at the top of this
+# file already excludes this directory outright (verified with `git check-ignore -v`), and a
+# directory excluded that way cannot be reopened by a file-level negation below it -- git will not
+# even descend into it to check. The first line here re-admits the directory itself so the next
+# two can then exclude its contents and re-admit exactly the placeholder, the same two-line shape
+# used everywhere else in this file for a directory that is mostly, but not entirely, ignored.
+!apps/api/internal/static/dist/
+apps/api/internal/static/dist/*
+!apps/api/internal/static/dist/.placeholder
