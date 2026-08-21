@@ -331,6 +331,21 @@ It has two spam defences you should know about before you test it:
 - A **honeypot** field that must stay empty.
 - A **2 second minimum** on screen. Submit faster and it waits, it does not reject you.
 
+### Where submissions go
+
+Nowhere, until you set `VITE_CONTACT_ENDPOINT`. The form POSTs JSON to that URL and reports a
+generic failure when it is unset, so a form that silently does nothing is almost always this.
+
+Both defences above are sent with the submission and **rechecked by the endpoint**, not only in the
+browser. That matters because everything on this page runs on a client a bot simply skips: it can
+POST straight at the endpoint and never load the form at all. The endpoint rejecting a too-fast
+submission is the only version of that check a bot cannot walk around.
+
+If your project has an `api/` directory, that service is the endpoint and its README covers running
+it. If not, point the variable at whatever receives your form; it needs to accept a JSON body with
+`name`, `email`, `message`, `honeypot_url`, `elapsed_ms`, `locale` and `source_page`, and it should
+reject a filled honeypot or an `elapsed_ms` under 2000.
+
 ## Fonts and Mongolian Cyrillic
 
 Both fonts **must** cover Cyrillic Extended. Mongolian uses `ө` and `ү`, which sit outside the
