@@ -301,3 +301,59 @@ session-level `pg_advisory_lock`, so a second replica blocks, then sees `ErrNoCh
 Postgres releases the lock if a backend dies. The one caveat: the library wraps acquisition in a 15
 second `DefaultLockTimeout`, so a migration slower than that makes other replicas exit non-zero for
 an orchestrator to retry. Harmless today, worth knowing before writing a heavy backfill.
+
+### Serving the site and Docker
+
+`apps/api/internal/static` embeds `apps/web`'s build output with `//go:embed all:dist`, so one
+binary serves the prerendered site on `/` and the API on `/api/*`. `//go:embed` is a build error
+when its pattern matches nothing (hit in phase 2a: the migrations package would not compile until
+a `.sql` file existed), and the web build output is a build artifact that must never be committed
+— so a fresh clone needs something committed under `internal/static/dist` before anyone has run a
+web build. `dist/.placeholder`, an empty file, is that something: `all:dist` matches it because
+`all:` includes dotfile names and a bare `dist` pattern does not. `.gitignore` then excludes
+everything else under `internal/static/dist/` except that one file.
+
+`HasSite()` tells the server whether it embedded a real build or just the placeholder, by checking
+for `dist/index.html` rather than the placeholder's absence — `make build` copies the web build in
+without deleting `dist/.placeholder` first, so the placeholder is present alongside a real build
+too. An API-only binary (no web build ever embedded) is a legitimate thing to run, so serving is
+conditional on `HasSite()`: mounted, the site's own catch-all would otherwise answer every page
+request with a confusing 404 instead of a working API. Without a real build, startup logs one
+warning naming `make build` and the API still serves.
+
+`make build` (in `apps/api/makefile`) is `build-site` then `go build`: it builds `apps/web`, then
+wipes `internal/static/dist` and recreates it from that output, rather than copying over the top.
+Every filename the web build produces is content-hashed, so a stale asset a previous build produced
+and the new one no longer does would otherwise stay embedded forever — nothing would ever overwrite
+it. `touch`ing `dist/.placeholder` afterwards keeps the tracked file from being left missing.
+
+`helmet.New()`'s defaults (`CrossOriginEmbedderPolicy: require-corp`,
+`CrossOriginResourcePolicy: same-origin`, verified against Fiber v2.52.8's `ConfigDefault`) were
+harmless while this binary served only JSON. The moment it also serves the site, `require-corp`
+blocks every cross-origin subresource that does not send a matching header — third-party widgets,
+CDN assets, embedded iframes — and the failure is browser-side only, with no server-side signal, so
+it looks like the site is broken for no reason. `internal/http/routes/routes.go` sets both back to
+the browser defaults (`unsafe-none`, `cross-origin`). Restoring the stricter defaults is the thing
+to undo first if a served site's third-party embeds start failing silently.
+
+The `Dockerfile` is three stages: a Node stage builds `apps/web`, a Go stage copies that output into
+`internal/static/dist` and compiles the binary, and a minimal `alpine` stage carries only the binary
+plus `ca-certificates` (SES calls over TLS) and `tzdata`. Neither toolchain reaches the final image.
+`docker-compose.yml`'s `api` service depends on `db` with `condition: service_healthy`, because the
+migrate-on-startup call in `cmd/main.go`'s `run()` would otherwise race Postgres's own startup on the
+container's first boot. Inside that one container the site and the API share one origin, so
+`CORS_ORIGINS` has far less to do than in local development, where the Vite dev server and this API
+are two different origins — a request from the served site to its own `/api/leads` is same-origin
+and never goes through CORS at all.
+
+Two scaffolder gaps surfaced when `apps/api/internal/static/` and the `api` compose service were
+added, both in `cli/`, not `apps/api/`: `cli/kit-manifest.mjs`'s `NEVER_COPY_ANYWHERE` refuses any
+path with a `dist` segment, which made `--backend=api` throw on `internal/static/dist` before that
+directory existed — `API_STATIC_DIST` and `API_STATIC_PLACEHOLDER` there carve out an exact-path
+exception for the placeholder only, so a stray real build left under `dist` by a prior `make build`
+is still refused rather than silently shipped. And `cli/generate.mjs`'s generated `.gitignore` had
+no equivalent carve-out for a scaffolded project's own `api/internal/static/dist` — unfixed, a
+scaffolded project's own `git init` would never track its placeholder, reintroducing this exact
+fresh-clone build failure one level further out, in every project this kit generates. Both fixes
+apply only when a backend is scaffolded, so the four `--backend=none` snapshot variants are
+untouched by either.

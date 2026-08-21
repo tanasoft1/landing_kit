@@ -86,6 +86,41 @@ repeated wrong guesses get throttled rather than retried without limit.
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has
 ever received.
 
+## Serving the site
+
+This service can serve the built site itself, alongside the API, out of one binary: `api/internal/static`
+embeds the web app's build output with `//go:embed`, and `/` falls back to it for anything that is
+not `/api/*`. `make build` (not `make dev`) is what fills it in — it builds the frontend first, then
+wipes and recreates `internal/static/dist` from that output rather than copying over the top, so a
+stale asset a previous build produced and this one no longer does can never stay embedded forever
+(every filename the build produces is content-hashed, so nothing would ever overwrite it). Run
+`./bin/landing-api` afterwards and it serves both the site and the API on the same port.
+
+Without a build ever embedded (`make dev`, or `make build` never having run), the service still
+starts and the API still works — it just has no site to fall back to, and says so once at startup.
+`api/internal/static/dist/.placeholder` is a committed empty file that exists only so this package
+compiles on a fresh clone before any build has run; it is not itself a site.
+
+If you serve the site this way, do not put `helmet`'s `CrossOriginEmbedderPolicy` and
+`CrossOriginResourcePolicy` back to their library defaults (`require-corp` and `same-origin`) in
+`internal/http/routes/routes.go`. Both are relaxed to the browser's own defaults (`unsafe-none` and
+`cross-origin`) because the stricter ones silently break every cross-origin subresource the site
+loads — third-party widgets, CDN assets, embedded iframes — with no error anywhere on the server
+side; the site just looks broken in the browser for no visible reason.
+
+## Docker
+
+```bash
+docker compose up --build     # both services; PORT=3001 if 3000 is already taken on your machine
+```
+
+Builds and runs the whole thing in one container: `docker build .` produces an image that serves
+the site on `/` and the API on `/api/*`, the same way `make build` plus running the binary does
+locally. Inside that one container the site and the API share an origin, so `CORS_ORIGINS` matters
+far less than it does in local development, where the Vite dev server and this API are two
+different origins — a request from the served site to its own `/api/leads` never goes through CORS
+at all.
+
 ## Tests
 
 ```bash
