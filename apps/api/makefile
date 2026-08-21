@@ -1,4 +1,4 @@
-.PHONY: run dev build test lint lint-fix sqlc migrate-create seed-admin
+.PHONY: run dev build build-site test lint lint-fix sqlc migrate-create seed-admin
 
 run:
 	go run ./cmd
@@ -6,7 +6,20 @@ run:
 dev:
 	air
 
-build:
+# Rebuilds the web app and re-embeds its output, wiping internal/static/dist first rather than
+# copying over the top of it. A stale asset from a previous build that the new one no longer
+# produces would otherwise stay embedded forever: every filename is content-hashed, so nothing
+# ever overwrites it, and go:embed has no notion of "files this build removed". touch restores
+# dist/.placeholder afterwards so the one file this directory always tracks in git is never left
+# missing from a working tree that just ran this.
+build-site:
+	cd ../web && pnpm build
+	rm -rf internal/static/dist
+	mkdir -p internal/static/dist
+	cp -R ../web/dist/client/. internal/static/dist/
+	touch internal/static/dist/.placeholder
+
+build: build-site
 	go build -o bin/landing-api ./cmd
 
 test:
