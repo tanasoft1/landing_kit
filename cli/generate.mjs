@@ -332,6 +332,24 @@ __unconfig*
 !.kit/scaffold.json
 `
 
+// Appended only when a backend was scaffolded (api/ does not otherwise exist), never spliced into
+// GITIGNORE unconditionally: the four --backend=none snapshot variants must see byte-identical
+// output to before, and an unconditional append would move every one of them for a rule that
+// names a path none of them have.
+//
+// Three lines, not the two this looks like it should need, for the identical reason as this kit's
+// own .gitignore (see there): the bare \`dist\` rule three lines up already excludes this directory
+// outright, and a directory excluded that way cannot be reopened by a file-level negation below
+// it. Skipping this fix here would mean a scaffolded project's OWN \`git init\` never tracks its
+// placeholder, so a fresh clone of THAT project hits the exact \`go:embed\` failure Task 1 exists
+// to prevent -- one level further out, in every project this kit generates rather than in the kit
+// itself.
+const API_STATIC_DIST_GITIGNORE = `
+!api/internal/static/dist/
+api/internal/static/dist/*
+!api/internal/static/dist/.placeholder
+`
+
 // --- docker-compose.yml ---------------------------------------------------------------------------
 
 /**
@@ -362,6 +380,39 @@ function dockerComposeYml() {
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        # Not just "started": the migrate-on-startup call in cmd/main.go's run() would otherwise
+        # race Postgres's own startup and fail the container on its very first boot.
+        condition: service_healthy
+    ports:
+      # Host side only, container side stays fixed at 3000 (matches EXPOSE 3000 in the Dockerfile
+      # and PORT's own default in conf.Load). A developer whose machine already has something on
+      # 3000 overrides just the host side with \`PORT=3001 docker compose up\`; the app inside never
+      # needs to know, because container-to-container and host-to-container both address it by
+      # its fixed internal port regardless of what host port maps to it.
+      - '\${PORT:-3000}:3000'
+    environment:
+      # DB_HOST is the one value that has to differ from apps/api/.env.example's "localhost":
+      # inside this compose network the database is reachable by service name, and DB_PORT here is
+      # the container's own 5432, not the 5433 the host uses to reach the same service.
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: landing
+      DB_SSLMODE: disable
+      # Left at APP_ENV's own "development" default deliberately: the site and the API answer on
+      # the same origin inside this one container, so CORS_ORIGINS has far less to do here than in
+      # local development where the Vite dev server and this API are two different origins, and
+      # conf.Load's dev-only JWT secret is exactly as safe here as it is under \`make dev\`. A real
+      # deployment overrides APP_ENV, JWT_SECRET and NOTIFY_DRIVER at that deployment's own layer,
+      # the same way it would for \`make dev\` -- this file is for \`docker compose up\`, not for prod.
 
 volumes:
   landing-db:
@@ -1119,7 +1170,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const files = [
     ['package.json', packageJson(outDir, answers, manifest)],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
-    ['.gitignore', GITIGNORE],
+    ['.gitignore', hasBackend ? GITIGNORE + API_STATIC_DIST_GITIGNORE : GITIGNORE],
     ['vite.config.ts', viteConfigTs(answers)],
     ['tsconfig.json', tsconfig],
     ['src/blocks/registry.ts', registryTs(answers)],

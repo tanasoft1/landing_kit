@@ -1,0 +1,30 @@
+# Kept small on purpose: everything here is either irrelevant to the build or actively wrong to
+# send into it. Without these, the build context balloons to hundreds of megabytes (node_modules,
+# every apps/web/dist from a local build) and a stale local web build could get baked into the
+# image ahead of the real multi-stage COPY --from=web output.
+node_modules
+**/node_modules
+
+# Build output. apps/web/dist is rebuilt inside the web stage; a local copy sitting in the build
+# context would not be used (Dockerfile builds it fresh) but would still be sent to the daemon.
+dist
+**/dist
+
+.git
+
+# The whole point of task 1's placeholder is that a fresh clone builds without it ever being
+# populated; a real local build sitting here would still not reach the image (the Go stage's
+# COPY --from=web overwrites this directory before go build runs), but sending a maintainer's
+# local build into every docker build context is pure waste, and worse, silently plausible-looking
+# waste that nobody would notice missing.
+apps/api/internal/static/dist
+
+.env
+.env.*
+*.local
+
+.DS_Store
+
+docs
+.superpowers
+.claude
