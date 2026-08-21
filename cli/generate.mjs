@@ -381,39 +381,6 @@ function dockerComposeYml() {
       timeout: 5s
       retries: 10
 
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    depends_on:
-      db:
-        # Not just "started": the migrate-on-startup call in cmd/main.go's run() would otherwise
-        # race Postgres's own startup and fail the container on its very first boot.
-        condition: service_healthy
-    ports:
-      # Host side only, container side stays fixed at 3000 (matches EXPOSE 3000 in the Dockerfile
-      # and PORT's own default in conf.Load). A developer whose machine already has something on
-      # 3000 overrides just the host side with \`PORT=3001 docker compose up\`; the app inside never
-      # needs to know, because container-to-container and host-to-container both address it by
-      # its fixed internal port regardless of what host port maps to it.
-      - '\${PORT:-3000}:3000'
-    environment:
-      # DB_HOST is the one value that has to differ from apps/api/.env.example's "localhost":
-      # inside this compose network the database is reachable by service name, and DB_PORT here is
-      # the container's own 5432, not the 5433 the host uses to reach the same service.
-      DB_HOST: db
-      DB_PORT: '5432'
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: landing
-      DB_SSLMODE: disable
-      # Left at APP_ENV's own "development" default deliberately: the site and the API answer on
-      # the same origin inside this one container, so CORS_ORIGINS has far less to do here than in
-      # local development where the Vite dev server and this API are two different origins, and
-      # conf.Load's dev-only JWT secret is exactly as safe here as it is under \`make dev\`. A real
-      # deployment overrides APP_ENV, JWT_SECRET and NOTIFY_DRIVER at that deployment's own layer,
-      # the same way it would for \`make dev\` -- this file is for \`docker compose up\`, not for prod.
-
 volumes:
   landing-db:
 `
@@ -428,7 +395,19 @@ volumes:
 function assertDockerComposeMatchesKit(kitRoot, generated) {
   const kitFile = join(kitRoot, 'docker-compose.yml')
   if (!existsSync(kitFile)) return
-  const kitText = readFileSync(kitFile, 'utf8')
+  // The kit's file declares an `api` service and a generated project's does not. That is the one
+  // difference allowed, and it is not cosmetic: the kit has a Dockerfile at its root built for its
+  // own apps/web plus apps/api shape, and a scaffolded project is a flat web app with the service
+  // in `api/`, so that Dockerfile does not apply and the CLI does not yet generate one. Shipping a
+  // compose file that referenced a Dockerfile the scaffold never receives would look complete and
+  // fail on `docker compose up`, so the service is omitted until there is one to point at.
+  //
+  // Stripped rather than the comparison loosened, so every OTHER line, which is the database
+  // configuration a scaffold really does inherit, still has to match exactly.
+  const kitText = readFileSync(kitFile, 'utf8').replace(
+    /\n {2}api:\n(?:(?: {2,}.*)?\n)*?(?=\nvolumes:)/,
+    '',
+  )
   if (kitText !== generated) {
     throw new Error(
       "The kit's own docker-compose.yml is no longer what the CLI generates, so a scaffolded " +

@@ -130,3 +130,22 @@ cd api && go test ./...
 Integration tests need Docker. Set environment values for a test with `t.Setenv`, never by writing
 a second `.env` — the first `.env` read wins for the whole test binary and a later one is silently
 ignored rather than erroring.
+
+## Why docker-compose.yml has no `api` service
+
+The kit this project was generated from builds one image serving both the site and the API, from a
+Dockerfile at its own repo root. That Dockerfile is written for the kit's layout, `apps/web` beside
+`apps/api`. This project has a different shape: the web app is flat at the root and the service is
+in `api/`. So the kit's Dockerfile does not apply, and the scaffolder does not yet generate one for
+this shape.
+
+Shipping a compose file that referenced a Dockerfile this project never received would look
+complete and then fail on `docker compose up` with a missing-file error, so the service is omitted
+until there is one to point at.
+
+Run the database in compose and the service directly:
+
+```bash
+docker compose up -d db
+cd api && make dev
+```
