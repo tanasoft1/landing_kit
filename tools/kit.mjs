@@ -10,7 +10,7 @@
  *
  * `tools/` is deliberately absent from `package.json`'s `files`, so this file does not ship.
  * That is the whole mechanism — there is no publish-time rewriting of `package.json`, which
- * would edit the working tree during `npm publish`, exactly what the README warns against.
+ * would edit the working tree during `npm publish`, exactly what the README warns against
  *
  * Usage:  node tools/kit.mjs <command>
  */
