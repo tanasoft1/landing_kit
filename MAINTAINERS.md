@@ -133,25 +133,64 @@ node tools/kit.mjs lighthouse:desktop
 
 ## Publishing
 
-Published to npm as `@dewsoft/landing-kit`.
+Published to npm as `@tanasoftllc/landing-kit`. The scope carries the `llc` because npm holds
+`tanasoft` from an organization that was created and deleted, and a name in that state can only be
+released by npm support.
+
+Versions 0.1.0 through 0.3.1 shipped as `@dewsoft/landing-kit`. Once the first `@tanasoftllc`
+release is up, point the old name at it:
 
 ```bash
-npm version patch     # or minor / major
-npm publish
+npm deprecate @dewsoft/landing-kit "moved to @tanasoftllc/landing-kit"
 ```
 
-2FA is on for writes, so `npm publish` prompts for a one-time code.
+That marks every published version without removing any of them, so the old name stays installable
+forever. Which is why one reference to it survives on purpose: the error in `cli/add.mjs` that sends a pre-0.3 scaffold to
+`pnpm dlx @dewsoft/landing-kit@0.2.0`. That version exists under no other name, and pointing it
+anywhere else would hand the reader a 404.
 
-Before publishing, test the real tarball rather than the working tree — that is what a user gets:
+Releases come from CI, not from a laptop:
+`.github/workflows/release.yml` publishes on a push to `main` whenever the version in
+`package.json` is not already on the registry. So a release is one edit:
+
+```bash
+npm version patch --no-git-tag-version   # or minor / major
+git commit -am "release 0.3.3" && git push
+```
+
+A merge that does not touch the version runs the checks and publishes nothing.
+
+The workflow authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers/):
+GitHub Actions mints a short-lived OIDC token scoped to one run, which is why the `publish` job
+carries `id-token: write` and why no npm token is stored in the repo. 2FA is on for writes, and
+trusted publishing satisfies that requirement rather than working around it. Configuring it is a
+one-time step in the package settings on npmjs.com, naming the org, the repo, and the workflow
+filename. **Renaming `release.yml` breaks publishing** until that config is updated to match.
+
+Because that configuration lives in a package's settings, a package npm has never seen cannot have
+one. So the first release under a new name is published by hand, and CI takes over from the second.
+That is a bootstrap step, not the normal flow.
+
+Three pins in the workflow have to track the repo. `SQLC_VERSION` matches the version stamped in
+the header of `apps/api/internal/db/sqlc/*.go`, because `sqlc diff` compares byte for byte and a
+newer sqlc fails on regenerated formatting alone. `packageManager` in `package.json` is what
+`pnpm/action-setup` reads, so CI and your shell cannot drift. The Go version comes from
+`apps/api/go.mod` and needs no separate pin.
+
+Publishing by hand works the same way locally, where `npm publish` prompts for a one-time code.
+
+The `smoke` job is the part worth understanding. It packs the real tarball, scaffolds from it, and
+runs `verify` on the result:
 
 ```bash
 npm pack --pack-destination /tmp
-cd /tmp && tar xzf dewsoft-landing-kit-*.tgz
+cd /tmp && tar xzf tanasoftllc-landing-kit-*.tgz
 node package/cli/index.mjs /tmp/smoke-scaffold --yes
 ```
 
 Then install and `verify` that scaffold. This catches a missing entry in `files`, which no other
-check can see.
+check can see. A fresh scaffold fails its own `verify` until `url` in `src/config/site.config.ts`
+is set, so CI substitutes a dummy domain first.
 
 ## What ships and what does not
 

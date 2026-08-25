@@ -1,0 +1,125 @@
+name: release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Two merges landing close together must not race into a double publish.
+# PR runs are cancellable; a push to main that may be mid-publish is not.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned to the version stamped in the generated code's header
+  # (apps/api/internal/db/sqlc/*.go). `sqlc diff` compares byte for byte, so a
+  # newer sqlc fails the check on regenerated formatting alone.
+  SQLC_VERSION: "1.30.0"
+  GOLANGCI_LINT_VERSION: v2.13.1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - uses: sqlc-dev/setup-sqlc@v5
+        with:
+          sqlc-version: ${{ env.SQLC_VERSION }}
+
+      # Installed rather than run through golangci-lint-action, because
+      # `pnpm verify` runs `golangci-lint run` itself. Letting the action run it
+      # too would lint twice and split the gate across two places.
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" "$GOLANGCI_LINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm verify
+
+  # Split from `verify` rather than tacked onto it: a scaffold with the default
+  # answers has no backend, so this needs no Go toolchain and runs in parallel.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # The one check nothing else in this repo can make: that `files` in
+      # package.json carries everything the CLI reads at scaffold time. A
+      # missing entry there passes `pnpm verify`, installs cleanly, and still
+      # ships a package that cannot scaffold. That shipped once already.
+      - name: Pack and scaffold from the tarball
+        run: |
+          mkdir -p /tmp/pack
+          npm pack --pack-destination /tmp/pack
+          tar xzf /tmp/pack/*.tgz -C /tmp/pack
+          node /tmp/pack/package/cli/index.mjs /tmp/smoke --yes
+
+      # A fresh scaffold ships a placeholder domain and fails its own `verify`
+      # until that is replaced. That is deliberate, so substitute one here.
+      - name: Verify the scaffolded project
+        working-directory: /tmp/smoke
+        run: |
+          sed -i "s|https://your-domain.example|https://ci.example.com|" src/config/site.config.ts
+          pnpm install
+          pnpm verify
+
+  publish:
+    needs: [verify, smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Mints the OIDC token that npm trusted publishing exchanges for a
+      # short-lived credential. No npm token is stored anywhere.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer, and the npm bundled with
+      # Node lags behind that.
+      - run: npm install -g npm@latest
+
+      # Asks the registry rather than diffing commits. Registry truth stays
+      # correct across re-runs, reverts, and force pushes; a git diff does not.
+      - name: Publish if this version is new
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already published, nothing to do"
+            exit 0
+          fi
+          echo "publishing $name@$version"
+          npm publish

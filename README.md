@@ -4,9 +4,9 @@ Scaffolds a bilingual (Mongolian + English) landing site: prerendered static HTM
 swappable blocks, and an optional Go backend for the contact form.
 
 ```bash
-pnpm dlx @dewsoft/landing-kit@latest my-site     # pnpm
-npx --yes @dewsoft/landing-kit@latest my-site    # npm
-yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+
+pnpm dlx @tanasoftllc/landing-kit@latest my-site     # pnpm
+npx --yes @tanasoftllc/landing-kit@latest my-site    # npm
+yarn dlx @tanasoftllc/landing-kit@latest my-site     # yarn 2+
 ```
 
 It asks five short questions, then writes a standalone TanStack Start project. The generated
@@ -20,8 +20,8 @@ also the README the scaffolder copies into your project.
 The fifth question decides whether the project gets one, and it defaults to `none`:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit@latest my-site                  # static site, nothing to run
-pnpm dlx @dewsoft/landing-kit@latest my-site --backend=api    # plus a Go service and Postgres
+pnpm dlx @tanasoftllc/landing-kit@latest my-site                  # static site, nothing to run
+pnpm dlx @tanasoftllc/landing-kit@latest my-site --backend=api    # plus a Go service and Postgres
 ```
 
 A brochure site should not arrive with a database it does not need, which is why `none` is the

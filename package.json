@@ -1,6 +1,6 @@
 {
-  "name": "@dewsoft/landing-kit",
-  "version": "0.3.1",
+  "name": "@tanasoftllc/landing-kit",
+  "version": "0.4.0",
   "description": "Scaffolds a bilingual (Mongolian + English) landing site: prerendered static HTML, per-locale SEO, and swappable blocks.",
   "keywords": [
     "landing-page",
@@ -13,6 +13,7 @@
     "tanstack-start",
     "react"
   ],
+  "packageManager": "pnpm@11.18.0",
   "type": "module",
   "bin": {
     "landing-kit": "./cli/index.mjs"
@@ -49,14 +50,14 @@
     "@biomejs/biome": "^2.5.8"
   },
   "scripts": {
-    "dev": "pnpm --filter @dewsoft/landing-kit-web dev",
-    "build": "pnpm --filter @dewsoft/landing-kit-web build",
-    "typecheck": "pnpm --filter @dewsoft/landing-kit-web typecheck",
-    "lint": "biome ci . && pnpm --filter @dewsoft/landing-kit-web lint",
-    "fix": "biome check --write . && pnpm --filter @dewsoft/landing-kit-web fix",
-    "conventions": "pnpm --filter @dewsoft/landing-kit-web conventions",
+    "dev": "pnpm --filter @tanasoftllc/landing-kit-web dev",
+    "build": "pnpm --filter @tanasoftllc/landing-kit-web build",
+    "typecheck": "pnpm --filter @tanasoftllc/landing-kit-web typecheck",
+    "lint": "biome ci . && pnpm --filter @tanasoftllc/landing-kit-web lint",
+    "fix": "biome check --write . && pnpm --filter @tanasoftllc/landing-kit-web fix",
+    "conventions": "pnpm --filter @tanasoftllc/landing-kit-web conventions",
     "snapshot": "node tools/scaffold-snapshot.mjs check",
-    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && pnpm --filter @dewsoft/landing-kit-web verify:build && pnpm api:sqlc && pnpm api:build && pnpm api:lint && pnpm api:test && pnpm snapshot",
+    "verify": "pnpm lint && pnpm typecheck && pnpm conventions && pnpm build && pnpm --filter @tanasoftllc/landing-kit-web verify:build && pnpm api:sqlc && pnpm api:build && pnpm api:lint && pnpm api:test && pnpm snapshot",
     "api:sqlc": "cd apps/api && sqlc diff",
     "api:build": "cd apps/api && go build ./...",
     "api:lint": "cd apps/api && golangci-lint run",

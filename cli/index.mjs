@@ -19,11 +19,11 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const HELP = `landing-kit — scaffold a bilingual landing site
 
-Usage:  pnpm dlx @dewsoft/landing-kit@latest <dir> [options]
+Usage:  pnpm dlx @tanasoftllc/landing-kit@latest <dir> [options]
 
         Inside a project you already scaffolded:
-          pnpm dlx @dewsoft/landing-kit add-block <name> [--variants=a,b]
-          pnpm dlx @dewsoft/landing-kit add-page  <id> --blocks=a,b \\
+          pnpm dlx @tanasoftllc/landing-kit add-block <name> [--variants=a,b]
+          pnpm dlx @tanasoftllc/landing-kit add-page  <id> --blocks=a,b \\
                         --title-mn=".." --title-en=".."
 
         There is no bare "landing-kit" command: a generated project does not
@@ -61,9 +61,9 @@ Blocks:   hero (centered|split)  features (grid|alternating)
           the home page with placeholder copy for you to replace. At least
           one of the four above is still required.
 
-Example:  pnpm dlx @dewsoft/landing-kit@latest frontend --yes
-          pnpm dlx @dewsoft/landing-kit add-block testimonials
-          pnpm dlx @dewsoft/landing-kit add-page about --blocks=features,cta \\
+Example:  pnpm dlx @tanasoftllc/landing-kit@latest frontend --yes
+          pnpm dlx @tanasoftllc/landing-kit add-block testimonials
+          pnpm dlx @tanasoftllc/landing-kit add-page about --blocks=features,cta \\
                         --title-mn="Бидний тухай" --title-en="About us"
 `
 
@@ -104,7 +104,7 @@ function runSubcommand(cmd, argv) {
   if (cmd === 'add-block') {
     if (!name || name.startsWith('-')) {
       throw new Error(
-        'add-block needs a name: pnpm dlx @dewsoft/landing-kit add-block testimonials',
+        'add-block needs a name: pnpm dlx @tanasoftllc/landing-kit add-block testimonials',
       )
     }
     const { written, edited, variants, formatted } = addBlock(
@@ -118,7 +118,7 @@ function runSubcommand(cmd, argv) {
   Next:
     1. Write the copy — both languages — in src/blocks/${name}/copy.ts
     2. Put it on a page — add '${name}' to that page's \`blocks\` in src/config/pages.config.ts
-       (or: pnpm dlx @dewsoft/landing-kit add-page <id> --blocks=${name})
+       (or: pnpm dlx @tanasoftllc/landing-kit add-page <id> --blocks=${name})
     3. ${verifyStep(formatted)}
 `)
     return
@@ -126,7 +126,7 @@ function runSubcommand(cmd, argv) {
 
   if (!name || name.startsWith('-')) {
     throw new Error(
-      'add-page needs an id: pnpm dlx @dewsoft/landing-kit add-page about ' +
+      'add-page needs an id: pnpm dlx @tanasoftllc/landing-kit add-page about ' +
         '--blocks=features,cta --title-mn="Бидний тухай" --title-en="About us"',
     )
   }

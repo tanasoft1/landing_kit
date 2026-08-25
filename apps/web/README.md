@@ -30,9 +30,9 @@ Nothing to install first. Pick the line for your package manager and run it — 
 folder it creates:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit@latest my-site     # pnpm
-npx --yes @dewsoft/landing-kit@latest my-site    # npm
-yarn dlx @dewsoft/landing-kit@latest my-site     # yarn 2+  (on yarn 1, use the npx line)
+pnpm dlx @tanasoftllc/landing-kit@latest my-site     # pnpm
+npx --yes @tanasoftllc/landing-kit@latest my-site    # npm
+yarn dlx @tanasoftllc/landing-kit@latest my-site     # yarn 2+  (on yarn 1, use the npx line)
 ```
 
 It asks five short questions. Use the **arrow keys** to move and **Enter** to choose — each option
@@ -158,7 +158,7 @@ on it, and the [rules](#rules-the-build-enforces) assume it is intact.
 ## Adding a page
 
 ```bash
-pnpm dlx @dewsoft/landing-kit add-page about
+pnpm dlx @tanasoftllc/landing-kit add-page about
 ```
 
 That is the whole command. It gives you a working `/about` page in both languages with placeholder
@@ -179,7 +179,7 @@ Both live in the entry the command just wrote, in `src/config/pages.config.ts`.
 You can pass the values up front instead, if you already know them:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit add-page about --blocks=features,cta \
+pnpm dlx @tanasoftllc/landing-kit add-page about --blocks=features,cta \
   --title-mn="Бидний тухай" --title-en="About us"
 ```
 
@@ -223,7 +223,7 @@ the home page, in one step — see [Create your site](#create-your-site).
 Afterwards, one command does the same thing:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit add-block testimonials
+pnpm dlx @tanasoftllc/landing-kit add-block testimonials
 ```
 
 Unlike a page, this **does** create a folder: `src/blocks/testimonials/`. It writes four files
@@ -239,7 +239,7 @@ there, makes all three registrations, and `pnpm verify` passes right away. Then 
 Want two layouts instead of one? Name them up front:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit add-block pricing --variants=simple,detailed
+pnpm dlx @tanasoftllc/landing-kit add-block pricing --variants=simple,detailed
 ```
 
 The default is a single variant named `simple`. Same `pnpm dlx` reason as
@@ -430,12 +430,12 @@ valid JSON-LD, and a sitemap that agrees with the `<head>`.
 Every question the CLI asks has a flag, so a scaffold can be fully scripted:
 
 ```bash
-pnpm dlx @dewsoft/landing-kit@latest frontend --yes
-pnpm dlx @dewsoft/landing-kit@latest frontend --yes --add-blocks=pricing,faq
-pnpm dlx @dewsoft/landing-kit@latest frontend --yes --backend=api
+pnpm dlx @tanasoftllc/landing-kit@latest frontend --yes
+pnpm dlx @tanasoftllc/landing-kit@latest frontend --yes --add-blocks=pricing,faq
+pnpm dlx @tanasoftllc/landing-kit@latest frontend --yes --backend=api
 ```
 
-Run `pnpm dlx @dewsoft/landing-kit --help` for the full list. `--add-blocks` is the flag form of
+Run `pnpm dlx @tanasoftllc/landing-kit --help` for the full list. `--add-blocks` is the flag form of
 the picker's **add your own** row, and takes as many names as you want. `--backend=api` adds a Go
 service in `api/` and a `docker-compose.yml` for Postgres, storing the contact form's submissions;
 `--backend=none` is the default, and stays a static site with nothing to run besides `pnpm dev`.
