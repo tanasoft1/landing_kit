@@ -60,14 +60,22 @@ const VARIANTS = {
 }
 
 /**
- * The one file whose bytes cannot be stable here, and the two fields that make it so:
- * `generatedAt` is the wall clock, and `answers.dir` is the scaffold target, which is a fresh
- * `mkdtemp` path on every call. Hashed raw, every variant reports drift on every run, for
- * reasons that have nothing to do with drift.
+ * The one file whose bytes cannot be stable here, and the three fields that make it so:
+ * `generatedAt` is the wall clock, `answers.dir` is the scaffold target, which is a fresh
+ * `mkdtemp` path on every call, and `kitVersion` is whatever `package.json` says today. Hashed
+ * raw, every variant reports drift on every run, and on every release, for reasons that have
+ * nothing to do with drift.
  *
- * Normalised rather than skipped. The rest of the file is `kitVersion` and the full answer set,
- * and a scaffold that stopped recording those is exactly the regression this tool exists to
- * catch, so the fix is to blank the two volatile fields, not to stop looking at the file.
+ * `kitVersion` is the least obvious of the three. It moves on a release schedule that has
+ * nothing to do with the copy layer this tool guards, so hashing it makes `npm version` look
+ * identical to a real regression. That is not merely untidy: `.github/workflows/release.yml`
+ * gates its publish job on `verify`, so a bump without a re-record blocks the release it was
+ * meant to cut.
+ *
+ * Normalised rather than skipped, because blanking a field is not the same as ignoring it. A
+ * scaffold that stopped writing any of the three would leave the pattern unmatched and the
+ * placeholder missing, so the hash still moves and the check still fails. That regression is
+ * the reason this file is read at all, and it stays caught.
  */
 const SCAFFOLD_RECORD = '.kit/scaffold.json'
 
@@ -76,11 +84,12 @@ function normalise(rel, buf) {
   // String substitution, not `JSON.parse` plus re-stringify. `generate.mjs` writes this file
   // with its own fits-or-expands formatter, and a round trip through `JSON.stringify` rewrites
   // every line of it. That would hide a change to that formatter behind a normalisation meant
-  // only to hide a clock and a temp path. A pattern that stops matching leaves the raw value in
+  // only to hide a clock, a temp path, and a version number. A pattern that stops matching leaves the raw value in
   // place, so this fails loudly rather than passing quietly.
   return Buffer.from(
     buf
       .toString('utf8')
+      .replace(/"kitVersion": "[^"]*"/, '"kitVersion": "<normalised>"')
       .replace(/"generatedAt": "[^"]*"/, '"generatedAt": "<normalised>"')
       .replace(/"dir": "[^"]*"/, '"dir": "<normalised>"'),
   )
