@@ -15,7 +15,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN npm install -g pnpm@10.13.1 && pnpm install --frozen-lockfile
 
 COPY apps/web ./apps/web
-RUN pnpm --filter @dewsoft/landing-kit-web build
+RUN pnpm --filter @tanasoftllc/landing-kit-web build
 
 # --- stage 2: build the Go binary --------------------------------------------------------------
 FROM golang:1.25-alpine AS builder
