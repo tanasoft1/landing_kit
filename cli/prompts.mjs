@@ -22,7 +22,7 @@ export const BLOCK_DEFAULT_VARIANT = {
 // The four single-choice questions. Order here is the order they are asked in.
 const CHOICES = {
   pages: ['multi', 'one'],
-  theme: ['both', 'single'],
+  theme: ['both', 'light', 'dark'],
   preset: ['editorial', 'warm'],
   // 'none' first: `pickChoice` opens on DEFAULTS, and the default must be the first option shown.
   backend: ['none', 'api'],
@@ -37,7 +37,8 @@ const HINTS = {
   multi: 'Home and Contact as separate pages',
   one: 'Everything on a single page',
   both: 'Light and dark, with a toggle',
-  single: 'One mode only, no toggle',
+  light: 'Light only, no toggle',
+  dark: 'Dark only, no toggle',
   editorial: 'Quiet and neutral, small radius',
   warm: 'Amber and rounder, with a soft shadow',
   none: 'Static site only',

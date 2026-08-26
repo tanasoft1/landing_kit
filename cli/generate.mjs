@@ -157,6 +157,8 @@ function formatJson(value, indent, used) {
 
 const json = (value) => `${formatJson(value, '', 0)}\n`
 
+// Only tsconfig needs this now: `paths` takes one file and cannot branch. Either half
+// type-checks the same, because both satisfy `ThemeModule` in theme.types.ts.
 const themeFile = (answers) => (answers.theme === 'both' ? 'theme.both.tsx' : 'theme.single.tsx')
 
 // --- package.json ---------------------------------------------------------------------------------
@@ -426,7 +428,7 @@ function assertDockerComposeMatchesKit(kitRoot, generated) {
 // implementation per boundary, so every branch the kit's own vite.config.ts carries has already
 // been decided by the answers. The comments that survive are the ones explaining a decision the
 // code cannot explain itself.
-function viteConfigTs(answers) {
+function viteConfigTs() {
   return `import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
@@ -448,7 +450,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@/motion': r('./src/integrations/motion.animated.tsx'),
-      '@/theme': r('./src/integrations/${themeFile(answers)}'),
+      // Read from the config, not frozen at scaffold time: changing \`theme.mode\` in
+      // src/config/site.config.ts switches the site between light, dark and both. Resolved
+      // during the build, so a pinned mode still bundles no theme-switching code.
+      '@/theme':
+        site.theme.mode === 'both'
+          ? r('./src/integrations/theme.both.tsx')
+          : r('./src/integrations/theme.single.tsx'),
       '@/submit': r('./src/integrations/submit.endpoint.ts'),
       '@/config': r('./src/config'),
       // Must stay LAST: '@' is a catch-all and would shadow the specific aliases above.
@@ -728,7 +736,7 @@ function manifestBlockDeps(kitRoot, id) {
         `  ${rel} declares \`blocks: [...]\`, but this layer reads \`requires\` with a regex that\n` +
         '  stops at the first `}`, so a nested object such as `meta: { … }` inside `requires`\n' +
         '  hides everything after it.\n' +
-        '  Fix: keep `requires` flat (`{ npm: [], ui: [], blocks: [...] }`), or teach\n' +
+        '  Fix: keep `requires` flat (`{ blocks: [...] }`), or teach\n' +
         '  `manifestBlockDeps` in cli/generate.mjs to parse nested objects.',
     )
   }
@@ -1007,8 +1015,7 @@ function navTargets(kitRoot, answers) {
 function siteConfigTs(kitRoot, answers) {
   const targets = navTargets(kitRoot, answers)
   const nav = targets.map((id) => `{ target: '${id}' }`).join(', ')
-  const theme =
-    answers.theme === 'both' ? "{ mode: 'both', default: 'light' }" : "{ mode: 'light' }"
+  const theme = `{ mode: '${answers.theme}' }`
   return `import type { SiteConfig } from '@/lib/types'
 
 // Annotated \`: SiteConfig\`, not \`satisfies SiteConfig\`. \`satisfies\` narrows every value here to
@@ -1032,6 +1039,8 @@ export const site: SiteConfig = {
     address: { country: 'MN', city: 'Ulaanbaatar', street: 'Street address', postalCode: '00000' },
   },
   nav: [${nav}],
+  // \`both\` gives light, dark and a toggle. Change it to \`'dark'\` or \`'light'\` to pin the
+  // site to one palette, which also drops the toggle and all theme-switching JavaScript.
   theme: ${theme},
 }
 `
@@ -1150,7 +1159,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
     ['package.json', packageJson(outDir, answers, manifest)],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
     ['.gitignore', hasBackend ? GITIGNORE + API_STATIC_DIST_GITIGNORE : GITIGNORE],
-    ['vite.config.ts', viteConfigTs(answers)],
+    ['vite.config.ts', viteConfigTs()],
     ['tsconfig.json', tsconfig],
     ['src/blocks/registry.ts', registryTs(answers)],
     ['src/blocks/block-modules.ts', blockModulesTs(answers)],

@@ -14,5 +14,4 @@ export const features = {
   copy: { mn, en },
   nav: { labelKey: 'navLabel' },
   // No `schema`: a feature list earns no rich result of its own — see ./hero/block.ts.
-  requires: { npm: [], ui: [] },
 } satisfies BlockManifest<FeaturesCopy, FeaturesVariant>

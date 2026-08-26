@@ -33,7 +33,8 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
 
 /**
  * Five answer sets, chosen to reach every branch the copy and generate layers have:
- * both `theme` halves (which picks a boundary file AND edits biome.json and token-gallery),
+ * `theme` pinned dark and pinned light as well as `both` (the answer picks a boundary file AND
+ * edits biome.json and token-gallery, and only `dark` puts a class on <html>),
  * both presets (which filters `src/styles/presets`), a block subset, custom blocks
  * (which runs the add-block templates at scaffold time), and a backend.
  *
@@ -53,9 +54,9 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
  */
 const VARIANTS = {
   default: ['--yes'],
-  onepage: ['--yes', '--pages=one', '--theme=single', '--preset=warm', '--blocks=hero,contact'],
+  onepage: ['--yes', '--pages=one', '--theme=dark', '--preset=warm', '--blocks=hero,contact'],
   custom: ['--yes', '--add-blocks=pricing,faq'],
-  subset: ['--yes', '--blocks=features,contact', '--theme=single'],
+  subset: ['--yes', '--blocks=features,contact', '--theme=light'],
   backend: ['--yes', '--backend=api'],
 }
 

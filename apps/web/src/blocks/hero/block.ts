@@ -34,5 +34,5 @@ export const hero = {
   // this block breaks if `contact` leaves `pages.config.ts`, and that break is a blank page that
   // never names the link. See `requires` in @/lib/types. (`secondaryCta.target` is 'hero', this
   // block itself, so it is always satisfied and not listed.)
-  requires: { npm: [], ui: [], blocks: ['contact'] },
+  requires: { blocks: ['contact'] },
 } satisfies BlockManifest<HeroCopy, HeroVariant>

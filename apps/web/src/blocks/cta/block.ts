@@ -20,5 +20,5 @@ export const cta = {
   // `pages.config.ts`; see `requires` in @/lib/types. `secondaryCta` is optional on `CtaCopy` and
   // only the `split` variant renders it, but both copy files always set it, so both variants
   // depend on it.
-  requires: { npm: [], ui: [], blocks: ['contact', 'features'] },
+  requires: { blocks: ['contact', 'features'] },
 } satisfies BlockManifest<CtaCopy, CtaVariant>
