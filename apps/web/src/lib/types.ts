@@ -28,7 +28,12 @@ export type SiteConfig = {
     sameAs?: string[]
   }
   nav: { target: string }[]
-  theme: { mode: 'light' | 'dark' | 'both'; default?: 'light' | 'dark' }
+  /**
+   * `both` ships the light and dark palettes and a toggle in the header, opening on whatever
+   * the visitor's operating system prefers. `light` and `dark` each pin the site to one palette
+   * and ship no toggle and no theme-switching JavaScript at all.
+   */
+  theme: { mode: 'light' | 'dark' | 'both' }
 }
 
 export type SeoCopy = { title: string; description: string; ogImage?: string }
@@ -87,5 +92,5 @@ export type BlockManifest<C = any, V extends string = string> = {
   // `pnpm verify` says "expected exactly 1 <h1>, found 0" without ever naming the link. So read
   // this list before removing a block from a page. A block linking to itself is not a
   // dependency: it is satisfied wherever the block is.
-  requires?: { npm?: string[]; ui?: string[]; blocks?: string[] }
+  requires?: { blocks?: string[] }
 }

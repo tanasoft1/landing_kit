@@ -18,5 +18,4 @@ export const contact = {
   // No `schema` here. `buildJsonLd` (src/lib/seo/json-ld.ts) already emits one `WebPage` node
   // per page, and a second description of the same page is a bug, not extra markup. Use
   // `schema` only for markup this block's own content earns, such as a future `ContactPoint`.
-  requires: { npm: ['react-hook-form', 'zod'], ui: [] },
 } satisfies BlockManifest<ContactCopy, ContactVariant>

@@ -438,46 +438,26 @@ function transformSubmitSchema(text) {
   )
 }
 
-// The only one of these that is answer-dependent: under `--theme=single` the file it names is the
-// one that shipped, and the note is the only thing explaining why the toggle on /docs does nothing.
-function transformTokenGallery(text, answers) {
-  const from =
-    '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
-    '          swatches it changes. In a single-mode build `@/theme` resolves to `theme.single.tsx`,\n' +
-    '          whose `ThemeToggle` renders `null` — so this adds no theme-switching code where there is none.'
-  const to =
-    answers.theme === 'single'
-      ? '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
-        '          swatches it changes. This site is single-mode, so `@/theme` resolves to\n' +
-        '          `theme.single.tsx`, whose `ThemeToggle` renders `null` — the control below is\n' +
-        '          deliberately inert.'
-      : '          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the\n' +
-        '          swatches it changes.'
-  return replaceExactText(text, 'src/components/docs/token-gallery.tsx', from, to)
-}
-
 // --- biome.json ---------------------------------------------------------------------------------
 
 // `noRestrictedImports` is a live rule, not inert configuration, which is exactly why the dead
 // entries matter: an entry naming a module that resolves to no file can never fire, because
 // `import … from '@/motion.noop'` is already a "cannot find module" type error before Biome sees
 // it. What it does do is tell a developer reading the lint config that this project has a
-// `motion.noop`, a `submit.rpc` and both theme implementations. It has none of them.
+// `motion.noop` and a `submit.rpc`. It has neither. Both theme entries stay: a generated project
+// really does contain both halves, so those two bans are live.
 //
 // The entries naming files that DID ship are kept, and they are the valuable ones: those imports
 // resolve, so without the rule a direct import would silently bypass the alias.
 //
-// Removed as whole named pairs rather than line by line because the last entry in a JSON object
-// carries no trailing comma — deleting `@/theme.single` from the second override on its own would
-// leave `@/theme.both": "…",` dangling and produce a file that is not JSON.
+// The theme pair is kept verbatim. Only `@/submit.rpc` goes, and it is not the last entry in its
+// object, so removing it cannot leave a dangling comma.
 const BIOME_INDENT = ' '.repeat(18)
 const themeRule = (half) =>
   `${BIOME_INDENT}"@/integrations/theme.${half}": "Import '@/theme' — the alias selects the implementation."`
 
-function transformBiomeJson(text, answers) {
+function transformBiomeJson(text) {
   const file = 'biome.json'
-  const keep = answers.theme === 'both' ? 'both' : 'single'
-
   // `vcs.root` points Biome at the repo root, where the kit keeps its `.gitignore`, two levels up
   // from `apps/web/biome.json`. A generated project is flat, so its `.gitignore` sits beside this
   // file and the same key would send Biome outside the project. Removed rather than rewritten:
@@ -494,21 +474,14 @@ function transformBiomeJson(text, answers) {
     `${BIOME_INDENT}"@/integrations/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
     '',
   )
-  // The theme pair and the `@/submit.rpc` line are taken together in the blocks override: the same
-  // two theme lines appear in the second override too, and the shorter of the two texts is a
-  // substring of the longer, so neither is unique on its own. `@/submit.rpc` follows only here.
+  // Anchored on the theme pair, which appears in both overrides: `@/submit.rpc` follows only
+  // here, so the three lines together are unique while the submit line alone is not.
   out = replaceExactText(
     out,
     `${file} (blocks override)`,
     `${themeRule('both')},\n${themeRule('single')},\n` +
       `${BIOME_INDENT}"@/integrations/submit.rpc": "Import '@/submit' — the alias selects the implementation.",\n`,
-    `${themeRule(keep)},\n`,
-  )
-  out = replaceExactText(
-    out,
-    `${file} (components/routes override)`,
-    `${themeRule('both')},\n${themeRule('single')}\n                }`,
-    `${themeRule(keep)}\n                }`,
+    `${themeRule('both')},\n${themeRule('single')},\n`,
   )
 
   // The edits above are line surgery on a file whose last-entry-has-no-comma rule they have to
@@ -531,7 +504,6 @@ const TRANSFORMS = {
   'README.md': transformReadme,
   'src/styles/theme.css': transformThemeCss,
   'src/components/docs/config-reference.tsx': transformConfigReference,
-  'src/components/docs/token-gallery.tsx': transformTokenGallery,
   'src/integrations/motion.animated.tsx': transformMotionAnimated,
   'src/integrations/submit.endpoint.ts': transformSubmitEndpoint,
   'src/integrations/submit-schema.ts': transformSubmitSchema,

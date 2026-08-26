@@ -55,6 +55,11 @@ export const COPY_FILES = [
   'src/app/router.tsx',
   'src/app/routeTree.gen.ts',
   'src/integrations/motion.types.ts',
+  // Both halves, unlike `@/motion` and `@/submit` below. The generated `vite.config.ts`
+  // reads `site.theme.mode`, so a project can switch between light, dark and both by
+  // editing that one line, and the half it switches to has to be there.
+  'src/integrations/theme.both.tsx',
+  'src/integrations/theme.single.tsx',
   'src/integrations/theme.types.ts',
   'src/blocks/variant-registry.ts',
   'scripts/check-conventions.mjs',
@@ -65,26 +70,29 @@ export const COPY_FILES = [
 // Chosen by answers; the unchosen half is never copied. A generated project ships exactly one
 // implementation per boundary, so `motion.noop.tsx` and friends are not merely unused — they are
 // not there. A value is either the path, or a function of the answers that returns it.
+//
+// `@/theme` used to be here too. It is not, because its choice has to stay changeable: both
+// halves are in COPY_FILES above and the generated `vite.config.ts` picks between them from
+// `site.theme.mode`. The unused half still costs nothing at run time, because the alias is
+// resolved at build time and only the chosen half is ever bundled.
 export const BOUNDARY_FILES = {
   motion: 'src/integrations/motion.animated.tsx', // deviation 5
   submit: 'src/integrations/submit.endpoint.ts', // deviation 5
-  theme: (a) =>
-    a.theme === 'both' ? 'src/integrations/theme.both.tsx' : 'src/integrations/theme.single.tsx',
 }
 
 // Copied with an edit, because the kit's own copy of each names things a generated project does
 // not have. This list drives the transform loop in `copy.mjs`, so a file listed here with no
 // transform registered is an error rather than a verbatim copy nobody notices.
-// Each of the last five is here for one reason: the kit ships TWO implementations behind every
-// `@/motion`, `@/theme` and `@/submit` alias and a generated project gets exactly one, so the
-// surviving half's own prose explains itself by pointing at the half that is not there — and
-// `biome.json` bans imports of files no scaffold contains. Same rule as the README: a generated
-// project may not describe machinery it does not have.
+// Each of the last four is here for one reason: the kit ships TWO implementations behind the
+// `@/motion` and `@/submit` aliases and a generated project gets exactly one, so the surviving
+// half's own prose explains itself by pointing at the half that is not there — and `biome.json`
+// bans imports of files no scaffold contains. Same rule as the README: a generated project may
+// not describe machinery it does not have. `@/theme` is not among them: both its halves ship, so
+// the kit's own wording about them is already true in a generated project.
 export const TRANSFORMED_FILES = [
   'README.md',
   'src/styles/theme.css',
   'src/components/docs/config-reference.tsx',
-  'src/components/docs/token-gallery.tsx',
   'src/integrations/motion.animated.tsx',
   'src/integrations/submit.endpoint.ts',
   'src/integrations/submit-schema.ts',

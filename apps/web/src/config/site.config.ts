@@ -16,5 +16,5 @@ export const site: SiteConfig = {
     sameAs: ['https://www.facebook.com/example'],
   },
   nav: [{ target: 'hero' }, { target: 'contact' }],
-  theme: { mode: 'both', default: 'light' },
+  theme: { mode: 'both' },
 }

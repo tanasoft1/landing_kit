@@ -25,12 +25,12 @@ function useActiveLocale(): string {
 function RootDocument() {
   const lang = useActiveLocale()
   return (
-    <html lang={lang}>
+    <html lang={lang} className={site.theme.mode === 'dark' ? 'dark' : undefined}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <HeadContent />
-        <ThemeScript defaultMode={site.theme.default ?? 'light'} />
+        <ThemeScript />
       </head>
       <body>
         <Outlet />
