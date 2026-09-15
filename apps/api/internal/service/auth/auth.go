@@ -42,9 +42,13 @@ var errInvalidToken = errors.New("invalid token")
 // emails without ever seeing a different error message. Comparing against this fixed hash costs
 // one bcrypt call on every path and closes the gap the identical error message alone does not.
 //
-// Closing it depends on this hash carrying the same cost as a real one: bcrypt's running time is
-// set by the cost encoded in the hash it is given, so a dummy written at a lower cost makes the
-// unknown-email path the faster one again. init below refuses to start if that ever drifts.
+// Closing it depends on this hash comparing in the same time as a real one, and bcrypt's running
+// time is set by the cost encoded in the hash it is handed. So the cost has to match exactly, not
+// merely keep up. A lower cost makes the unknown-email path the faster one, a higher cost makes it
+// the slower one, and either difference enumerates emails just as well. A value bcrypt cannot
+// parse at all is the worst of the three: CompareHashAndPassword rejects it on the parse and does
+// no hashing whatsoever, which measures at 3ns against 200ms for a real cost-12 compare. init
+// below refuses to start on any of them.
 const dummyPasswordHash = "$2a$12$hUQZsy0MRlWsdaOKt6/a5ugySbQvoGmsHDxBxLO8EIRoxbk6/.6GC" //nolint:gosec // a bcrypt hash of a fixed non-secret string, not a credential
 
 // A wrong security invariant should stop the process rather than warn, which is what conf.Load
@@ -53,8 +57,8 @@ const dummyPasswordHash = "$2a$12$hUQZsy0MRlWsdaOKt6/a5ugySbQvoGmsHDxBxLO8EIRoxb
 //
 //nolint:gochecknoinits // an invariant that must hold before the first request, with nothing to return an error to
 func init() {
-	if utils.NeedsRehash(dummyPasswordHash) {
-		panic("auth: dummyPasswordHash is below utils.bcryptCost — the unknown-email path is now faster than the wrong-password path, which reopens the email-enumeration timing oracle this constant exists to close")
+	if !utils.HashCostIsCurrent(dummyPasswordHash) {
+		panic("auth: dummyPasswordHash must be a bcrypt hash at exactly utils.bcryptCost. A lower cost, a higher cost, or a value bcrypt cannot parse all break the timing match between the unknown-email path and the wrong-password path, which reopens the email-enumeration oracle this constant exists to close.")
 	}
 }
 

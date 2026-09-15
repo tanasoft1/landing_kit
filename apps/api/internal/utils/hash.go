@@ -41,3 +41,19 @@ func NeedsRehash(hash string) bool {
 	}
 	return cost < bcryptCost
 }
+
+// HashCostIsCurrent reports whether hash is a bcrypt hash written at exactly the current cost.
+//
+// This is not the negation of NeedsRehash, and the two answer different questions. NeedsRehash
+// asks whether a stored password should be rewritten, so it forgives everything that is not a
+// hash below the current cost. This asks whether a hash takes the same time to compare as one
+// this package would write today, so it forgives nothing: a cost above the current one fails,
+// and so does anything bcrypt cannot parse.
+//
+// Callers that need a comparison to take a predictable amount of time want this one. An
+// unparseable value is the worst case for them, not a harmless one, because
+// CompareHashAndPassword rejects it on the parse rather than doing any work at all.
+func HashCostIsCurrent(hash string) bool {
+	cost, err := bcrypt.Cost([]byte(hash))
+	return err == nil && cost == bcryptCost
+}
