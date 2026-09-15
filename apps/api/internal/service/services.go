@@ -32,10 +32,12 @@ func New(pool *pgxpool.Pool, notifier notify.Notifier, cfg *conf.Config) *Servic
 	q := sqlc.New(pool)
 	tokenService := secure.NewTokenService(cfg.JWT.Secret, cfg.JWT.AccessExpireMinutes, cfg.JWT.RefreshExpireDays)
 
+	auditService := audit.New(q)
+
 	return &Services{
 		Lead:         lead.New(q, notifier),
-		Auth:         auth.New(q, tokenService),
-		Audit:        audit.New(q),
+		Auth:         auth.New(q, tokenService, auditService),
+		Audit:        auditService,
 		Queries:      q,
 		Pool:         pool,
 		TokenService: tokenService,

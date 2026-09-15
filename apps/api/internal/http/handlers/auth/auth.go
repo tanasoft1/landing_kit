@@ -39,7 +39,7 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.svc.Login(c.Context(), &req)
+	result, err := h.svc.Login(c.Context(), &req, c.IP(), c.Get("User-Agent"))
 	if err != nil {
 		// Unknown email and wrong password reach here as the SAME error (see
 		// auth.errInvalidCredentials), so this branch cannot leak account existence even if it
@@ -55,10 +55,16 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: resp})
+	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: models.RsAuth{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		Admin:        result.Admin,
+	}})
 }
 
-// Refresh validates a refresh token and, on success, returns a fresh access/refresh token pair.
+// Refresh spends a refresh token and, on success, returns a fresh access/refresh token pair. The
+// token presented is now dead either way: it was spent, or it was already spent and presenting it
+// again killed every token issued from the same login.
 // Never logs req.RefreshToken.
 func (h *Handler) Refresh(c *fiber.Ctx) error {
 	var req models.RqRefreshToken
@@ -74,7 +80,7 @@ func (h *Handler) Refresh(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.svc.Refresh(c.Context(), &req)
+	result, err := h.svc.Refresh(c.Context(), req.RefreshToken, c.IP(), c.Get("User-Agent"))
 	if err != nil {
 		if auth.IsInvalidToken(err) {
 			return c.Status(fiber.StatusUnauthorized).JSON(models.ErrorResponse{
@@ -87,5 +93,9 @@ func (h *Handler) Refresh(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: resp})
+	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: models.RsAuth{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		Admin:        result.Admin,
+	}})
 }

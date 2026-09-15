@@ -389,14 +389,17 @@ sequenceDiagram
     OP->>A: POST /api/auth/login
     A->>DB: GetAdminByEmail
     A->>A: bcrypt compare on every path, even for an unknown email
+    A->>DB: CreateRefreshToken, a ledger row under a new family_id
     A-->>OP: access_token, refresh_token, admin profile
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
     A->>A: AuthMiddleware: HS256 asserted, token_type must be access
     A->>DB: ORDER BY created_at DESC, id DESC, LIMIT and OFFSET
     A-->>OP: success true, data is an array of RsLead
     OP->>A: POST /api/auth/refresh with refresh_token
+    A->>DB: GetRefreshToken by jti; already revoked means replay
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
-    A-->>OP: a fresh pair
+    A->>DB: RevokeRefreshToken, then CreateRefreshToken in the same family
+    A-->>OP: a fresh pair, and the presented token is now dead
 ```
 
 | Endpoint | Auth | Limits |
@@ -405,7 +408,7 @@ sequenceDiagram
 | `POST /api/auth/refresh` | the refresh token itself | 5 per 15 minutes per client |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Four properties of this path are deliberate and easy to undo by accident:
+Five properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
@@ -422,6 +425,13 @@ Four properties of this path are deliberate and easy to undo by accident:
 - **Refresh re-reads the admin row.** An admin removed after a refresh token was issued cannot use
   it to obtain a new access token, and "token malformed" and "admin was deleted" collapse to the
   same 401.
+- **Every refresh token is single-use, and a replayed one kills its whole family.** Each token
+  carries a `jti` and has a row in `refresh_tokens`. Refreshing revokes that row and writes a new
+  one under the same `family_id`, so a token presented twice can only mean two parties hold it. The
+  second presentation revokes the entire family, logs `token_reuse_detected`, and sends the thief
+  and the real admin both back to the login screen. The revoke runs before the insert on purpose: a
+  crash between them costs a re-login, while the other order can leave two live tokens after a
+  crash, which is the state this exists to prevent.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same
@@ -484,8 +494,11 @@ of what happened outlives the account it happened to. `login_attempts` joins not
 the email as submitted, so a lockout exists for addresses that were never registered, and the
 presence of one cannot be used to ask whether an account exists.
 
-All three auth tables exist in the schema and nothing reads or writes them yet. They are groundwork
-for token rotation, per-account backoff and an auth event trail.
+`refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
+reads it to decide whether a presented token is still live. `admin_audit_log` is written by the
+same two paths, through `internal/service/audit`, for login success, login failure and detected
+token reuse. `login_attempts` exists in the schema and nothing reads or writes it yet. It is
+groundwork for per-account backoff.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The

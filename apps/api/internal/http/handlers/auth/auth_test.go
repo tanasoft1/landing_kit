@@ -16,6 +16,7 @@ import (
 	leadhandler "landing-api/internal/http/handlers/lead"
 	"landing-api/internal/http/models"
 	"landing-api/internal/http/routes"
+	"landing-api/internal/service/audit"
 	"landing-api/internal/service/auth"
 	"landing-api/internal/service/lead"
 	"landing-api/internal/service/notify"
@@ -40,7 +41,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	tokenService := secure.NewTokenService(testJWTSecret, 15, 7)
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(lead.New(db.Queries, notify.NewLogger())),
-		Auth: authhandler.New(auth.New(db.Queries, tokenService)),
+		Auth: authhandler.New(auth.New(db.Queries, tokenService, audit.New(db.Queries))),
 	}
 
 	app := fiber.New()

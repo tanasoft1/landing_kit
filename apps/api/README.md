@@ -74,6 +74,17 @@ everywhere else, and only call `/api/auth/refresh` with the refresh token to get
 the access token expires (`JWT_ACCESS_EXPIRE_MINUTES`, default 15 minutes; the refresh token lasts
 `JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
 
+Each refresh token works exactly once. `/api/auth/refresh` returns a new refresh token along with
+the new access token, and the one you sent is dead from that moment. Store the new one and discard
+the old one, or the next refresh gets a 401.
+
+Sending a refresh token that was already spent is treated as theft, because two parties holding the
+same token is what that looks like from here. The server revokes every token descended from the
+same login, including the replacement the honest client is holding, and writes a
+`token_reuse_detected` row to `admin_audit_log`. Both parties get a 401 on their next refresh and
+have to log in again. A client that keeps a copy of an old refresh token and retries with it will
+log itself out this way, so keep one token and replace it on every call.
+
 `JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to
 anything but `development` when the secret is empty or shorter than 32 characters, because a short
 or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example

@@ -8,6 +8,7 @@ import (
 
 	"landing-api/internal/db/sqlc"
 	"landing-api/internal/http/models"
+	"landing-api/internal/service/audit"
 	"landing-api/internal/service/auth"
 	"landing-api/internal/testsupport"
 	"landing-api/internal/utils"
@@ -15,8 +16,10 @@ import (
 )
 
 const (
-	testPassword = "correct-horse-battery-staple"
-	testSecret   = "auth-service-test-secret-32-bytes!!" //nolint:gosec // fixture value for tests, not a real secret
+	testPassword  = "correct-horse-battery-staple"
+	testSecret    = "auth-service-test-secret-32-bytes!!" //nolint:gosec // fixture value for tests, not a real secret
+	testIP        = "127.0.0.1"
+	testUserAgent = "test-agent"
 )
 
 func setupAuth(t *testing.T) (*testsupport.DB, *auth.Service, *secure.TokenService) {
@@ -24,7 +27,7 @@ func setupAuth(t *testing.T) (*testsupport.DB, *auth.Service, *secure.TokenServi
 
 	tdb := testsupport.Fresh(t)
 	tokenSvc := secure.NewTokenService(testSecret, 15, 7)
-	svc := auth.New(tdb.Queries, tokenSvc)
+	svc := auth.New(tdb.Queries, tokenSvc, audit.New(tdb.Queries))
 
 	return tdb, svc, tokenSvc
 }
@@ -59,7 +62,7 @@ func TestLogin(t *testing.T) {
 	t.Run("returns valid token pair and profile", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := svc.Login(ctx, &models.RqLogin{Email: "login@test.mn", Password: testPassword})
+		resp, err := svc.Login(ctx, &models.RqLogin{Email: "login@test.mn", Password: testPassword}, testIP, testUserAgent)
 		if err != nil {
 			t.Fatalf("Login: %v", err)
 		}
@@ -88,8 +91,8 @@ func TestLogin(t *testing.T) {
 	t.Run("wrong password and unknown email return the identical error", func(t *testing.T) {
 		t.Parallel()
 
-		_, wrongPassErr := svc.Login(ctx, &models.RqLogin{Email: "login@test.mn", Password: "wrong-password"})
-		_, unknownEmailErr := svc.Login(ctx, &models.RqLogin{Email: "nobody@test.mn", Password: testPassword})
+		_, wrongPassErr := svc.Login(ctx, &models.RqLogin{Email: "login@test.mn", Password: "wrong-password"}, testIP, testUserAgent)
+		_, unknownEmailErr := svc.Login(ctx, &models.RqLogin{Email: "nobody@test.mn", Password: testPassword}, testIP, testUserAgent)
 
 		if wrongPassErr == nil || !auth.IsInvalidCredentials(wrongPassErr) {
 			t.Fatalf("wrong password err = %v, want invalid credentials", wrongPassErr)
@@ -114,12 +117,14 @@ func TestRefresh(t *testing.T) {
 	t.Run("valid refresh token returns a new pair", func(t *testing.T) {
 		t.Parallel()
 
-		refresh, err := tokenSvc.GenerateRefreshToken(adminID)
+		// Through Login, not tokenSvc: a refresh token is only honoured if it has a ledger row,
+		// and Login is what writes one.
+		login, err := svc.Login(ctx, &models.RqLogin{Email: "refresh@test.mn", Password: testPassword}, testIP, testUserAgent)
 		if err != nil {
-			t.Fatalf("GenerateRefreshToken: %v", err)
+			t.Fatalf("Login: %v", err)
 		}
 
-		resp, err := svc.Refresh(ctx, &models.RqRefreshToken{RefreshToken: refresh})
+		resp, err := svc.Refresh(ctx, login.RefreshToken, testIP, testUserAgent)
 		if err != nil {
 			t.Fatalf("Refresh: %v", err)
 		}
@@ -142,7 +147,7 @@ func TestRefresh(t *testing.T) {
 			t.Fatalf("GenerateAccessToken: %v", err)
 		}
 
-		_, err = svc.Refresh(ctx, &models.RqRefreshToken{RefreshToken: access})
+		_, err = svc.Refresh(ctx, access, testIP, testUserAgent)
 		if err == nil || !auth.IsInvalidToken(err) {
 			t.Fatalf("err = %v, want invalid token", err)
 		}
@@ -151,21 +156,24 @@ func TestRefresh(t *testing.T) {
 	t.Run("garbage token returns invalid token", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := svc.Refresh(ctx, &models.RqRefreshToken{RefreshToken: "not-a-jwt"})
+		_, err := svc.Refresh(ctx, "not-a-jwt", testIP, testUserAgent)
 		if err == nil || !auth.IsInvalidToken(err) {
 			t.Fatalf("err = %v, want invalid token", err)
 		}
 	})
 
-	t.Run("refresh token naming a deleted admin returns invalid token", func(t *testing.T) {
+	// Signed by this service, and valid on its face, but with nothing behind it in the ledger.
+	// That is what a token issued before the ledger existed looks like, and what a token whose row
+	// was pruned looks like, and neither is one this service will honour.
+	t.Run("refresh token with no ledger row returns invalid token", func(t *testing.T) {
 		t.Parallel()
 
-		refresh, err := tokenSvc.GenerateRefreshToken(uuid.New())
+		refresh, _, err := tokenSvc.GenerateRefreshToken(uuid.New(), uuid.New())
 		if err != nil {
 			t.Fatalf("GenerateRefreshToken: %v", err)
 		}
 
-		_, err = svc.Refresh(ctx, &models.RqRefreshToken{RefreshToken: refresh})
+		_, err = svc.Refresh(ctx, refresh, testIP, testUserAgent)
 		if err == nil || !auth.IsInvalidToken(err) {
 			t.Fatalf("err = %v, want invalid token", err)
 		}

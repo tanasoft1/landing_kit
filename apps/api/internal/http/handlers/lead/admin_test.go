@@ -87,7 +87,7 @@ func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 
 	app, _, tokenService := newApp(t)
 
-	refresh, err := tokenService.GenerateRefreshToken(uuid.New())
+	refresh, _, err := tokenService.GenerateRefreshToken(uuid.New(), uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}
