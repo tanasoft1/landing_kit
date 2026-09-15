@@ -5,15 +5,22 @@ package audit
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
 	"landing-api/internal/db/sqlc"
 )
 
-// The events slice 1 records. token_reuse_detected is the important one: it is the only signal
-// that a refresh token was stolen, and without it a family revocation looks to the admin like a
-// random logout.
+// auditWriteTimeout bounds the insert in Record. One row into a table carrying a single index is a
+// single-digit-millisecond write, so five seconds is not a budget, it is a tripwire for a wedged
+// database: nothing merely busy reaches it. It also stays under the 10 second
+// ShutdownWithTimeout in cmd/main.go, so a stuck audit write cannot outlive a graceful shutdown.
+const auditWriteTimeout = 5 * time.Second
+
+// The events the admin auth path records. token_reuse_detected is the important one: it is the
+// only signal that a refresh token was stolen, and without it a family revocation looks to the
+// admin like a random logout.
 const (
 	EventLoginSuccess = "login_success"
 	EventLoginFailed  = "login_failed"
@@ -35,10 +42,14 @@ func New(queries *sqlc.Queries) *Service {
 //
 // adminID is nil for a failed login against an email with no account.
 func (s *Service) Record(ctx context.Context, event string, adminID *uuid.UUID, ip, userAgent string) {
-	// WithoutCancel because the request's context may already be cancelled -- a client that
-	// disconnects mid-login still generated an event worth keeping, and that is doubly true of
-	// the reuse-detection path, where an attacker hanging up is not a reason to lose the record.
-	ctx = context.WithoutCancel(ctx)
+	// Two decisions, not one. WithoutCancel drops the request's cancellation, because a client
+	// that disconnects mid-login still generated an event worth keeping, and that is doubly true
+	// of the reuse-detection path, where an attacker hanging up is not a reason to lose the
+	// record. WithTimeout then puts a bound back, because WithoutCancel strips the request's
+	// deadline along with its cancellation. Without that second half a wedged database turns "an
+	// audit write must never fail a request" into "an audit write can hang one forever".
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditWriteTimeout)
+	defer cancel()
 
 	err := s.queries.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
 		ID:        uuid.New(),
