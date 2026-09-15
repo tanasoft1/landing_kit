@@ -49,23 +49,23 @@ type Claims struct {
 // only client is its own admin UI, so one secret to manage beats a keypair (see the plan's
 // "Decisions taken before writing this").
 type TokenService struct {
-	secret            string
-	accessExpireHours int
-	refreshExpireDays int
+	secret              string
+	accessExpireMinutes int
+	refreshExpireDays   int
 }
 
-func NewTokenService(secret string, accessExpireHours, refreshExpireDays int) *TokenService {
+func NewTokenService(secret string, accessExpireMinutes, refreshExpireDays int) *TokenService {
 	return &TokenService{
-		secret:            secret,
-		accessExpireHours: accessExpireHours,
-		refreshExpireDays: refreshExpireDays,
+		secret:              secret,
+		accessExpireMinutes: accessExpireMinutes,
+		refreshExpireDays:   refreshExpireDays,
 	}
 }
 
 // GenerateAccessToken signs a short-lived token carrying the admin's identity, used to
 // authorize requests to routes behind AuthMiddleware.
 func (s *TokenService) GenerateAccessToken(adminID uuid.UUID, email string) (string, error) {
-	expiresAt := time.Now().Add(time.Duration(s.accessExpireHours) * time.Hour)
+	expiresAt := time.Now().Add(time.Duration(s.accessExpireMinutes) * time.Minute)
 
 	claims := &Claims{
 		AdminID:   adminID,

@@ -413,7 +413,7 @@ Four properties of this path are deliberate and easy to undo by accident:
   valid emails without ever showing a different message.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
-  extends the session from one hour to seven days.
+  extends the session from fifteen minutes to seven days.
 - **The signing method is asserted in the keyfunc**, not assumed. `jwt.Parse` runs the keyfunc
   before verifying the signature, so a keyfunc that returns the secret unconditionally accepts
   anything the library can parse.
