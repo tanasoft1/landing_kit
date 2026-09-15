@@ -109,7 +109,7 @@ func TestValidateRejectsExpiredToken(t *testing.T) {
 	t.Parallel()
 
 	// Built directly with jwt, not through GenerateAccessToken: the service's expiry is
-	// configured in whole hours, too coarse to produce an already-expired token in a fast test.
+	// configured in whole minutes, too coarse to produce an already-expired token in a fast test.
 	// Same secret and shape parseToken expects, so this exercises exactly the expiry check.
 	claims := &secure.Claims{
 		AdminID:   uuid.New(),
