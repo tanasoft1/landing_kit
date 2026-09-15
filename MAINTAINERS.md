@@ -295,6 +295,13 @@ is deliberately slow, so a request that skips it answers measurably sooner than 
 letting a caller enumerate registered emails by timing alone even though both cases return the
 identical error message.
 
+That only works while the dummy hash carries the same bcrypt cost as a real one, because bcrypt's
+running time comes from the cost encoded in the hash it is handed. A dummy left behind at a lower
+cost makes the unknown-email path the faster one again, which is what happened when `HashPassword`
+moved to cost 12. `internal/service/auth`'s `init` now refuses to start the process if the constant
+is below `utils.bcryptCost`, on the same reasoning as `conf.Load` refusing a short `JWT_SECRET`: a
+security invariant that is wrong should stop the server, not log a warning nobody reads.
+
 `JWT_SECRET` has no default outside development. `conf.Load` refuses to start when
 `APP_ENV` is anything but `development` and the secret is empty or shorter than 32 characters:
 HS256 with a short secret is brute-forceable offline once an attacker holds one token to check
