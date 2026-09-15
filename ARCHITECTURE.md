@@ -410,7 +410,9 @@ Four properties of this path are deliberate and easy to undo by accident:
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
   deliberately slow, so a path that skips it returns measurably sooner, and that gap enumerates
-  valid emails without ever showing a different message.
+  valid emails without ever showing a different message. The dummy hash has to carry the same cost
+  as a real one, since bcrypt reads its running time out of the hash it is given; the `auth`
+  package panics at startup if it drifts below `utils.bcryptCost`.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
   extends the session from fifteen minutes to seven days.

@@ -41,7 +41,22 @@ var errInvalidToken = errors.New("invalid token")
 // sooner than one that runs it. An attacker timing responses can use that gap to enumerate valid
 // emails without ever seeing a different error message. Comparing against this fixed hash costs
 // one bcrypt call on every path and closes the gap the identical error message alone does not.
-const dummyPasswordHash = "$2a$10$uJZNA0fM7Ye.pwsk8uffEO6kmwmv9iOQz/PRe9TlQUAZzBErcmiZG" //nolint:gosec // a bcrypt hash of a fixed non-secret string, not a credential
+//
+// Closing it depends on this hash carrying the same cost as a real one: bcrypt's running time is
+// set by the cost encoded in the hash it is given, so a dummy written at a lower cost makes the
+// unknown-email path the faster one again. init below refuses to start if that ever drifts.
+const dummyPasswordHash = "$2a$12$hUQZsy0MRlWsdaOKt6/a5ugySbQvoGmsHDxBxLO8EIRoxbk6/.6GC" //nolint:gosec // a bcrypt hash of a fixed non-secret string, not a credential
+
+// A wrong security invariant should stop the process rather than warn, which is what conf.Load
+// already does for an empty or too-short JWT secret outside development. The check is cheap, it
+// is correct only at startup, and there is no caller to return an error to.
+//
+//nolint:gochecknoinits // an invariant that must hold before the first request, with nothing to return an error to
+func init() {
+	if utils.NeedsRehash(dummyPasswordHash) {
+		panic("auth: dummyPasswordHash is below utils.bcryptCost — the unknown-email path is now faster than the wrong-password path, which reopens the email-enumeration timing oracle this constant exists to close")
+	}
+}
 
 type Service struct {
 	queries      *sqlc.Queries
