@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -31,8 +32,14 @@ type ServerConfig struct {
 	// silently drops every real submission at preflight with no server-side log line. Load()
 	// therefore refuses to start in production while this is still the default.
 	//
-	// psyfint_v2_back defaults to "*" instead, which fails open. That is fine for an endpoint
-	// behind JWT and wrong for a public one: "*" lets any site on the internet post leads here.
+	// The admin panel's session rides on this setting too. internal/http/routes answers with
+	// credentialed CORS so the browser will carry the refresh cookie, which means the panel's
+	// origin has to be listed here or login, refresh and logout all fail cross-origin.
+	//
+	// psyfint_v2_back defaults to "*" instead, which fails open. Do not copy that here: Load
+	// refuses a "*" entry outright, in every environment. A wildcard origin on a credentialed
+	// response would hand a logged-in admin session to any site a browser visits, and even
+	// without the cookie "*" lets any site on the internet post leads here.
 	CORSOrigins string
 	// ProxyHeader names the header Fiber reads the client IP from behind a load balancer.
 	// Empty means "use the socket address". Do not set it unless a proxy really sets that
@@ -77,8 +84,8 @@ type NotifyConfig struct {
 // boundary: HS256 with a short secret is brute-forceable offline once an attacker holds one
 // token to check guesses against, and an empty secret makes every token forgeable by anyone who
 // can compute an HMAC. Load refuses to start on either problem outside development, the same
-// asymmetry the CORS_ORIGINS check above documents: a staging deploy has real admins and the
-// same forgeable-token failure mode a production deploy has.
+// asymmetry the CORS_ORIGINS development-default check documents: a staging deploy has real
+// admins and the same forgeable-token failure mode a production deploy has.
 type JWTConfig struct {
 	Secret              string
 	AccessExpireMinutes int
@@ -180,11 +187,29 @@ func Load() (*Config, error) {
 			devCORSOrigins, cfg.Server.AppEnv)
 	}
 
+	// Unconditional, unlike the check just above: "*" is wrong in development too. The admin
+	// session cookie only travels cross-origin because internal/http/routes turns credentialed
+	// CORS on, and the CORS spec forbids answering a credentialed request with a wildcard origin.
+	// Fiber enforces that itself by panicking inside cors.New, so all this check adds is a
+	// startup error that names the variable instead of a stack trace from middleware setup.
+	//
+	// Entries are compared whole, so Fiber's "https://*.example.com" subdomain form still works.
+	// That form answers with the caller's own origin, never with "*".
+	for _, origin := range strings.Split(cfg.Server.CORSOrigins, ",") {
+		if strings.TrimSpace(origin) == "*" {
+			return nil, fmt.Errorf(
+				"CORS_ORIGINS is %q, which allows every origin: the admin session cookie travels "+
+					"on credentialed requests, and honouring one from any origin would hand a "+
+					"logged-in admin session to every site a browser visits",
+				cfg.Server.CORSOrigins)
+		}
+	}
+
 	if cfg.Notify.Driver != notifyDriverLog && cfg.Notify.Driver != notifyDriverSES {
 		return nil, fmt.Errorf("invalid NOTIFY_DRIVER %q: want \"ses\" or \"log\"", cfg.Notify.Driver)
 	}
-	// Only "production", unlike the CORS check above which fires for anything that is not
-	// "development". The asymmetry is deliberate: a staging deploy SHOULD keep the log driver,
+	// Only "production", unlike the CORS_ORIGINS development-default check above, which fires for
+	// anything that is not "development". The asymmetry is deliberate: a staging deploy SHOULD keep the log driver,
 	// because a staging site emailing a real client is worse than a staging site not emailing.
 	// A staging deploy with the wrong CORS origin, by contrast, is simply broken.
 	if cfg.Server.AppEnv == "production" && cfg.Notify.Driver == notifyDriverLog {
@@ -209,11 +234,12 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Same asymmetry as the CORS_ORIGINS check above and for the same reason: anything that is
-	// not development gets a real admin login, so anything that is not development gets this
-	// guard. devJWTSecret is long enough to pass the length check itself, but the check still
-	// runs on it here rather than being skipped by construction, so a copy-pasted "just set
-	// APP_ENV=development in prod to make the error go away" cannot silently work either.
+	// Same asymmetry as the CORS_ORIGINS development-default check above, and for the same
+	// reason: anything that is not development gets a real admin login, so anything that is not
+	// development gets this guard. devJWTSecret is long enough to pass the length check itself,
+	// but the check still runs on it here rather than being skipped by construction, so a
+	// copy-pasted "just set APP_ENV=development in prod to make the error go away" cannot
+	// silently work either.
 	if cfg.Server.AppEnv != defaultAppEnv {
 		if cfg.JWT.Secret == "" {
 			return nil, errors.New("JWT_SECRET is required outside development: " +

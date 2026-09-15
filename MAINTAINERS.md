@@ -279,10 +279,20 @@ boundary. The region is checked differently: `NewSES` errors when the **resolved
 or an explicit variable both satisfy it. Note EC2 instance metadata does not, deliberately; the
 comment in `ses.go` explains why enabling it would make startup hang on non-EC2 hosts.
 
-The asymmetry with the CORS guard is intentional. `CORS_ORIGINS` is refused for any environment that
-is not `development`, because a wrong origin is simply broken everywhere. `NOTIFY_DRIVER=log` is
-refused only in `production`, because a staging site emailing a real client is worse than a staging
-site not emailing.
+The asymmetry with the CORS guard is intentional. The development default for `CORS_ORIGINS` is
+refused for any environment that is not `development`, because a wrong origin is simply broken
+everywhere. `NOTIFY_DRIVER=log` is refused only in `production`, because a staging site emailing a
+real client is worse than a staging site not emailing.
+
+`CORS_ORIGINS` carries a second check with no environment condition at all: a `*` entry is refused
+in `development` too. `internal/http/routes` sets `AllowCredentials: true` so the admin refresh
+cookie survives a cross-origin login, and the CORS spec forbids pairing credentials with a wildcard
+origin. Fiber v2.52.8 enforces that itself, by panicking inside `cors.New` on a bare `"*"` and
+panicking on `"Invalid origin format in configuration: *"` when `*` is one entry in a longer list.
+Both are fatal, so the config check is not what makes this safe. What it adds is a startup error
+naming `CORS_ORIGINS` and the consequence, instead of a stack trace out of middleware setup. Entries
+are compared whole, so Fiber's `https://*.example.com` subdomain form still works: it answers with
+the caller's own origin and never with `*`.
 
 ### Admin authentication
 
@@ -398,6 +408,13 @@ week of access. `Path` is the second half of that: no `/api/admin/*` request car
 it cannot be picked out of a proxy log or an access log of a request that had no use for it.
 `clearRefreshCookie` repeats the same `Path` on purpose. A mismatched path is a different cookie to
 the browser, and the original would quietly survive the clear.
+
+None of those attributes matter if the browser never keeps the cookie in the first place. It keeps
+one from a cross-origin response only when that response carries
+`Access-Control-Allow-Credentials: true`, which is why `internal/http/routes` sets
+`AllowCredentials` and why `CORS_ORIGINS` must name the panel's origin. `Authorization` is in
+`AllowHeaders` for the same reason on the `/api/admin/*` side: a browser will not send a header the
+preflight response did not list.
 
 `SameSite=Strict` is why there are no CSRF tokens on these endpoints. A request that did not
 originate from this site does not carry the cookie, and `/api/admin/*` wants an `Authorization`

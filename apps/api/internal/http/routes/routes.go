@@ -34,8 +34,25 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 	}))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins,
-		AllowHeaders: "Origin, Content-Type, Accept",
+		// Authorization is listed because every /api/admin/* route reads the access token from
+		// it. A browser refuses to send a header the preflight response did not name, so leaving
+		// it out fails the request before the handler sees it.
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, OPTIONS",
+		// What this buys: the admin refresh token lives in a cookie (see
+		// internal/http/handlers/auth/cookie.go), and a browser neither stores nor sends a cookie
+		// on a cross-origin request unless the response says
+		// Access-Control-Allow-Credentials: true. Without it the panel's development setup, Vite
+		// on :5173 against this API on :3000, cannot log in, refresh or log out. A deployment
+		// serves the site and the API from one origin, so it never exercises this and never
+		// exposes the gap.
+		//
+		// What this forbids: the origin allowlist can never be "*". A credentialed request
+		// honoured from any origin would hand a logged-in admin session to every site a browser
+		// visits. Fiber panics inside cors.New on that combination, and conf.Load rejects a "*"
+		// entry in CORS_ORIGINS first, so the failure names the variable rather than printing a
+		// stack trace from middleware setup.
+		AllowCredentials: true,
 	}))
 
 	api := app.Group("/api")
