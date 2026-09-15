@@ -7,6 +7,7 @@ import (
 
 	"landing-api/conf"
 	"landing-api/internal/db/sqlc"
+	"landing-api/internal/service/audit"
 	"landing-api/internal/service/auth"
 	"landing-api/internal/service/lead"
 	"landing-api/internal/service/notify"
@@ -18,6 +19,7 @@ import (
 type Services struct {
 	Lead    *lead.Service
 	Auth    *auth.Service
+	Audit   *audit.Service
 	Queries *sqlc.Queries
 	Pool    *pgxpool.Pool
 	// TokenService is exposed separately from Auth because AuthMiddleware needs it too, on
@@ -33,6 +35,7 @@ func New(pool *pgxpool.Pool, notifier notify.Notifier, cfg *conf.Config) *Servic
 	return &Services{
 		Lead:         lead.New(q, notifier),
 		Auth:         auth.New(q, tokenService),
+		Audit:        audit.New(q),
 		Queries:      q,
 		Pool:         pool,
 		TokenService: tokenService,
