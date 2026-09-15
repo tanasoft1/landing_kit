@@ -27,13 +27,13 @@ import (
 // expiries throughout, so a token minted with it in one test file validates in another. Never
 // used for anything but tests.
 const (
-	testJWTSecret         = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
-	testAccessExpireHours = 1
-	testRefreshExpireDays = 7
+	testJWTSecret           = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
+	testAccessExpireMinutes = 15
+	testRefreshExpireDays   = 7
 )
 
 func newTestTokenService() *secure.TokenService {
-	return secure.NewTokenService(testJWTSecret, testAccessExpireHours, testRefreshExpireDays)
+	return secure.NewTokenService(testJWTSecret, testAccessExpireMinutes, testRefreshExpireDays)
 }
 
 // validRequest clears every check this handler applies: field shape, the honeypot, and the

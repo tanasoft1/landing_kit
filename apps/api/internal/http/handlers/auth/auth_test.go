@@ -37,7 +37,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	t.Helper()
 
 	db := testsupport.Fresh(t)
-	tokenService := secure.NewTokenService(testJWTSecret, 1, 7)
+	tokenService := secure.NewTokenService(testJWTSecret, 15, 7)
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(lead.New(db.Queries, notify.NewLogger())),
 		Auth: authhandler.New(auth.New(db.Queries, tokenService)),

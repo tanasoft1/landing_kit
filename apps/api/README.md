@@ -71,7 +71,7 @@ GET  /api/admin/leads   Authorization: Bearer <access_token>
 `access_token` and `refresh_token` are not interchangeable: `GET /api/admin/leads` rejects a
 refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token
 everywhere else, and only call `/api/auth/refresh` with the refresh token to get a new pair once
-the access token expires (`JWT_ACCESS_EXPIRE_HOURS`, default 1 hour; the refresh token lasts
+the access token expires (`JWT_ACCESS_EXPIRE_MINUTES`, default 15 minutes; the refresh token lasts
 `JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
 
 `JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to

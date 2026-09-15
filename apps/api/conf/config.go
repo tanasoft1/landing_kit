@@ -80,9 +80,9 @@ type NotifyConfig struct {
 // asymmetry the CORS_ORIGINS check above documents: a staging deploy has real admins and the
 // same forgeable-token failure mode a production deploy has.
 type JWTConfig struct {
-	Secret            string
-	AccessExpireHours int
-	RefreshExpireDays int
+	Secret              string
+	AccessExpireMinutes int
+	RefreshExpireDays   int
 }
 
 // DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
@@ -116,9 +116,9 @@ func Load() (*Config, error) {
 	// Parsed here, not left as strings for a caller to convert: a bad value fails Load itself
 	// rather than reaching secure.NewTokenService, which has no way to report it beyond a panic
 	// or a silently wrong duration.
-	accessExpireHours, err := strconv.Atoi(getEnv("JWT_ACCESS_EXPIRE_HOURS", "1"))
+	accessExpireMinutes, err := strconv.Atoi(getEnv("JWT_ACCESS_EXPIRE_MINUTES", "15"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid JWT_ACCESS_EXPIRE_HOURS: %w", err)
+		return nil, fmt.Errorf("invalid JWT_ACCESS_EXPIRE_MINUTES: %w", err)
 	}
 	refreshExpireDays, err := strconv.Atoi(getEnv("JWT_REFRESH_EXPIRE_DAYS", "7"))
 	if err != nil {
@@ -157,9 +157,9 @@ func Load() (*Config, error) {
 			// instance's tokens forgeable by anyone who cloned the repo. So the default is
 			// applied only when AppEnv is development (right after this literal), and every
 			// other environment must set JWT_SECRET or fail the validation below.
-			Secret:            getEnv("JWT_SECRET", ""),
-			AccessExpireHours: accessExpireHours,
-			RefreshExpireDays: refreshExpireDays,
+			Secret:              getEnv("JWT_SECRET", ""),
+			AccessExpireMinutes: accessExpireMinutes,
+			RefreshExpireDays:   refreshExpireDays,
 		},
 	}
 

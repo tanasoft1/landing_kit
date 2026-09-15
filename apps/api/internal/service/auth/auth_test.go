@@ -23,7 +23,7 @@ func setupAuth(t *testing.T) (*testsupport.DB, *auth.Service, *secure.TokenServi
 	t.Helper()
 
 	tdb := testsupport.Fresh(t)
-	tokenSvc := secure.NewTokenService(testSecret, 1, 7)
+	tokenSvc := secure.NewTokenService(testSecret, 15, 7)
 	svc := auth.New(tdb.Queries, tokenSvc)
 
 	return tdb, svc, tokenSvc

@@ -302,9 +302,9 @@ guesses against, and an empty secret makes every admin token forgeable by anyone
 a documented, obviously-a-placeholder default so `pnpm dev` runs with no `.env` at all.
 
 Access and refresh tokens are not interchangeable. `secure.Claims.TokenType` is checked on every
-validation, not only at issue time, because a refresh token lives far longer (days, versus an
-hour for an access token) — accepting one as the other would silently extend a stolen or leaked
-token's usefulness to the longer of the two lifetimes. `ValidateAccessToken` and
+validation, not only at issue time, because a refresh token lives far longer (days, versus
+minutes for an access token) — accepting one as the other would silently extend a stolen or
+leaked token's usefulness to the longer of the two lifetimes. `ValidateAccessToken` and
 `ValidateRefreshToken` each reject the other token type, and the keyfunc in `parseToken` asserts
 `*jwt.SigningMethodHMAC` so a token signed with a different algorithm is rejected before its
 signature is even checked.

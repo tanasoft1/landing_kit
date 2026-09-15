@@ -17,7 +17,7 @@ const testSecret = "test-secret-at-least-32-bytes-long"
 func TestAccessTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7)
 	adminID := uuid.New()
 
 	token, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
@@ -43,7 +43,7 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 func TestRefreshTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7)
 	adminID := uuid.New()
 
 	token, err := svc.GenerateRefreshToken(adminID)
@@ -69,7 +69,7 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7)
 	adminID := uuid.New()
 
 	access, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
@@ -92,8 +92,8 @@ func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 func TestValidateRejectsWrongSecret(t *testing.T) {
 	t.Parallel()
 
-	issuer := secure.NewTokenService(testSecret, 1, 7)
-	verifier := secure.NewTokenService("a-completely-different-secret-value", 1, 7)
+	issuer := secure.NewTokenService(testSecret, 15, 7)
+	verifier := secure.NewTokenService("a-completely-different-secret-value", 15, 7)
 
 	token, err := issuer.GenerateAccessToken(uuid.New(), "admin@example.mn")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestValidateRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted an expired token, want error")
 	}
@@ -156,7 +156,7 @@ func TestValidateRejectsWrongAlgorithm(t *testing.T) {
 		t.Fatalf("sign rs256 token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted a token signed with RS256, want error")
 	}
