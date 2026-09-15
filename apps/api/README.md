@@ -85,6 +85,11 @@ same login, including the replacement the honest client is holding, and writes a
 have to log in again. A client that keeps a copy of an old refresh token and retries with it will
 log itself out this way, so keep one token and replace it on every call.
 
+The same applies to two refreshes fired at once with the same token: exactly one wins and the other
+gets a 401 that takes the session with it. From the server there is no difference between that and a
+thief racing the real client. If several requests can discover an expired access token at the same
+time, funnel them through one refresh and let the rest wait for its result.
+
 `JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to
 anything but `development` when the secret is empty or shorter than 32 characters, because a short
 or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example
