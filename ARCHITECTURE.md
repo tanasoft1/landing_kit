@@ -450,16 +450,54 @@ erDiagram
         text password_hash "bcrypt"
         timestamptz created_at "default now"
     }
+    refresh_tokens {
+        uuid jti PK "the token's own id, stored in the clear"
+        uuid admin_id FK "ON DELETE CASCADE"
+        uuid family_id "shared by every token descended from one login"
+        timestamptz expires_at
+        timestamptz revoked_at "nullable, NULL while the token is still good"
+    }
+    login_attempts {
+        text email PK "as submitted, registered or not"
+        int failed_count "default 0"
+        timestamptz locked_until "nullable"
+    }
+    admin_audit_log {
+        uuid id PK
+        uuid admin_id FK "nullable, NULL for a login against an unknown email"
+        text event
+        text ip "nullable"
+        text user_agent "nullable"
+        timestamptz created_at "default now, indexed DESC"
+    }
+    admin_users ||--o{ refresh_tokens : issues
+    admin_users ||--o{ admin_audit_log : "appears in"
 ```
 
-No foreign key joins the two, because nothing relates them: an admin reads leads, an admin does not
-own them.
+No foreign key joins `leads` to `admin_users`, because nothing relates them: an admin reads leads,
+an admin does not own them.
+
+The two auth tables that do point at `admin_users` point at it differently on purpose. Deleting an
+admin drops that admin's refresh tokens, because a token for an account that no longer exists is only
+a way to fail. The same delete keeps the audit rows and blanks their `admin_id`, because the record
+of what happened outlives the account it happened to. `login_attempts` joins nothing: it is keyed by
+the email as submitted, so a lockout exists for addresses that were never registered, and the
+presence of one cannot be used to ask whether an account exists.
+
+All three auth tables exist in the schema and nothing reads or writes them yet. They are groundwork
+for token rotation, per-account backoff and an auth event trail.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The
 `id DESC` tiebreaker in `ListLeads` is not decoration either: `created_at` alone is not a total
 order, two rows can share a timestamp under concurrent inserts, and `LIMIT`/`OFFSET` paging over a
 non-total order can show one lead twice or skip another.
+
+The auth tables carry three more indexes. `refresh_tokens_family_idx` serves the write that revokes
+a whole token family at once, which is what a replayed token triggers.
+`refresh_tokens_admin_expiry_idx` serves the expired-row cleanup that runs for the admin who is
+logging in. `admin_audit_log_created_idx` is DESC for the same reason `leads_created_at_idx` is: the
+only way anyone reads an event log is newest first.
 
 Migrations are embedded and run automatically at startup, before the pool is opened. The sqlc output
 under `internal/db/sqlc` is committed so a scaffolded project builds without anyone installing sqlc

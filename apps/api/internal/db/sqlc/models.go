@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type AdminAuditLog struct {
+	ID        uuid.UUID  `json:"id"`
+	AdminID   *uuid.UUID `json:"admin_id"`
+	Event     string     `json:"event"`
+	Ip        *string    `json:"ip"`
+	UserAgent *string    `json:"user_agent"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
 type AdminUser struct {
 	ID           uuid.UUID `json:"id"`
 	Email        string    `json:"email"`
@@ -28,4 +37,18 @@ type Lead struct {
 	Ip         *netip.Addr `json:"ip"`
 	UserAgent  *string     `json:"user_agent"`
 	CreatedAt  time.Time   `json:"created_at"`
+}
+
+type LoginAttempt struct {
+	Email       string     `json:"email"`
+	FailedCount int32      `json:"failed_count"`
+	LockedUntil *time.Time `json:"locked_until"`
+}
+
+type RefreshToken struct {
+	Jti       uuid.UUID  `json:"jti"`
+	AdminID   uuid.UUID  `json:"admin_id"`
+	FamilyID  uuid.UUID  `json:"family_id"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
 }
