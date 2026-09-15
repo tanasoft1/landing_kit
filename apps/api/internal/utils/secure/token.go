@@ -22,7 +22,7 @@ const (
 // check cannot replace: TokenType is read back out of the claims on every validation, and the
 // signing method is asserted in the keyfunc, not merely assumed from how this service signs.
 //
-// A refresh token has a much longer life than an access token (days versus an hour, see
+// A refresh token has a much longer life than an access token (days versus minutes, see
 // conf.JWTConfig), so accepting one as the other silently extends the session window to the
 // longer one. And jwt.Parse's keyfunc runs before signature verification: a keyfunc that returns
 // the secret unconditionally accepts anything the library can parse, including a token signed

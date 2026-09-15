@@ -131,7 +131,7 @@ func TestRefresh(t *testing.T) {
 		}
 	})
 
-	// A refresh token has a much longer life than an access token (days versus an hour, see
+	// A refresh token has a much longer life than an access token (days versus minutes, see
 	// conf.JWTConfig), so accepting an access token here would silently extend a stolen access
 	// token's usefulness beyond its own, much shorter, lifetime.
 	t.Run("access token rejected as refresh token", func(t *testing.T) {
