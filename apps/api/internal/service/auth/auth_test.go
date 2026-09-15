@@ -27,7 +27,7 @@ func setupAuth(t *testing.T) (*testsupport.DB, *auth.Service, *secure.TokenServi
 
 	tdb := testsupport.Fresh(t)
 	tokenSvc := secure.NewTokenService(testSecret, 15, 7)
-	svc := auth.New(tdb.Queries, tokenSvc, audit.New(tdb.Queries))
+	svc := auth.New(tdb.Pool, tdb.Queries, tokenSvc, audit.New(tdb.Queries))
 
 	return tdb, svc, tokenSvc
 }
