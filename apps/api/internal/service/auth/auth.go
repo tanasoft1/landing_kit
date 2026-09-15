@@ -244,6 +244,39 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	return result, nil
 }
 
+// Logout revokes every token in the presented token's family.
+//
+// It returns nothing. A logout that reports failure gives a caller something to probe with, and
+// there is nothing useful for them to do with the answer either way: the handler clears the
+// cookie regardless, so from the browser's side the session is over even if the ledger write
+// failed. A stale live row is bounded by the token's own seven-day expiry.
+//
+// The revoke goes through revokeFamily, which takes the family's advisory lock, rather than
+// running the family UPDATE on its own. Signing out in one tab while another is mid-refresh is
+// exactly the race the lock exists for: an UPDATE cannot see the successor row a rotation
+// inserts after the UPDATE's own statement began, so an unlocked revoke can leave that successor
+// alive in a family it has just killed.
+func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string) {
+	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return
+	}
+	jti, err := uuid.Parse(claims.ID)
+	if err != nil {
+		return
+	}
+	row, err := s.queries.GetRefreshToken(ctx, jti)
+	if err != nil {
+		return
+	}
+	if err := s.revokeFamily(ctx, row.FamilyID); err != nil {
+		slog.Error("revoking family on logout failed", slog.Any("err", err))
+		return
+	}
+	slog.Info("admin logout", slog.String("admin_id", row.AdminID.String()))
+	s.audit.Record(ctx, auditsvc.EventLogout, &row.AdminID, ip, userAgent)
+}
+
 // rotate spends the presented token and issues its successor as one transaction, under the
 // family's advisory lock. Both halves of that matter and for different reasons.
 //

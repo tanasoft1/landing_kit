@@ -65,4 +65,10 @@ func setupPublicRoutes(api fiber.Router, h *handlers.Handlers) {
 	api.Post("/leads", leadLimiter(), h.Lead.Create)
 	api.Post("/auth/login", loginLimiter(), h.Auth.Login)
 	api.Post("/auth/refresh", loginLimiter(), h.Auth.Refresh)
+
+	// Not behind AuthMiddleware, and not behind loginLimiter. It authenticates with the refresh
+	// cookie rather than an access token, so it still works once the access token has expired --
+	// which is exactly when someone is most likely to click Sign out. It is not a guessing
+	// target: it reveals nothing and grants nothing.
+	api.Post("/auth/logout", h.Auth.Logout)
 }

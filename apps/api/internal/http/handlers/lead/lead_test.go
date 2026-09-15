@@ -62,7 +62,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	tokenService := newTestTokenService()
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(svc),
-		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries))),
+		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries)), false),
 	}
 
 	app := fiber.New()
