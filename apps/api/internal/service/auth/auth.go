@@ -183,10 +183,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 		slog.Warn("refresh token replay detected, revoking family",
 			slog.String("admin_id", row.AdminID.String()),
 			slog.String("family_id", row.FamilyID.String()))
-		if revErr := s.queries.RevokeRefreshTokenFamily(ctx, row.FamilyID); revErr != nil {
-			slog.Error("revoking refresh token family failed", slog.Any("err", revErr))
-		}
-		s.audit.Record(ctx, auditsvc.EventTokenReuse, &row.AdminID, ip, userAgent)
+		s.revokeFamilyAsReplay(ctx, row, ip, userAgent)
 		return nil, errInvalidToken
 	}
 
@@ -211,13 +208,42 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	// Revoke before issuing, never after. If the insert then fails, the family has no live token
 	// and the admin logs in again, which is an annoyance. The other order can leave two live
 	// tokens after a crash, which is the exact state replay detection exists to make impossible.
-	if err := s.queries.RevokeRefreshToken(ctx, jti); err != nil {
+	//
+	// The revoke is also what claims the token, which is why its row count is read rather than
+	// discarded. The check above cannot do that job: two requests carrying the same live token can
+	// both pass it, because neither has written anything yet. The UPDATE settles it instead, by
+	// matching only a row that is still unrevoked (see RevokeRefreshToken). Exactly one of the two
+	// changes a row.
+	spent, err := s.queries.RevokeRefreshToken(ctx, jti)
+	if err != nil {
 		slog.Error("revoking spent refresh token failed", slog.Any("err", err))
 		return nil, fmt.Errorf("revoke refresh token: %w", err)
+	}
+	if spent == 0 {
+		// Someone else spent this token between the read above and this write. That is the same
+		// event as the already-revoked row above, only caught a few milliseconds earlier, and it
+		// gets the same answer. A client that fires two refreshes at once on one token is
+		// indistinguishable from a thief racing its owner, and pays the same price.
+		slog.Warn("refresh token was spent by a concurrent request, revoking family",
+			slog.String("admin_id", row.AdminID.String()),
+			slog.String("family_id", row.FamilyID.String()))
+		s.revokeFamilyAsReplay(ctx, row, ip, userAgent)
+		return nil, errInvalidToken
 	}
 
 	slog.Info("token refresh succeeded", slog.String("admin_id", admin.ID.String()))
 	return s.issueTokenPair(ctx, admin, row.FamilyID)
+}
+
+// revokeFamilyAsReplay kills every token descended from the same login and records the detection.
+// Two paths reach it: a token whose ledger row was already revoked, and a token another request
+// spent while this one was working. Both mean two parties held one token, and neither tells us
+// which of the two is the one asking now, so both lose the session.
+func (s *Service) revokeFamilyAsReplay(ctx context.Context, row sqlc.RefreshToken, ip, userAgent string) {
+	if err := s.queries.RevokeRefreshTokenFamily(ctx, row.FamilyID); err != nil {
+		slog.Error("revoking refresh token family failed", slog.Any("err", err))
+	}
+	s.audit.Record(ctx, auditsvc.EventTokenReuse, &row.AdminID, ip, userAgent)
 }
 
 // issueTokenPair signs a new access and refresh token and records the refresh token in the

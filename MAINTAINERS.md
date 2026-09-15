@@ -335,6 +335,23 @@ impossible. And `issueTokenPair` fails the whole call if the ledger insert fails
 returning a signed token with no row behind it: that token would be rejected on its first use, and
 the admin would be bounced with nothing explaining why.
 
+`RevokeRefreshToken` is `:execrows` and its count is load-bearing, which is the part most likely to
+get quietly simplified back. Spending a token has to be one operation, not a `SELECT` that checks
+`revoked_at` and an `UPDATE` that sets it: two requests carrying the same live token both pass a
+prior check, because neither has written anything yet, and both go on to issue. The `UPDATE` already
+carries `AND revoked_at IS NULL`, so it settles the race by itself. Under READ COMMITTED the second
+writer blocks on the row lock, re-evaluates its predicate against the committed version, finds
+`revoked_at` set, and matches nothing. Reading the count is all that turns that into an answer:
+zero rows means someone else spent the token, which is replay, and gets the family revoked like any
+other replay. The `row.RevokedAt != nil` check earlier in `Refresh` is not redundant with it. That
+one catches a token spent long ago and is where the common case is diagnosed; the row count catches
+the few milliseconds the check cannot cover.
+
+One consequence worth knowing before someone reports it as a bug: a client that fires two refreshes
+concurrently on one token logs itself out. That is not a false positive. The server cannot tell it
+apart from a thief racing the owner, and a design that could would have to trust something the
+attacker also controls.
+
 Every failure inside `Refresh` returns the same `errInvalidToken` and the same 401. "Already
 spent", "never existed" and "admin was deleted" told apart would tell a thief exactly when the real
 admin noticed. The `token_reuse_detected` row is where that distinction lives instead, visible to

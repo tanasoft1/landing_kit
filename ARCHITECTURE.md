@@ -431,7 +431,11 @@ Five properties of this path are deliberate and easy to undo by accident:
   second presentation revokes the entire family, logs `token_reuse_detected`, and sends the thief
   and the real admin both back to the login screen. The revoke runs before the insert on purpose: a
   crash between them costs a re-login, while the other order can leave two live tokens after a
-  crash, which is the state this exists to prevent.
+  crash, which is the state this exists to prevent. The revoke is also what claims the token. It is
+  a single `UPDATE ... WHERE revoked_at IS NULL` whose row count is read, so two requests racing on
+  one live token cannot both proceed: the loser affects zero rows and is treated as replay. A
+  `SELECT` followed by an `UPDATE` would let both through, because neither has written anything when
+  the check runs.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same
