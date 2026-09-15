@@ -401,6 +401,11 @@ it fails silently.
 - **If the contact form "silently fails", check CORS first.** In endpoint mode the browser POSTs
   cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight — and it
   surfaces as the same generic error a real code bug would.
+- **If admin login "works" but every later call is unauthenticated, check CORS too.** The refresh
+  token arrives as a cookie, and a browser discards it unless the response carries
+  `Access-Control-Allow-Credentials: true`. The API sends that header only for an origin listed in
+  its `CORS_ORIGINS`, so a panel served from an unlisted origin sees a 200 login followed by a
+  session that never survives a refresh.
 - **React warns `Invalid DOM property 'hreflang'` in dev.** Expected. The lowercase spelling is
   what SEO tools read from the built HTML. Renaming it to `hrefLang` would ship the wrong casing.
 - **A light-only or dark-only build ships no theme-switching code at all** — none of the

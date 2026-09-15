@@ -34,6 +34,12 @@ VITE_CONTACT_ENDPOINT=http://localhost:3000/api/leads
 
 `api/.env.example`'s `CORS_ORIGINS` already defaults to `http://localhost:5173`, Vite's own
 default port, so the two dev servers talk to each other with no CORS changes on a fresh scaffold.
+The same list governs the admin panel, which runs on that origin too. Serving the panel from a
+different port means adding that origin here, or login fails at preflight.
+
+`CORS_ORIGINS=*` is refused at startup. The admin session cookie only crosses origins because the
+API answers with `Access-Control-Allow-Credentials: true`, and a wildcard origin on a credentialed
+response would hand a logged-in admin session to any site a browser visits. List the origins.
 
 ## Prerequisites
 
@@ -85,6 +91,11 @@ and the browser would refuse to store a Secure cookie.
 So a browser client does nothing to hold the refresh token, and must send `credentials: 'include'`
 on the three `/api/auth` calls so the browser attaches it. Keep the access token in memory, not in
 `localStorage`. A command-line client needs a cookie jar: `curl -c jar -b jar`.
+
+`credentials: 'include'` is only half of it. The browser also drops the cookie unless the response
+carries `Access-Control-Allow-Credentials: true`, which the API sends only for an origin listed in
+`CORS_ORIGINS`. A panel served from an origin that is not on that list logs in, receives the
+`Set-Cookie`, throws it away, and then fails every refresh with no error that says why.
 
 `access_token` and the refresh token are not interchangeable: `GET /api/admin/leads` rejects a
 refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token

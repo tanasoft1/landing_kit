@@ -451,12 +451,20 @@ Six properties of this path are deliberate and easy to undo by accident:
   `Authorization` header no cross-site form can set. `Secure` comes off only under
   `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all over
   plain HTTP.
+- **The cookie only crosses origins because CORS allows credentials.** `cors.Config` sets
+  `AllowCredentials: true`, without which a browser would refuse to store the `Set-Cookie` and
+  refuse to send it back, breaking login, refresh and logout for the Vite dev server on `:5173`
+  talking to the API on `:3000`. Topology C below is same-origin and would never notice. The cost
+  is that `CORS_ORIGINS` can no longer be a wildcard, which `conf.Load` now refuses.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same
 asymmetry applies to `CORS_ORIGINS`, whose development default is refused outside development,
 because a deploy that forgets it boots cleanly, answers `/api/health` with 200, and drops every real
-submission at preflight with no server-side log line at all.
+submission at preflight with no server-side log line at all. A `*` entry in `CORS_ORIGINS` is
+refused everywhere instead, development included, because the admin session cookie rides on
+credentialed CORS and a wildcard origin on a credentialed response is both invalid per the spec and
+a handout of any logged-in admin session to any site the browser visits.
 
 ## 7. Data model
 
