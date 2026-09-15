@@ -236,6 +236,13 @@ const devCORSOrigins = "http://localhost:5173"
 
 const defaultAppEnv = "development"
 
+// IsDevelopment reports whether this process is running under the one environment allowed weaker
+// defaults. Exported so callers outside this package can make the same distinction Load makes
+// internally, instead of each one re-hardcoding the string "development".
+func (c *Config) IsDevelopment() bool {
+	return c.Server.AppEnv == defaultAppEnv
+}
+
 // notifyDriverLog and notifyDriverSES are the only two valid NOTIFY_DRIVER values. Named once so
 // the default, the "invalid driver" check and the production guard cannot drift from each other.
 const (

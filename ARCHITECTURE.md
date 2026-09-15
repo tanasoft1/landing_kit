@@ -390,25 +390,29 @@ sequenceDiagram
     A->>DB: GetAdminByEmail
     A->>A: bcrypt compare on every path, even for an unknown email
     A->>DB: CreateRefreshToken, a ledger row under a new family_id
-    A-->>OP: access_token, refresh_token, admin profile
+    A-->>OP: access_token and admin profile in the body, refresh token as a Set-Cookie
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
     A->>A: AuthMiddleware: HS256 asserted, token_type must be access
     A->>DB: ORDER BY created_at DESC, id DESC, LIMIT and OFFSET
     A-->>OP: success true, data is an array of RsLead
-    OP->>A: POST /api/auth/refresh with refresh_token
+    OP->>A: POST /api/auth/refresh carrying the refresh cookie
     A->>DB: GetRefreshToken by jti; already revoked means replay
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
     A->>DB: RevokeRefreshToken then CreateRefreshToken, one transaction under the family lock
-    A-->>OP: a fresh pair, and the presented token is now dead
+    A-->>OP: a fresh access_token and a replacement cookie; the presented token is now dead
+    OP->>A: POST /api/auth/logout carrying the refresh cookie
+    A->>DB: revoke every unrevoked row in the family, under the family lock
+    A-->>OP: 200 and an expired cookie, whatever the cookie was worth
 ```
 
 | Endpoint | Auth | Limits |
 |---|---|---|
 | `POST /api/auth/login` | none | 5 per 15 minutes per client |
-| `POST /api/auth/refresh` | the refresh token itself | 5 per 15 minutes per client |
+| `POST /api/auth/refresh` | the refresh cookie | 5 per 15 minutes per client |
+| `POST /api/auth/logout` | the refresh cookie | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Five properties of this path are deliberate and easy to undo by accident:
+Six properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
@@ -438,6 +442,15 @@ Five properties of this path are deliberate and easy to undo by accident:
   one live token cannot both proceed: the loser affects zero rows and is treated as replay. A
   `SELECT` followed by an `UPDATE` would let both through, because neither has written anything when
   the check runs.
+- **The refresh token never reaches JavaScript.** It leaves as `Set-Cookie: landing_refresh=...;
+  Path=/api/auth; HttpOnly; Secure; SameSite=Strict` and is absent from every response body. The
+  token lives seven days, so a copy anywhere a script can read is a week of access for one injected
+  script. `Path=/api/auth` keeps it off `/api/admin/*`, where it does no work and could only end up
+  in a proxy log. `SameSite=Strict` is what removes the need for CSRF tokens on these endpoints: a
+  request that did not come from this site does not carry the cookie, and `/api/admin/*` needs an
+  `Authorization` header no cross-site form can set. `Secure` comes off only under
+  `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all over
+  plain HTTP.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same

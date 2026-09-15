@@ -347,6 +347,14 @@ logged out, the thief keeps rotating, and no second token is left in play to tri
 again. With every writer taking the lock first, whichever runs second begins after the other has
 committed and sees its rows.
 
+Waiting on that lock is bounded, and bounded in the pool rather than at each call site.
+`dbsetup.NewPool` sets `lock_timeout` to 3000 ms as a connection runtime parameter, so any statement
+that blocks on a lock for three seconds fails instead of waiting forever. The HTTP layer hands the
+database a context with no deadline, so without this a request wedged behind a contended row or a
+held advisory lock holds a pooled connection indefinitely, and enough of them exhaust the pool while
+every log stays quiet. Three seconds is far above any lock this API takes deliberately: reaching it
+means something is wrong, and failing loudly is the point.
+
 `issueTokenPair` fails the whole call if the ledger insert fails, rather than returning a signed
 token with no row behind it: that token would be rejected on its first use, and the admin would be
 bounced with nothing explaining why.
@@ -376,7 +384,41 @@ the operator and not to the caller.
 `POST /api/auth/login` and `POST /api/auth/refresh` are public and rate limited, reusing
 `leadLimiter`'s `KeyGenerator` shape (factored out as `clientKeyGenerator` in
 `internal/http/routes/public.go`): an unresolvable `c.IP()` gets a unique key rather than joining
-every other caller's bucket, for the same reason documented there.
+every other caller's bucket, for the same reason documented there. `POST /api/auth/logout` is
+public and deliberately **not** limited. It authenticates with the refresh cookie rather than an
+access token, so it still works once the access token has expired, which is when someone is most
+likely to click Sign out, and a throttle there would strand them in a session they are trying to
+end. There is nothing to guess at either: it reveals nothing and grants nothing.
+
+The refresh token never appears in a response body. `Login` and `Refresh` both write it with
+`setRefreshCookie` (`internal/http/handlers/auth/cookie.go`) as `HttpOnly; Secure; SameSite=Strict;
+Path=/api/auth`, and `models.RsAuth` carries only the access token and the admin profile. The token
+lives `JWT_REFRESH_EXPIRE_DAYS`, so one copy in a place a script can reach turns a single XSS into a
+week of access. `Path` is the second half of that: no `/api/admin/*` request carries the cookie, so
+it cannot be picked out of a proxy log or an access log of a request that had no use for it.
+`clearRefreshCookie` repeats the same `Path` on purpose. A mismatched path is a different cookie to
+the browser, and the original would quietly survive the clear.
+
+`SameSite=Strict` is why there are no CSRF tokens on these endpoints. A request that did not
+originate from this site does not carry the cookie, and `/api/admin/*` wants an `Authorization`
+header that no cross-site form can set. `Secure` is the one attribute that varies, and it varies on
+exactly one input: `handlers.New` passes `!cfg.IsDevelopment()`. Development speaks plain HTTP to
+localhost, where a browser refuses to store a Secure cookie at all, so the flag has to come off
+there and nowhere else. `conf.(*Config).IsDevelopment` exists so that decision reads the same string
+`conf.Load` reads, rather than a second hardcoded `"development"` drifting somewhere else.
+
+`Service.Logout` revokes through `revokeFamily`, not through `RevokeRefreshTokenFamily` directly,
+and that is not interchangeable. The raw query outside the advisory lock hits the same race
+documented above: an `UPDATE` cannot see a row inserted after its own statement began, so signing
+out in one tab while another tab is mid-rotation can leave the successor alive in a family that was
+just revoked. `Logout` returns nothing at all. A logout that reported failure would give a caller
+something to probe with, and the handler expires the cookie either way, so the session is over from
+the browser's side even when the ledger write failed. A stale live row is bounded by the token's own
+expiry.
+
+The handler answers 200 for a missing cookie, a malformed one and a valid one alike. Distinguishing
+them would answer a question the caller has not authenticated to ask, and no client would act
+differently on the answer.
 
 `./cmd seed-admin <email> <password>` creates an admin account, following `habido-back`'s
 `./cmd cron` pattern of dispatching on `os.Args[1]` in the same binary rather than shipping a

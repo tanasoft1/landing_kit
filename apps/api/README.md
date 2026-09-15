@@ -63,27 +63,50 @@ never the password, never its hash. A second seed of the same email fails rather
 duplicate.
 
 ```
-POST /api/auth/login    {"email": "...", "password": "..."}  -> access_token, refresh_token
-POST /api/auth/refresh  {"refresh_token": "..."}              -> a fresh access_token, refresh_token
+POST /api/auth/login    {"email": "...", "password": "..."}  -> access_token, and a refresh cookie
+POST /api/auth/refresh  sends the refresh cookie             -> a fresh access_token, and a new cookie
+POST /api/auth/logout   sends the refresh cookie             -> 200, and the session is revoked
 GET  /api/admin/leads   Authorization: Bearer <access_token>
 ```
 
-`access_token` and `refresh_token` are not interchangeable: `GET /api/admin/leads` rejects a
-refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token
-everywhere else, and only call `/api/auth/refresh` with the refresh token to get a new pair once
-the access token expires (`JWT_ACCESS_EXPIRE_MINUTES`, default 15 minutes; the refresh token lasts
-`JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
+The refresh token is never in a response body. It leaves as a cookie:
 
-Each refresh token works exactly once. `/api/auth/refresh` returns a new refresh token along with
-the new access token, and the one you sent is dead from that moment. Store the new one and discard
-the old one, or the next refresh gets a 401.
+```
+Set-Cookie: landing_refresh=...; Path=/api/auth; HttpOnly; Secure; SameSite=Strict
+```
+
+`HttpOnly` is why: no script can read the cookie, so an injected one cannot lift a credential that
+lasts `JWT_REFRESH_EXPIRE_DAYS`. `Path=/api/auth` keeps it off every `/api/admin/*` request, where
+it has no job and could only be logged by a proxy or read out of an access log. `SameSite=Strict`
+is also what replaces CSRF tokens here: a request from another site does not carry the cookie at
+all. `Secure` is dropped only when `APP_ENV=development`, where the dev server speaks plain HTTP
+and the browser would refuse to store a Secure cookie.
+
+So a browser client does nothing to hold the refresh token, and must send `credentials: 'include'`
+on the three `/api/auth` calls so the browser attaches it. Keep the access token in memory, not in
+`localStorage`. A command-line client needs a cookie jar: `curl -c jar -b jar`.
+
+`access_token` and the refresh token are not interchangeable: `GET /api/admin/leads` rejects a
+refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token
+everywhere else, and call `/api/auth/refresh` once it expires (`JWT_ACCESS_EXPIRE_MINUTES`,
+default 15 minutes; the refresh token lasts `JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
+
+Each refresh token works exactly once. `/api/auth/refresh` sets a replacement cookie along with the
+new access token, and the one you sent is dead from that moment. A browser replaces it for you.
+
+`POST /api/auth/logout` revokes every token descended from that login and expires the cookie. It
+answers 200 whether or not a cookie arrived and whether or not it was valid: telling "that was a
+real session" apart from "that was nothing" would answer a question the caller never authenticated
+to ask. It takes no access token, so it still works after the access token has expired, which is
+exactly when someone reaches for Sign out.
 
 Sending a refresh token that was already spent is treated as theft, because two parties holding the
 same token is what that looks like from here. The server revokes every token descended from the
 same login, including the replacement the honest client is holding, and writes a
 `token_reuse_detected` row to `admin_audit_log`. Both parties get a 401 on their next refresh and
 have to log in again. A client that keeps a copy of an old refresh token and retries with it will
-log itself out this way, so keep one token and replace it on every call.
+log itself out this way. A browser cannot: the `Set-Cookie` overwrites the old value and there is
+nowhere for a copy to survive. A command-line client using one jar per session gets the same.
 
 The same applies to two refreshes fired at once with the same token: exactly one wins and the other
 gets a 401 that takes the session with it. From the server there is no difference between that and a
@@ -96,7 +119,9 @@ or empty secret makes admin tokens forgeable. Generate a real one before deployi
 `openssl rand -base64 32`.
 
 `POST /api/auth/login` and `POST /api/auth/refresh` are rate limited, same as the contact form, so
-repeated wrong guesses get throttled rather than retried without limit.
+repeated wrong guesses get throttled rather than retried without limit. `POST /api/auth/logout` is
+not: it is nothing to guess at, and throttling it would leave someone stuck in a session they are
+trying to end.
 
 `GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has

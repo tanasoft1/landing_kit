@@ -122,7 +122,7 @@ func run() error {
 	}
 
 	services := service.New(pool, notifier, cfg)
-	h := handlers.New(services)
+	h := handlers.New(services, cfg)
 
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",

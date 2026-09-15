@@ -1,4 +1,5 @@
-// Package authhandler serves the admin login and refresh endpoints. Named authhandler, not auth,
+// Package authhandler serves the admin login, refresh and logout endpoints. Named authhandler,
+// not auth,
 // so that a caller importing both this package and internal/service/auth never needs an import
 // alias to tell them apart -- same convention as internal/http/handlers/lead's leadhandler.
 package authhandler
@@ -13,13 +14,14 @@ import (
 	"landing-api/internal/utils"
 )
 
-// Handler serves POST /api/auth/login and POST /api/auth/refresh.
+// Handler serves POST /api/auth/login, POST /api/auth/refresh and POST /api/auth/logout.
 type Handler struct {
-	svc *auth.Service
+	svc          *auth.Service
+	cookieSecure bool
 }
 
-func New(svc *auth.Service) *Handler {
-	return &Handler{svc: svc}
+func New(svc *auth.Service, cookieSecure bool) *Handler {
+	return &Handler{svc: svc, cookieSecure: cookieSecure}
 }
 
 // Login validates the request body and, on success, returns a fresh access/refresh token pair.
@@ -55,34 +57,32 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 		})
 	}
 
+	setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresAt, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: models.RsAuth{
-		AccessToken:  result.AccessToken,
-		RefreshToken: result.RefreshToken,
-		Admin:        result.Admin,
+		AccessToken: result.AccessToken,
+		Admin:       result.Admin,
 	}})
 }
 
-// Refresh spends a refresh token and, on success, returns a fresh access/refresh token pair. The
-// token presented is now dead either way: it was spent, or it was already spent and presenting it
+// Refresh reads the refresh cookie, rotates it, and returns a fresh access token. Never logs the
+// cookie's value.
+//
+// The token presented is dead either way: it was spent, or it was already spent and presenting it
 // again killed every token issued from the same login.
-// Never logs req.RefreshToken.
 func (h *Handler) Refresh(c *fiber.Ctx) error {
-	var req models.RqRefreshToken
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
-			Error: "validation error", Message: "Хүсэлтийн бүтэц буруу байна",
+	token := c.Cookies(RefreshCookieName)
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(models.ErrorResponse{
+			Error: "invalid token", Message: "Токен хүчингүй байна",
 		})
 	}
 
-	if msg := utils.ValidateStruct(req); msg != "" {
-		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
-			Error: "validation error", Message: msg,
-		})
-	}
-
-	result, err := h.svc.Refresh(c.Context(), req.RefreshToken, c.IP(), c.Get("User-Agent"))
+	result, err := h.svc.Refresh(c.Context(), token, c.IP(), c.Get("User-Agent"))
 	if err != nil {
 		if auth.IsInvalidToken(err) {
+			// Clear it. The token is dead, and leaving it in the browser means every future
+			// request carries a credential that can only ever produce this same 401.
+			clearRefreshCookie(c, h.cookieSecure)
 			return c.Status(fiber.StatusUnauthorized).JSON(models.ErrorResponse{
 				Error: "invalid token", Message: "Токен хүчингүй байна",
 			})
@@ -93,9 +93,22 @@ func (h *Handler) Refresh(c *fiber.Ctx) error {
 		})
 	}
 
+	setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresAt, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: models.RsAuth{
-		AccessToken:  result.AccessToken,
-		RefreshToken: result.RefreshToken,
-		Admin:        result.Admin,
+		AccessToken: result.AccessToken,
+		Admin:       result.Admin,
 	}})
+}
+
+// Logout revokes the presented token's family and clears the cookie.
+//
+// Always 200, even with no cookie or a garbage one. A logout endpoint that distinguished "that
+// was a valid session" from "that was nothing" would answer a question the caller has not
+// authenticated to ask, and there is no action a client could take differently on the answer.
+func (h *Handler) Logout(c *fiber.Ctx) error {
+	if token := c.Cookies(RefreshCookieName); token != "" {
+		h.svc.Logout(c.Context(), token, c.IP(), c.Get("User-Agent"))
+	}
+	clearRefreshCookie(c, h.cookieSecure)
+	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true})
 }

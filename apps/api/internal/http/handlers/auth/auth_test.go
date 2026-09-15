@@ -1,6 +1,7 @@
 package authhandler_test
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"testing"
@@ -41,7 +42,9 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	tokenService := secure.NewTokenService(testJWTSecret, 15, 7)
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(lead.New(db.Queries, notify.NewLogger())),
-		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries))),
+		// cookieSecure is false here for the same reason it is false in development: these
+		// requests never travel over TLS, and a Secure cookie would not be stored.
+		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries)), false),
 	}
 
 	app := fiber.New()
@@ -68,13 +71,36 @@ func seedAdmin(t *testing.T, db *testsupport.DB) {
 }
 
 // authData mirrors models.SuccessResponse with Data typed as models.RsAuth, so a test can decode
-// straight into the token pair instead of re-decoding an `any`.
+// straight into the access token instead of re-decoding an `any`.
 type authData struct {
 	Success bool          `json:"success"`
 	Data    models.RsAuth `json:"data"`
 }
 
-func TestLoginSucceedsAndReturnsTokenPair(t *testing.T) {
+// refreshCookie pulls the refresh cookie out of a response, so the next request can present it
+// the way a browser would. Fails the test if the response set no such cookie.
+func refreshCookie(t *testing.T, res *testkit.Response) *http.Cookie {
+	t.Helper()
+
+	for _, c := range (&http.Response{Header: res.Header}).Cookies() {
+		if c.Name == authhandler.RefreshCookieName {
+			return c
+		}
+	}
+
+	t.Fatalf("response set no %s cookie", authhandler.RefreshCookieName)
+	return nil
+}
+
+// refreshCookieHeader renders a token as a request Cookie header. Only the name and value go
+// back: a browser sends those and nothing else, and replaying the full Set-Cookie line would
+// test a request shape no client ever makes. No escaping, because a JWT is base64url and dots,
+// every one of which is legal in a cookie value.
+func refreshCookieHeader(token string) string {
+	return authhandler.RefreshCookieName + "=" + token
+}
+
+func TestLoginSucceedsAndSetsRefreshCookie(t *testing.T) {
 	t.Parallel()
 
 	app, db, tokenService := newApp(t)
@@ -89,11 +115,31 @@ func TestLoginSucceedsAndReturnsTokenPair(t *testing.T) {
 	if !body.Success {
 		t.Fatal("Success = false, want true")
 	}
-	if body.Data.AccessToken == "" || body.Data.RefreshToken == "" {
-		t.Fatal("login response carried an empty token")
+	if body.Data.AccessToken == "" {
+		t.Fatal("login response carried an empty access token")
 	}
 	if _, err := tokenService.ValidateAccessToken(body.Data.AccessToken); err != nil {
 		t.Fatalf("access token invalid: %v", err)
+	}
+
+	// The whole point of the cookie is that the refresh token never reaches a script. A copy in
+	// the response body would give it back.
+	if bytes.Contains(res.Body, []byte("refresh_token")) {
+		t.Fatalf("login body still carries a refresh token: %s", res.Body)
+	}
+
+	cookie := refreshCookie(t, res)
+	if cookie.Value == "" {
+		t.Fatal("refresh cookie is empty")
+	}
+	if !cookie.HttpOnly {
+		t.Error("refresh cookie is not HttpOnly, so a script can read it")
+	}
+	if cookie.Path != "/api/auth" {
+		t.Errorf("refresh cookie Path = %q, want /api/auth, or every admin request carries it", cookie.Path)
+	}
+	if cookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("refresh cookie SameSite = %v, want Strict", cookie.SameSite)
 	}
 }
 
@@ -136,11 +182,10 @@ func TestRefreshHappyPath(t *testing.T) {
 	loginRes := testkit.NewClient(t, fiberkit.Doer(app)).
 		PostJSON("/api/auth/login", models.RqLogin{Email: testAdminEmail, Password: testPassword}).
 		Status(http.StatusOK)
-	var loginBody authData
-	loginRes.Decode(&loginBody)
 
 	refreshRes := testkit.NewClient(t, fiberkit.Doer(app)).
-		PostJSON("/api/auth/refresh", models.RqRefreshToken{RefreshToken: loginBody.Data.RefreshToken}).
+		With("Cookie", refreshCookieHeader(refreshCookie(t, loginRes).Value)).
+		PostJSON("/api/auth/refresh", nil).
 		Status(http.StatusOK)
 	var refreshBody authData
 	refreshRes.Decode(&refreshBody)
@@ -150,6 +195,9 @@ func TestRefreshHappyPath(t *testing.T) {
 	}
 	if _, err := tokenService.ValidateAccessToken(refreshBody.Data.AccessToken); err != nil {
 		t.Fatalf("refreshed access token invalid: %v", err)
+	}
+	if rotated := refreshCookie(t, refreshRes); rotated.Value == "" {
+		t.Fatal("refresh did not set a replacement cookie")
 	}
 }
 
@@ -168,6 +216,7 @@ func TestRefreshRejectsAccessTokenAsRefreshToken(t *testing.T) {
 	}
 
 	testkit.NewClient(t, fiberkit.Doer(app)).
-		PostJSON("/api/auth/refresh", models.RqRefreshToken{RefreshToken: access}).
+		With("Cookie", refreshCookieHeader(access)).
+		PostJSON("/api/auth/refresh", nil).
 		Status(http.StatusUnauthorized)
 }
