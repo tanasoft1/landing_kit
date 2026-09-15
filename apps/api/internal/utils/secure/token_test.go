@@ -46,9 +46,14 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	svc := secure.NewTokenService(testSecret, 15, 7)
 	adminID := uuid.New()
 
-	token, err := svc.GenerateRefreshToken(adminID)
+	jti := uuid.New()
+
+	token, expiresAt, err := svc.GenerateRefreshToken(adminID, jti)
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+	if expiresAt.IsZero() {
+		t.Error("GenerateRefreshToken returned a zero expiry")
 	}
 
 	claims, err := svc.ValidateRefreshToken(token)
@@ -60,6 +65,11 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	}
 	if claims.TokenType != secure.TokenTypeRefresh {
 		t.Errorf("TokenType = %q, want %q", claims.TokenType, secure.TokenTypeRefresh)
+	}
+	// The jti is what ties the token to its ledger row. A token that comes back without the id it
+	// was signed with cannot be looked up, spent, or revoked.
+	if claims.ID != jti.String() {
+		t.Errorf("ID = %q, want %q", claims.ID, jti.String())
 	}
 }
 
@@ -76,7 +86,7 @@ func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
-	refresh, err := svc.GenerateRefreshToken(adminID)
+	refresh, _, err := svc.GenerateRefreshToken(adminID, uuid.New())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}

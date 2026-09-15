@@ -1,7 +1,10 @@
 // Package auth implements admin login and token refresh. Mirrors
-// ~/work/psyfint_v2_back/internal/service/auth/auth.go, with one deliberate difference: Login
+// ~/work/psyfint_v2_back/internal/service/auth/auth.go, with two deliberate differences. Login
 // always runs bcrypt, even when the email does not exist (see the comment on dummyPasswordHash
-// below), where psyfint returns on pgx.ErrNoRows before ever calling bcrypt.
+// below), where psyfint returns on pgx.ErrNoRows before ever calling bcrypt. And a refresh token
+// is not stateless here: every one has a row in refresh_tokens, is spent by the call that
+// exchanges it, and takes every token descended from the same login down with it if it is ever
+// presented twice (see Refresh).
 package auth
 
 import (
@@ -11,10 +14,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"landing-api/internal/db/sqlc"
 	"landing-api/internal/http/models"
+	auditsvc "landing-api/internal/service/audit"
 	"landing-api/internal/utils"
 	"landing-api/internal/utils/secure"
 )
@@ -25,11 +30,24 @@ import (
 // can enumerate every registered email with one request per guess.
 var errInvalidCredentials = errors.New("invalid credentials")
 
-// errInvalidToken is returned when a refresh token fails validation, or validates but names an
-// admin that no longer exists. Both collapse to the same error and the same 401: an attacker
-// who can tell "token malformed" from "admin was deleted" learns something the token itself did
-// not entitle them to know.
+// errInvalidToken is returned for every way a refresh token can be refused: a bad signature, the
+// wrong token type, an unreadable jti, no matching ledger row, a row already spent, a row past its
+// expiry, and a token naming an admin that no longer exists. They all collapse to the same error
+// and the same 401 on purpose. An attacker who can tell "token malformed" from "admin was deleted"
+// from "that one was already used" learns something the token itself did not entitle them to know,
+// and the last of those would tell a thief exactly when the real admin noticed.
 var errInvalidToken = errors.New("invalid token")
+
+// LoginResult is what Login and Refresh hand back. It is not models.RsAuth, because the refresh
+// token is not part of the response body's shape: how it reaches the client, in the body or as a
+// Set-Cookie header, is the handler's decision, and the handler is the only layer that should
+// know which.
+type LoginResult struct {
+	AccessToken      string
+	RefreshToken     string
+	RefreshExpiresAt time.Time
+	Admin            models.RsAdminProfile
+}
 
 // dummyPasswordHash is a bcrypt hash of a fixed string nobody's real password is checked
 // against. It exists so Login can run bcrypt.CompareHashAndPassword on every attempt, including
@@ -65,14 +83,17 @@ func init() {
 type Service struct {
 	queries      *sqlc.Queries
 	tokenService *secure.TokenService
+	audit        *auditsvc.Service
 }
 
-func New(queries *sqlc.Queries, tokenService *secure.TokenService) *Service {
-	return &Service{queries: queries, tokenService: tokenService}
+func New(queries *sqlc.Queries, tokenService *secure.TokenService, audit *auditsvc.Service) *Service {
+	return &Service{queries: queries, tokenService: tokenService, audit: audit}
 }
 
-// Login checks req's credentials and, on success, issues a fresh access/refresh token pair.
-func (s *Service) Login(ctx context.Context, req *models.RqLogin) (*models.RsAuth, error) {
+// Login checks req's credentials and, on success, issues a fresh access/refresh token pair. ip
+// and userAgent are recorded against the attempt, successful or not, and are never used to decide
+// whether it succeeds.
+func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent string) (*LoginResult, error) {
 	admin, err := s.queries.GetAdminByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -81,6 +102,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin) (*models.RsAut
 			// wrong password.
 			utils.CheckPasswordHash(req.Password, dummyPasswordHash)
 			slog.Warn("login attempt with unknown email")
+			s.audit.Record(ctx, auditsvc.EventLoginFailed, nil, ip, userAgent)
 			return nil, errInvalidCredentials
 		}
 		slog.Error("failed to query admin during login", slog.Any("err", err))
@@ -89,6 +111,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin) (*models.RsAut
 
 	if !utils.CheckPasswordHash(req.Password, admin.PasswordHash) {
 		slog.Warn("login attempt with invalid password", slog.String("admin_id", admin.ID.String()))
+		s.audit.Record(ctx, auditsvc.EventLoginFailed, &admin.ID, ip, userAgent)
 		return nil, errInvalidCredentials
 	}
 
@@ -108,48 +131,126 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin) (*models.RsAut
 		}
 	}
 
+	// Housekeeping while we have the admin id. Bounded with no scheduled job: a dead row can
+	// only outlive its expiry until its owner next signs in. A failure here is not worth failing
+	// a valid login over.
+	if err := s.queries.DeleteExpiredRefreshTokens(ctx, admin.ID); err != nil {
+		slog.Warn("pruning expired refresh tokens failed", slog.Any("err", err))
+	}
+
 	slog.Info("admin login succeeded", slog.String("admin_id", admin.ID.String()))
-	return s.issueTokenPair(admin)
+	s.audit.Record(ctx, auditsvc.EventLoginSuccess, &admin.ID, ip, userAgent)
+
+	// A login starts a new family. Nothing issued before it is related to it, so a replay
+	// detected later cannot reach back and revoke a session the admin started deliberately.
+	return s.issueTokenPair(ctx, admin, uuid.New())
 }
 
-// Refresh validates req's refresh token and, on success, issues a fresh pair. The admin row is
+// Refresh validates a refresh token, spends it, and issues a replacement. The admin row is
 // re-read rather than trusted from the token's claims, so an admin removed after the refresh
 // token was issued cannot use it to obtain a new access token.
-func (s *Service) Refresh(ctx context.Context, req *models.RqRefreshToken) (*models.RsAuth, error) {
-	claims, err := s.tokenService.ValidateRefreshToken(req.RefreshToken)
+//
+// The ledger lookup is what makes a refresh token single-use. Presenting one that has already
+// been spent means two parties hold the same token, and only one of them came by it honestly, so
+// the entire family dies and both are forced back to the login screen. That is deliberately
+// disruptive: the alternative is letting a thief keep rotating quietly for a week.
+func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent string) (*LoginResult, error) {
+	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		slog.Warn("refresh token validation failed", slog.Any("err", err))
 		return nil, errInvalidToken
 	}
 
-	admin, err := s.queries.GetAdminByID(ctx, claims.AdminID)
+	jti, err := uuid.Parse(claims.ID)
+	if err != nil {
+		slog.Warn("refresh token has no usable jti", slog.Any("err", err))
+		return nil, errInvalidToken
+	}
+
+	row, err := s.queries.GetRefreshToken(ctx, jti)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Signed by us, but no ledger row: either issued before this table existed, or the
+			// row was pruned. Neither is a token we are willing to honour.
+			slog.Warn("refresh token is not in the ledger")
+			return nil, errInvalidToken
+		}
+		slog.Error("failed to read refresh token ledger", slog.Any("err", err))
+		return nil, fmt.Errorf("get refresh token: %w", err)
+	}
+
+	if row.RevokedAt != nil {
+		slog.Warn("refresh token replay detected, revoking family",
+			slog.String("admin_id", row.AdminID.String()),
+			slog.String("family_id", row.FamilyID.String()))
+		if revErr := s.queries.RevokeRefreshTokenFamily(ctx, row.FamilyID); revErr != nil {
+			slog.Error("revoking refresh token family failed", slog.Any("err", revErr))
+		}
+		s.audit.Record(ctx, auditsvc.EventTokenReuse, &row.AdminID, ip, userAgent)
+		return nil, errInvalidToken
+	}
+
+	// Belt and braces. The JWT's own exp claim already covers this, so reaching here means the
+	// ledger and the token disagree, and the ledger wins.
+	if row.ExpiresAt.Before(time.Now()) {
+		slog.Warn("refresh token is past its ledger expiry")
+		return nil, errInvalidToken
+	}
+
+	admin, err := s.queries.GetAdminByID(ctx, row.AdminID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			slog.Warn("refresh token names an admin that no longer exists",
-				slog.String("admin_id", claims.AdminID.String()))
+				slog.String("admin_id", row.AdminID.String()))
 			return nil, errInvalidToken
 		}
 		slog.Error("failed to query admin during refresh", slog.Any("err", err))
 		return nil, fmt.Errorf("get admin by id: %w", err)
 	}
 
+	// Revoke before issuing, never after. If the insert then fails, the family has no live token
+	// and the admin logs in again, which is an annoyance. The other order can leave two live
+	// tokens after a crash, which is the exact state replay detection exists to make impossible.
+	if err := s.queries.RevokeRefreshToken(ctx, jti); err != nil {
+		slog.Error("revoking spent refresh token failed", slog.Any("err", err))
+		return nil, fmt.Errorf("revoke refresh token: %w", err)
+	}
+
 	slog.Info("token refresh succeeded", slog.String("admin_id", admin.ID.String()))
-	return s.issueTokenPair(admin)
+	return s.issueTokenPair(ctx, admin, row.FamilyID)
 }
 
-func (s *Service) issueTokenPair(admin sqlc.AdminUser) (*models.RsAuth, error) {
+// issueTokenPair signs a new access and refresh token and records the refresh token in the
+// ledger under familyID. A login passes a fresh familyID; a rotation passes the one the
+// presented token already belonged to, which is what lets replay revoke the whole chain.
+func (s *Service) issueTokenPair(ctx context.Context, admin sqlc.AdminUser, familyID uuid.UUID) (*LoginResult, error) {
 	accessToken, err := s.tokenService.GenerateAccessToken(admin.ID, admin.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
-	refreshToken, err := s.tokenService.GenerateRefreshToken(admin.ID)
+
+	jti := uuid.New()
+	refreshToken, expiresAt, err := s.tokenService.GenerateRefreshToken(admin.ID, jti)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	return &models.RsAuth{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+	if err := s.queries.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
+		Jti:       jti,
+		AdminID:   admin.ID,
+		FamilyID:  familyID,
+		ExpiresAt: expiresAt,
+	}); err != nil {
+		// Fail the whole call. A signed refresh token with no ledger row is worse than no token:
+		// Refresh would reject it as unknown, so the admin would appear to log in and then be
+		// bounced on their first refresh with nothing explaining why.
+		return nil, fmt.Errorf("store refresh token: %w", err)
+	}
+
+	return &LoginResult{
+		AccessToken:      accessToken,
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: expiresAt,
 		Admin: models.RsAdminProfile{
 			ID:        admin.ID,
 			Email:     admin.Email,

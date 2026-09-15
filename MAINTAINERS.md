@@ -288,9 +288,9 @@ site not emailing.
 
 `internal/service/auth`, `internal/utils/secure` and `internal/http/handlers/middleware.go` mirror
 `psyfint_v2_back`'s login/refresh service and Bearer-token middleware: HS256, one secret, and the
-same Mongolian 401 messages. One deliberate difference: `Login` always runs bcrypt, even when the
-email does not exist, comparing against a fixed dummy hash instead of returning early on
-`pgx.ErrNoRows`. Returning early is faster, and that speed difference is itself an oracle — bcrypt
+same Mongolian 401 messages. Two deliberate differences, this one and the refresh token ledger
+further down. `Login` always runs bcrypt, even when the email does not exist, comparing against a
+fixed dummy hash instead of returning early on `pgx.ErrNoRows`. Returning early is faster, and that speed difference is itself an oracle — bcrypt
 is deliberately slow, so a request that skips it answers measurably sooner than one that ran it,
 letting a caller enumerate registered emails by timing alone even though both cases return the
 identical error message.
@@ -315,6 +315,30 @@ leaked token's usefulness to the longer of the two lifetimes. `ValidateAccessTok
 `ValidateRefreshToken` each reject the other token type, and the keyfunc in `parseToken` asserts
 `*jwt.SigningMethodHMAC` so a token signed with a different algorithm is rejected before its
 signature is even checked.
+
+Refresh tokens are not stateless, which is the second deliberate difference from `psyfint_v2_back`.
+Every one carries a `jti` and has a row in `refresh_tokens`, so a signature alone no longer buys
+entry: `Refresh` looks the row up and refuses a token that has none. Spending a token revokes its
+row and writes a replacement under the same `family_id`, so one login produces one chain of tokens
+that can be killed together.
+
+Presenting an already-revoked token is what replay looks like from the server: two parties hold a
+token only one of them came by honestly, and there is no way to tell which one is asking. So the
+whole family is revoked, `audit.Record` writes `token_reuse_detected`, and both parties are sent
+back to the login screen. That is disruptive on purpose. The alternative is a thief rotating
+quietly for the full `JWT_REFRESH_EXPIRE_DAYS` with nothing able to stop them.
+
+Two orderings inside `Refresh` matter. The revoke runs before the new row is inserted, because a
+crash in between leaves the family with no live token and costs a re-login, while the reverse can
+leave two live tokens after a crash, which is the exact state this design exists to make
+impossible. And `issueTokenPair` fails the whole call if the ledger insert fails, rather than
+returning a signed token with no row behind it: that token would be rejected on its first use, and
+the admin would be bounced with nothing explaining why.
+
+Every failure inside `Refresh` returns the same `errInvalidToken` and the same 401. "Already
+spent", "never existed" and "admin was deleted" told apart would tell a thief exactly when the real
+admin noticed. The `token_reuse_detected` row is where that distinction lives instead, visible to
+the operator and not to the caller.
 
 `POST /api/auth/login` and `POST /api/auth/refresh` are public and rate limited, reusing
 `leadLimiter`'s `KeyGenerator` shape (factored out as `clientKeyGenerator` in

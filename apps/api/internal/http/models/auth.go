@@ -16,6 +16,10 @@ type RqRefreshToken struct {
 // RsAuth is what both login and refresh return: a fresh token pair plus the admin's identity.
 // AccessToken and RefreshToken are NOT interchangeable -- see
 // internal/utils/secure.TokenService, which rejects each as the other.
+//
+// RefreshToken replaces whichever one the caller sent, and that one is dead from here on. A client
+// that keeps the old one and retries with it revokes its own session, because a refresh token
+// presented twice is indistinguishable from a stolen one.
 type RsAuth struct {
 	AccessToken  string         `json:"access_token"`
 	RefreshToken string         `json:"refresh_token"`

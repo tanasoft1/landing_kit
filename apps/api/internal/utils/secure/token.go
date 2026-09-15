@@ -87,15 +87,24 @@ func (s *TokenService) GenerateAccessToken(adminID uuid.UUID, email string) (str
 
 // GenerateRefreshToken signs a long-lived token used only to obtain a new token pair through
 // Refresh. It deliberately carries no email: a refresh token's one job is proving the admin id,
-// and the endpoint that consumes it (internal/service/auth.Refresh) looks the admin up again
-// before issuing anything, rather than trusting a value that may be days stale.
-func (s *TokenService) GenerateRefreshToken(adminID uuid.UUID) (string, error) {
+// and the endpoint that consumes it looks the admin up again before issuing anything, rather
+// than trusting a value that may be days stale.
+//
+// jti is supplied by the caller rather than generated here, because the caller has to write that
+// same id into the refresh_tokens ledger. Generating it here would mean handing it back out and
+// trusting every caller to store the one it was given.
+//
+// expiresAt is returned for the same reason: the ledger row and the token's own exp claim have
+// to agree, and recomputing "now plus the TTL" in the caller would drift by however long the
+// signing took.
+func (s *TokenService) GenerateRefreshToken(adminID, jti uuid.UUID) (string, time.Time, error) {
 	expiresAt := time.Now().Add(time.Duration(s.refreshExpireDays) * 24 * time.Hour)
 
 	claims := &Claims{
 		AdminID:   adminID,
 		TokenType: TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti.String(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -104,9 +113,9 @@ func (s *TokenService) GenerateRefreshToken(adminID uuid.UUID) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(s.secret))
 	if err != nil {
-		return "", fmt.Errorf("sign refresh token: %w", err)
+		return "", time.Time{}, fmt.Errorf("sign refresh token: %w", err)
 	}
-	return signed, nil
+	return signed, expiresAt, nil
 }
 
 // ValidateAccessToken parses tokenString and rejects it unless its type is access. See the
