@@ -267,6 +267,14 @@ func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string
 	}
 	row, err := s.queries.GetRefreshToken(ctx, jti)
 	if err != nil {
+		// A token with no ledger row is the ordinary case: it was already spent, or its family
+		// was revoked, and there is nothing left to revoke. Anything else means the lookup itself
+		// failed, and the caller cannot be told -- logout answers the same way regardless. Without
+		// this line that failure leaves no trace at all, while the caller sees a cleared cookie
+		// and a success, and the session it asked to end stays live until its own expiry.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("reading the token ledger on logout failed", slog.Any("err", err))
+		}
 		return
 	}
 	if err := s.revokeFamily(ctx, row.FamilyID); err != nil {

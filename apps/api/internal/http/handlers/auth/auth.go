@@ -1,7 +1,7 @@
 // Package authhandler serves the admin login, refresh and logout endpoints. Named authhandler,
-// not auth,
-// so that a caller importing both this package and internal/service/auth never needs an import
-// alias to tell them apart -- same convention as internal/http/handlers/lead's leadhandler.
+// not auth, so that a caller importing both this package and internal/service/auth never needs
+// an import alias to tell them apart -- same convention as internal/http/handlers/lead's
+// leadhandler.
 package authhandler
 
 import (
