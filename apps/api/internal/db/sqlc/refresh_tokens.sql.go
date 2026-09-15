@@ -24,6 +24,9 @@ type CreateRefreshTokenParams struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// A rotation's insert runs in the same transaction as the revoke that preceded it, under the
+// family lock (see LockTokenFamily). The two halves of spending a token and issuing its successor
+// commit together or not at all, and no family revoke can interleave between them.
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error {
 	_, err := q.db.Exec(ctx, createRefreshToken,
 		arg.Jti,
@@ -62,6 +65,22 @@ func (q *Queries) GetRefreshToken(ctx context.Context, jti uuid.UUID) (RefreshTo
 	return i, err
 }
 
+const lockTokenFamily = `-- name: LockTokenFamily :exec
+SELECT pg_advisory_xact_lock(hashtextextended(($1::uuid)::text, 0))
+`
+
+// Serializes every writer that touches one token family, for the length of the calling
+// transaction. Row locks cannot do this job: they order two writes to the same row, and the
+// orderings that matter here are a write against an INSERT of a row that does not exist yet.
+// An UPDATE's scan cannot see a row inserted after its own statement began, so a family revoke
+// racing a rotation can miss the successor and leave it live in a family that has just been
+// declared compromised. Every writer taking this lock first means the second one begins after
+// the first has committed, and sees what it wrote.
+func (q *Queries) LockTokenFamily(ctx context.Context, familyID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockTokenFamily, familyID)
+	return err
+}
+
 const revokeRefreshToken = `-- name: RevokeRefreshToken :execrows
 UPDATE refresh_tokens SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NULL
 `
@@ -71,8 +90,8 @@ UPDATE refresh_tokens SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NU
 // concurrent updates to the same row blocks on the row lock, then re-evaluates its predicate
 // against the committed version, finds revoked_at already set, and matches nothing. Zero rows
 // therefore means another request spent this token first, which is the same event as presenting an
-// already-revoked one. Reading the count is what makes spending a token atomic; a preceding SELECT
-// cannot, because two callers can both pass it before either writes.
+// already-revoked one. Reading the count is what settles which of the two spent the token; a
+// preceding SELECT cannot, because both callers can pass it before either writes.
 func (q *Queries) RevokeRefreshToken(ctx context.Context, jti uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeRefreshToken, jti)
 	if err != nil {
@@ -85,6 +104,11 @@ const revokeRefreshTokenFamily = `-- name: RevokeRefreshTokenFamily :exec
 UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL
 `
 
+// Must run under LockTokenFamily in the same transaction. Without the lock this UPDATE races a
+// rotation of a live token in the same family: it blocks on that token's row lock, re-evaluates,
+// skips the row the rotation just revoked, and never sees the successor, because that row was
+// inserted after this statement's scan began. The successor survives live in a family this call
+// has just declared dead. The lock makes the two writers run one after the other instead.
 func (q *Queries) RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeRefreshTokenFamily, familyID)
 	return err
