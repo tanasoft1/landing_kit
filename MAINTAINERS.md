@@ -290,10 +290,10 @@ site not emailing.
 `psyfint_v2_back`'s login/refresh service and Bearer-token middleware: HS256, one secret, and the
 same Mongolian 401 messages. Two deliberate differences, this one and the refresh token ledger
 further down. `Login` always runs bcrypt, even when the email does not exist, comparing against a
-fixed dummy hash instead of returning early on `pgx.ErrNoRows`. Returning early is faster, and that speed difference is itself an oracle — bcrypt
-is deliberately slow, so a request that skips it answers measurably sooner than one that ran it,
-letting a caller enumerate registered emails by timing alone even though both cases return the
-identical error message.
+fixed dummy hash instead of returning early on `pgx.ErrNoRows`. Returning early is faster, and that
+speed difference is itself an oracle — bcrypt is deliberately slow, so a request that skips it
+answers measurably sooner than one that ran it, letting a caller enumerate registered emails by
+timing alone even though both cases return the identical error message.
 
 That only works while the dummy hash carries the same bcrypt cost as a real one, because bcrypt's
 running time comes from the cost encoded in the hash it is handed. A dummy left behind at a lower
@@ -328,12 +328,28 @@ whole family is revoked, `audit.Record` writes `token_reuse_detected`, and both 
 back to the login screen. That is disruptive on purpose. The alternative is a thief rotating
 quietly for the full `JWT_REFRESH_EXPIRE_DAYS` with nothing able to stop them.
 
-Two orderings inside `Refresh` matter. The revoke runs before the new row is inserted, because a
-crash in between leaves the family with no live token and costs a re-login, while the reverse can
-leave two live tokens after a crash, which is the exact state this design exists to make
-impossible. And `issueTokenPair` fails the whole call if the ledger insert fails, rather than
-returning a signed token with no row behind it: that token would be rejected on its first use, and
-the admin would be bounced with nothing explaining why.
+Spending a token and issuing its successor are one transaction, taken under an advisory lock on the
+`family_id` (`LockTokenFamily`). Neither half of that is decoration. The transaction removes the
+in-between state: there is no longer a moment where the old row is dead and the new one is not yet
+written, so a crash mid-rotation leaves the presented token still live and the client's next attempt
+with it simply works.
+
+The lock is what orders a rotation against a family revoke running at the same time, and row locks
+cannot do that job. A row lock orders two writes to one row; the collisions here are a write against
+an `INSERT` of a row that does not exist yet, and an `UPDATE`'s scan cannot see a row inserted after
+its own statement began. Two orderings run into that. Two requests race on one live token: the loser
+matches zero rows and goes on to revoke the family, and without the lock its `UPDATE` can start
+before the winner's successor is committed and never see it. Or a replay of a long-spent token
+arrives while the honest client is rotating the live one: the family revoke blocks on the live row,
+re-evaluates, skips the row the rotation has just revoked, and again misses the successor. Both
+leave a live token inside a family the server has just declared compromised — the honest client is
+logged out, the thief keeps rotating, and no second token is left in play to trigger detection
+again. With every writer taking the lock first, whichever runs second begins after the other has
+committed and sees its rows.
+
+`issueTokenPair` fails the whole call if the ledger insert fails, rather than returning a signed
+token with no row behind it: that token would be rejected on its first use, and the admin would be
+bounced with nothing explaining why.
 
 `RevokeRefreshToken` is `:execrows` and its count is load-bearing, which is the part most likely to
 get quietly simplified back. Spending a token has to be one operation, not a `SELECT` that checks

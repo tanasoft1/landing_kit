@@ -398,7 +398,7 @@ sequenceDiagram
     OP->>A: POST /api/auth/refresh with refresh_token
     A->>DB: GetRefreshToken by jti; already revoked means replay
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
-    A->>DB: RevokeRefreshToken, then CreateRefreshToken in the same family
+    A->>DB: RevokeRefreshToken then CreateRefreshToken, one transaction under the family lock
     A-->>OP: a fresh pair, and the presented token is now dead
 ```
 
@@ -429,9 +429,11 @@ Five properties of this path are deliberate and easy to undo by accident:
   carries a `jti` and has a row in `refresh_tokens`. Refreshing revokes that row and writes a new
   one under the same `family_id`, so a token presented twice can only mean two parties hold it. The
   second presentation revokes the entire family, logs `token_reuse_detected`, and sends the thief
-  and the real admin both back to the login screen. The revoke runs before the insert on purpose: a
-  crash between them costs a re-login, while the other order can leave two live tokens after a
-  crash, which is the state this exists to prevent. The revoke is also what claims the token. It is
+  and the real admin both back to the login screen. The revoke and the insert are one transaction,
+  so no crash can leave the family half-rotated. That transaction and every family revoke both take
+  an advisory lock on the `family_id` before writing, which is what keeps a revoke from finishing
+  past a successor row inserted after the revoke's own statement began and leaving it live in a
+  family the server has just declared compromised. The revoke is also what claims the token. It is
   a single `UPDATE ... WHERE revoked_at IS NULL` whose row count is read, so two requests racing on
   one live token cannot both proceed: the loser affects zero rows and is treated as replay. A
   `SELECT` followed by an `UPDATE` would let both through, because neither has written anything when
