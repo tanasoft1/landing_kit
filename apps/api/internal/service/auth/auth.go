@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"landing-api/internal/db/sqlc"
 	"landing-api/internal/http/models"
@@ -32,11 +33,23 @@ var errInvalidCredentials = errors.New("invalid credentials")
 
 // errInvalidToken is returned for every way a refresh token can be refused: a bad signature, the
 // wrong token type, an unreadable jti, no matching ledger row, a row already spent, a row past its
-// expiry, and a token naming an admin that no longer exists. They all collapse to the same error
-// and the same 401 on purpose. An attacker who can tell "token malformed" from "admin was deleted"
-// from "that one was already used" learns something the token itself did not entitle them to know,
-// and the last of those would tell a thief exactly when the real admin noticed.
+// expiry, and a token naming an admin that no longer exists. Every one of them answers with the
+// same status and the same body on purpose. An attacker who can tell "token malformed" from "admin
+// was deleted" from "that one was already used" learns something the token itself did not entitle
+// them to know, and the last of those would tell a thief exactly when the real admin noticed.
+//
+// Timing is not identical, and saying otherwise would overstate what the code delivers. The two
+// replay branches revoke a family and write an audit row before answering; a token with no ledger
+// row answers after a single SELECT. That residue is worth living with. The endpoint is rate
+// limited, so the gap cannot be sampled enough times to lift it out of network noise, and what it
+// leaks is only that the presented token was already spent -- a state the replay itself created,
+// about a token its holder already has.
 var errInvalidToken = errors.New("invalid token")
+
+// errTokenAlreadySpent is internal to this package and never reaches a handler. It is how rotate
+// tells Refresh that another request claimed the presented token, so Refresh can revoke the
+// family AFTER rotate's transaction has been rolled back and released the family lock.
+var errTokenAlreadySpent = errors.New("refresh token already spent")
 
 // LoginResult is what Login and Refresh hand back. It is not models.RsAuth, because the refresh
 // token is not part of the response body's shape: how it reaches the client, in the body or as a
@@ -80,14 +93,19 @@ func init() {
 	}
 }
 
+// Service holds the pool as well as the queries built from it, because sqlc.Queries can only run
+// statements, not open a transaction. Refresh needs one: spending a token and issuing its
+// successor have to commit together, under a lock that no other writer on the same family can
+// cross.
 type Service struct {
+	pool         *pgxpool.Pool
 	queries      *sqlc.Queries
 	tokenService *secure.TokenService
 	audit        *auditsvc.Service
 }
 
-func New(queries *sqlc.Queries, tokenService *secure.TokenService, audit *auditsvc.Service) *Service {
-	return &Service{queries: queries, tokenService: tokenService, audit: audit}
+func New(pool *pgxpool.Pool, queries *sqlc.Queries, tokenService *secure.TokenService, audit *auditsvc.Service) *Service {
+	return &Service{pool: pool, queries: queries, tokenService: tokenService, audit: audit}
 }
 
 // Login checks req's credentials and, on success, issues a fresh access/refresh token pair. ip
@@ -143,7 +161,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 
 	// A login starts a new family. Nothing issued before it is related to it, so a replay
 	// detected later cannot reach back and revoke a session the admin started deliberately.
-	return s.issueTokenPair(ctx, admin, uuid.New())
+	return s.issueTokenPair(ctx, s.queries, admin, uuid.New())
 }
 
 // Refresh validates a refresh token, spends it, and issues a replacement. The admin row is
@@ -205,51 +223,148 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 		return nil, fmt.Errorf("get admin by id: %w", err)
 	}
 
-	// Revoke before issuing, never after. If the insert then fails, the family has no live token
-	// and the admin logs in again, which is an annoyance. The other order can leave two live
-	// tokens after a crash, which is the exact state replay detection exists to make impossible.
-	//
-	// The revoke is also what claims the token, which is why its row count is read rather than
-	// discarded. The check above cannot do that job: two requests carrying the same live token can
-	// both pass it, because neither has written anything yet. The UPDATE settles it instead, by
-	// matching only a row that is still unrevoked (see RevokeRefreshToken). Exactly one of the two
-	// changes a row.
-	spent, err := s.queries.RevokeRefreshToken(ctx, jti)
+	result, err := s.rotate(ctx, admin, jti, row.FamilyID)
+	if err != nil {
+		if errors.Is(err, errTokenAlreadySpent) {
+			// Someone else spent this token between the ledger read above and rotate's write.
+			// That is the same event as the already-revoked row above, only caught a few
+			// milliseconds earlier, and it gets the same answer. A client that fires two refreshes
+			// at once on one token is indistinguishable from a thief racing its owner, and pays
+			// the same price.
+			slog.Warn("refresh token was spent by a concurrent request, revoking family",
+				slog.String("admin_id", row.AdminID.String()),
+				slog.String("family_id", row.FamilyID.String()))
+			s.revokeFamilyAsReplay(ctx, row, ip, userAgent)
+			return nil, errInvalidToken
+		}
+		return nil, err
+	}
+
+	slog.Info("token refresh succeeded", slog.String("admin_id", admin.ID.String()))
+	return result, nil
+}
+
+// rotate spends the presented token and issues its successor as one transaction, under the
+// family's advisory lock. Both halves of that matter and for different reasons.
+//
+// The transaction is what makes spending atomic: a crash between the two now leaves the
+// presented token still live, so the client's next attempt with it simply works. The previous
+// ordering argument -- revoke first, because a crash between them costs a re-login while the
+// reverse leaves two live tokens -- no longer applies, because there is no longer an in-between
+// state to crash in.
+//
+// The lock is what orders this transaction against a family revoke running at the same time. A
+// revoke cannot revoke a row that does not exist yet, and an UPDATE's scan cannot see a row
+// inserted after its statement began, so without the lock a family revoke racing this function
+// can miss the successor and leave it live in a family it has just killed.
+//
+// The revoke is also what claims the token, which is why its row count is read rather than
+// discarded. The RevokedAt check in Refresh cannot do that job: two requests carrying the same
+// live token can both pass it, because neither has written anything yet. The UPDATE settles it
+// instead, by matching only a row that is still unrevoked (see RevokeRefreshToken). Exactly one
+// of the two changes a row.
+func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyID uuid.UUID) (*LoginResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin token rotation: %w", err)
+	}
+	// Load-bearing, not hygiene. This is what releases the family lock on every path that does not
+	// commit, including the one where the token was already spent -- and on that path Refresh goes
+	// straight on to revokeFamilyAsReplay, which takes the same lock on another connection. Without
+	// the rollback here that call waits on a lock this function still holds, and the request hangs
+	// until its deadline.
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("rolling back token rotation failed", slog.Any("err", rbErr))
+		}
+	}()
+
+	qtx := s.queries.WithTx(tx)
+
+	if err := qtx.LockTokenFamily(ctx, familyID); err != nil {
+		slog.Error("locking refresh token family failed", slog.Any("err", err))
+		return nil, fmt.Errorf("lock token family: %w", err)
+	}
+
+	spent, err := qtx.RevokeRefreshToken(ctx, jti)
 	if err != nil {
 		slog.Error("revoking spent refresh token failed", slog.Any("err", err))
 		return nil, fmt.Errorf("revoke refresh token: %w", err)
 	}
 	if spent == 0 {
-		// Someone else spent this token between the read above and this write. That is the same
-		// event as the already-revoked row above, only caught a few milliseconds earlier, and it
-		// gets the same answer. A client that fires two refreshes at once on one token is
-		// indistinguishable from a thief racing its owner, and pays the same price.
-		slog.Warn("refresh token was spent by a concurrent request, revoking family",
-			slog.String("admin_id", row.AdminID.String()),
-			slog.String("family_id", row.FamilyID.String()))
-		s.revokeFamilyAsReplay(ctx, row, ip, userAgent)
-		return nil, errInvalidToken
+		return nil, errTokenAlreadySpent
 	}
 
-	slog.Info("token refresh succeeded", slog.String("admin_id", admin.ID.String()))
-	return s.issueTokenPair(ctx, admin, row.FamilyID)
+	result, err := s.issueTokenPair(ctx, qtx, admin, familyID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("committing token rotation failed", slog.Any("err", err))
+		return nil, fmt.Errorf("commit token rotation: %w", err)
+	}
+
+	return result, nil
 }
 
 // revokeFamilyAsReplay kills every token descended from the same login and records the detection.
 // Two paths reach it: a token whose ledger row was already revoked, and a token another request
 // spent while this one was working. Both mean two parties held one token, and neither tells us
 // which of the two is the one asking now, so both lose the session.
+//
+// The audit row records the detection, which happened, and not the revocation, which may not have.
+// A failed revoke shows up only in the error log, so the row is not proof that the family died.
 func (s *Service) revokeFamilyAsReplay(ctx context.Context, row sqlc.RefreshToken, ip, userAgent string) {
-	if err := s.queries.RevokeRefreshTokenFamily(ctx, row.FamilyID); err != nil {
+	if err := s.revokeFamily(ctx, row.FamilyID); err != nil {
 		slog.Error("revoking refresh token family failed", slog.Any("err", err))
 	}
 	s.audit.Record(ctx, auditsvc.EventTokenReuse, &row.AdminID, ip, userAgent)
 }
 
+// revokeFamily revokes every unrevoked token in one family, under that family's advisory lock.
+// The lock is the whole reason this needs a transaction of its own. A rotation of a live token in
+// the same family can be running right now, and the UPDATE below cannot see a successor row the
+// rotation inserts after the UPDATE's own statement began -- it would revoke everything it could
+// see and leave that successor alive in a family this call has just declared compromised. Taking
+// the lock first means whichever of the two writers arrives second starts after the other has
+// committed, and so sees its rows.
+func (s *Service) revokeFamily(ctx context.Context, familyID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin family revoke: %w", err)
+	}
+	// Releases the family lock on every path that does not commit. Another writer on this family
+	// is blocked behind it until then.
+	defer func() {
+		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("rolling back family revoke failed", slog.Any("err", rbErr))
+		}
+	}()
+
+	qtx := s.queries.WithTx(tx)
+
+	if err := qtx.LockTokenFamily(ctx, familyID); err != nil {
+		return fmt.Errorf("lock token family: %w", err)
+	}
+
+	if err := qtx.RevokeRefreshTokenFamily(ctx, familyID); err != nil {
+		return fmt.Errorf("revoke refresh token family: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit family revoke: %w", err)
+	}
+
+	return nil
+}
+
 // issueTokenPair signs a new access and refresh token and records the refresh token in the
-// ledger under familyID. A login passes a fresh familyID; a rotation passes the one the
-// presented token already belonged to, which is what lets replay revoke the whole chain.
-func (s *Service) issueTokenPair(ctx context.Context, admin sqlc.AdminUser, familyID uuid.UUID) (*LoginResult, error) {
+// ledger under familyID, through whichever queries handle q is. A rotation passes its
+// transaction-bound handle, so the insert commits with the revoke that preceded it; a login
+// passes the pool-bound one. A login also passes a fresh familyID, where a rotation passes the
+// one the presented token already belonged to, which is what lets replay revoke the whole chain.
+func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sqlc.AdminUser, familyID uuid.UUID) (*LoginResult, error) {
 	accessToken, err := s.tokenService.GenerateAccessToken(admin.ID, admin.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
@@ -261,7 +376,7 @@ func (s *Service) issueTokenPair(ctx context.Context, admin sqlc.AdminUser, fami
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	if err := s.queries.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
+	if err := q.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
 		Jti:       jti,
 		AdminID:   admin.ID,
 		FamilyID:  familyID,

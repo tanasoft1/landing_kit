@@ -36,7 +36,7 @@ func New(pool *pgxpool.Pool, notifier notify.Notifier, cfg *conf.Config) *Servic
 
 	return &Services{
 		Lead:         lead.New(q, notifier),
-		Auth:         auth.New(q, tokenService, auditService),
+		Auth:         auth.New(pool, q, tokenService, auditService),
 		Audit:        auditService,
 		Queries:      q,
 		Pool:         pool,
