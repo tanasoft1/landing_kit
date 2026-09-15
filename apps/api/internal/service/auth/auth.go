@@ -73,6 +73,22 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin) (*models.RsAut
 		return nil, errInvalidCredentials
 	}
 
+	// Upgrade a hash written at an older cost. Deliberately not fatal: the caller supplied the
+	// right password, and refusing the login because a background rewrite failed would turn a
+	// housekeeping problem into an outage. Logged and ignored, and retried on the next login.
+	if utils.NeedsRehash(admin.PasswordHash) {
+		if newHash, hashErr := utils.HashPassword(req.Password); hashErr != nil {
+			slog.Error("rehash after login failed", slog.Any("err", hashErr))
+		} else if updErr := s.queries.UpdateAdminPasswordHash(ctx, sqlc.UpdateAdminPasswordHashParams{
+			ID:           admin.ID,
+			PasswordHash: newHash,
+		}); updErr != nil {
+			slog.Error("storing rehashed password failed", slog.Any("err", updErr))
+		} else {
+			slog.Info("password hash upgraded", slog.String("admin_id", admin.ID.String()))
+		}
+	}
+
 	slog.Info("admin login succeeded", slog.String("admin_id", admin.ID.String()))
 	return s.issueTokenPair(admin)
 }
