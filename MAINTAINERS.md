@@ -434,12 +434,18 @@ twenty are all refused. The bound is N guesses per window, not one. Closing that
 the increment to happen in the same statement, which is a larger change than the backoff itself.
 
 `lockDuration` shifts `time.Minute` left by `failures - lockAfterFailures`, not by the failure
-count, and both of its guards are load bearing for different reasons. Past 32 failures the shift
-runs off the end of an int64: between 33 and 57 the result is negative for fifteen of those counts
-and, for the other ten, a positive value far above the cap, and from 58 up it is exactly zero
-(`time.Minute << 60` is `0s`, not a negative number). `d > maxLockDuration` catches the huge
-positives and nothing else. Only `d <= 0` catches the negatives and the zeros, and without it an
-attacker who kept failing would reach a lock that had already expired.
+count, and both of its guards are load bearing for different reasons. `d > maxLockDuration` does
+most of its work on ordinary values: only failures 5 through 8 return a window below the cap, so
+that test is what clamps every count from 9 to 32. Past 32 the shift runs off the end of an int64.
+Between 33 and 57 the result is negative for fifteen of those counts and, for the other ten, a
+positive value far above the cap, and from 58 up it is exactly zero. Only `d <= 0` catches the
+negatives and the zeros, and without it an attacker who kept failing would reach a lock that had
+already expired.
+
+A shift of 60 is worth pinning down, because checking it the obvious way misleads. Written as the
+constant expression `time.Minute << 60` it does not compile at all: Go evaluates constant shifts at
+arbitrary precision and the result overflows `int64`. The shift count here is a variable, and a
+variable shift of 60 yields exactly `0s`. That is the value the guard has to catch.
 
 `ClearLoginAttempts` empties the row on a successful sign-in, and `PruneLoginAttempts`, also on the
 login path, drops rows whose lock lapsed more than a day ago. Neither one reaches the rows a spray
