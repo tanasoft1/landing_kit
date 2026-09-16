@@ -43,6 +43,13 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 
 	result, err := h.svc.Login(c.Context(), &req, c.IP(), c.Get("User-Agent"))
 	if err != nil {
+		if auth.IsAccountLocked(err) {
+			// The same error code loginLimiter's 429 uses, so the panel needs one case, not two.
+			// The caller is only being told about failures they generated themselves.
+			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+				Error: "rate limited", Message: "Хэт олон удаа оролдлоо. Дараа дахин оролдоно уу.",
+			})
+		}
 		// Unknown email and wrong password reach here as the SAME error (see
 		// auth.errInvalidCredentials), so this branch cannot leak account existence even if it
 		// wanted to: it has no way left to tell the two cases apart.

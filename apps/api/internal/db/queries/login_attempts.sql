@@ -13,3 +13,8 @@ RETURNING *;
 
 -- name: ClearLoginAttempts :exec
 DELETE FROM login_attempts WHERE email = $1;
+
+-- name: PruneLoginAttempts :exec
+-- Rows whose lock lapsed more than a day ago cannot affect any future decision: the backoff curve
+-- reads failed_count, and a count that old is not evidence of anything current.
+DELETE FROM login_attempts WHERE locked_until IS NOT NULL AND locked_until < now() - interval '1 day';
