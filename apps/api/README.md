@@ -134,8 +134,10 @@ form, so repeated wrong guesses get throttled rather than retried without limit.
 off per email, which per-client limiting alone cannot do: from the fifth failure that address is
 refused for a minute, doubling with each further failure up to fifteen. An attacker who spreads
 guesses across many client addresses walks past the per-client limit untouched, because every
-address is a fresh bucket to it; what stops them is that lock on the account they are guessing at,
-which counts failures however many addresses they arrived from. Both limits answer with the same
+address is a fresh bucket to it; what holds them back is that lock on the account they are guessing
+at, which counts failures however many addresses they arrived from. It is a bound rather than a
+wall: guesses already in flight when the lock lands still get an answer, so a burst of twenty
+costs twenty guesses before the address goes quiet for the window. Both limits answer with the same
 429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would
 leave someone stuck in a session they are trying to end.
 
