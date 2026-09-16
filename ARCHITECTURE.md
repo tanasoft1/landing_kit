@@ -387,8 +387,10 @@ sequenceDiagram
     CMD->>DB: INSERT INTO admin_users with a bcrypt hash
     CMD-->>OP: the created email, and nothing else, ever
     OP->>A: POST /api/auth/login
+    A->>DB: GetLoginAttempt, before the lookup and whether or not the email is registered
     A->>DB: GetAdminByEmail
     A->>A: bcrypt compare on every path, even for an unknown email
+    A->>DB: ClearLoginAttempts on success, RecordLoginFailure on either failure
     A->>DB: CreateRefreshToken, a ledger row under a new family_id
     A-->>OP: access_token and admin profile in the body, refresh token as a Set-Cookie
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
@@ -407,12 +409,12 @@ sequenceDiagram
 
 | Endpoint | Auth | Limits |
 |---|---|---|
-| `POST /api/auth/login` | none | 5 per 15 minutes per client |
+| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email: from the 5th failure, one minute doubling to a 15-minute cap |
 | `POST /api/auth/refresh` | the refresh cookie | 5 per 15 minutes per client |
 | `POST /api/auth/logout` | the refresh cookie | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Six properties of this path are deliberate and easy to undo by accident:
+Eight properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
@@ -420,6 +422,14 @@ Six properties of this path are deliberate and easy to undo by accident:
   valid emails without ever showing a different message. The dummy hash has to carry the same cost
   as a real one, since bcrypt reads its running time out of the hash it is given; the `auth`
   package panics at startup if it drifts below `utils.bcryptCost`.
+- **Failed logins back off per email as well as per client.** The per-client limiter alone lets an
+  attacker spread across a thousand addresses take five thousand guesses at one account. From the
+  fifth failure the email is refused for a minute, doubling with each further failure to a
+  fifteen-minute cap, answered with the same 429 the limiter returns so a client needs one case
+  rather than two. A row is written for every email tried, registered or not: if only real accounts
+  were recorded, a lockout would prove an account exists, which is the leak the dummy hash above
+  closes on the timing side. And the curve caps rather than latching, because a permanent lock lets
+  anyone who knows the admin's email deny them access for good.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
   extends the session from fifteen minutes to seven days.
@@ -524,8 +534,9 @@ presence of one cannot be used to ask whether an account exists.
 `refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
 reads it to decide whether a presented token is still live. `admin_audit_log` is written by the
 same two paths, through `internal/service/audit`, for login success, login failure and detected
-token reuse. `login_attempts` exists in the schema and nothing reads or writes it yet. It is
-groundwork for per-account backoff.
+token reuse. `login_attempts` is read and written by `Login` alone: it reads the row before it looks
+the email up, records a failure on both credential-failure branches, deletes the row on a successful
+sign-in, and drops rows whose lock lapsed more than a day ago.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The
