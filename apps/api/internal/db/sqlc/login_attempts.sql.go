@@ -30,6 +30,17 @@ func (q *Queries) GetLoginAttempt(ctx context.Context, email string) (LoginAttem
 	return i, err
 }
 
+const pruneLoginAttempts = `-- name: PruneLoginAttempts :exec
+DELETE FROM login_attempts WHERE locked_until IS NOT NULL AND locked_until < now() - interval '1 day'
+`
+
+// Rows whose lock lapsed more than a day ago cannot affect any future decision: the backoff curve
+// reads failed_count, and a count that old is not evidence of anything current.
+func (q *Queries) PruneLoginAttempts(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, pruneLoginAttempts)
+	return err
+}
+
 const recordLoginFailure = `-- name: RecordLoginFailure :one
 INSERT INTO login_attempts (email, failed_count, locked_until)
 VALUES ($1, 1, $2)

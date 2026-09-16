@@ -31,6 +31,36 @@ import (
 // can enumerate every registered email with one request per guess.
 var errInvalidCredentials = errors.New("invalid credentials")
 
+// errAccountLocked is returned when an email has failed too many times recently, whether or not
+// it belongs to a real account. Separate from errInvalidCredentials because it maps to a 429 the
+// panel shows differently, and safe to distinguish for one reason: it only ever tells a caller
+// about attempts they made themselves.
+var errAccountLocked = errors.New("account locked")
+
+const (
+	// lockAfterFailures is how many failures a legitimate typo budget absorbs before backoff
+	// starts. Five matches loginLimiter's per-IP allowance, so neither wall is reached first by
+	// accident.
+	lockAfterFailures = 5
+	// maxLockDuration caps the curve. Backoff, never a permanent lockout: a hard lock means
+	// anyone who knows the admin's email can deny them access indefinitely, which trades an
+	// authentication problem for an availability one.
+	maxLockDuration = 15 * time.Minute
+)
+
+// lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
+// minute, capped. failures is the count AFTER the failure being recorded.
+func lockDuration(failures int32) time.Duration {
+	if failures < lockAfterFailures {
+		return 0
+	}
+	d := time.Minute << (failures - lockAfterFailures)
+	if d > maxLockDuration || d <= 0 {
+		return maxLockDuration
+	}
+	return d
+}
+
 // errInvalidToken is returned for every way a refresh token can be refused: a bad signature, the
 // wrong token type, an unreadable jti, no matching ledger row, a row already spent, a row past its
 // expiry, and a token naming an admin that no longer exists. Every one of them answers with the
@@ -112,6 +142,19 @@ func New(pool *pgxpool.Pool, queries *sqlc.Queries, tokenService *secure.TokenSe
 // and userAgent are recorded against the attempt, successful or not, and are never used to decide
 // whether it succeeds.
 func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent string) (*LoginResult, error) {
+	// Read once, up front. The count also feeds the backoff computed below, which is why this
+	// runs even when the email turns out to be unregistered: rows exist for every failed email,
+	// registered or not, so a lockout can never reveal that an account exists.
+	attempt, attemptErr := s.queries.GetLoginAttempt(ctx, req.Email)
+	if attemptErr != nil && !errors.Is(attemptErr, pgx.ErrNoRows) {
+		slog.Error("reading login attempts failed", slog.Any("err", attemptErr))
+		return nil, fmt.Errorf("get login attempt: %w", attemptErr)
+	}
+	if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
+		slog.Warn("login attempt against a locked email")
+		return nil, errAccountLocked
+	}
+
 	admin, err := s.queries.GetAdminByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -121,7 +164,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 			utils.CheckPasswordHash(req.Password, dummyPasswordHash)
 			slog.Warn("login attempt with unknown email")
 			s.audit.Record(ctx, auditsvc.EventLoginFailed, nil, ip, userAgent)
-			return nil, errInvalidCredentials
+			return nil, s.noteFailure(ctx, req.Email, attempt.FailedCount)
 		}
 		slog.Error("failed to query admin during login", slog.Any("err", err))
 		return nil, fmt.Errorf("get admin by email: %w", err)
@@ -130,7 +173,11 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	if !utils.CheckPasswordHash(req.Password, admin.PasswordHash) {
 		slog.Warn("login attempt with invalid password", slog.String("admin_id", admin.ID.String()))
 		s.audit.Record(ctx, auditsvc.EventLoginFailed, &admin.ID, ip, userAgent)
-		return nil, errInvalidCredentials
+		return nil, s.noteFailure(ctx, req.Email, attempt.FailedCount)
+	}
+
+	if err := s.queries.ClearLoginAttempts(ctx, req.Email); err != nil {
+		slog.Warn("clearing login attempts failed", slog.Any("err", err))
 	}
 
 	// Upgrade a hash written at an older cost. Deliberately not fatal: the caller supplied the
@@ -156,12 +203,41 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 		slog.Warn("pruning expired refresh tokens failed", slog.Any("err", err))
 	}
 
+	// The same bargain for login_attempts, which ClearLoginAttempts above only ever empties for
+	// the email that just succeeded. A row for an address that failed and was never tried again
+	// would otherwise live forever, so a spray across a million addresses leaves a million rows.
+	if err := s.queries.PruneLoginAttempts(ctx); err != nil {
+		slog.Warn("pruning login attempts failed", slog.Any("err", err))
+	}
+
 	slog.Info("admin login succeeded", slog.String("admin_id", admin.ID.String()))
 	s.audit.Record(ctx, auditsvc.EventLoginSuccess, &admin.ID, ip, userAgent)
 
 	// A login starts a new family. Nothing issued before it is related to it, so a replay
 	// detected later cannot reach back and revoke a session the admin started deliberately.
 	return s.issueTokenPair(ctx, s.queries, admin, uuid.New())
+}
+
+// noteFailure records a failed attempt and returns the error Login should surface.
+//
+// The new count is derived from the count read at the top of Login rather than from the row this
+// writes. Two simultaneous failures can therefore both compute the same lock window, making the
+// backoff momentarily lenient under a race. That is the right way to be wrong here: the
+// alternative is a second round trip on every failed login to tighten a window an attacker
+// reaches five guesses later anyway.
+func (s *Service) noteFailure(ctx context.Context, email string, priorCount int32) error {
+	var lockedUntil *time.Time
+	if d := lockDuration(priorCount + 1); d > 0 {
+		until := time.Now().Add(d)
+		lockedUntil = &until
+	}
+	if _, err := s.queries.RecordLoginFailure(ctx, sqlc.RecordLoginFailureParams{
+		Email:       email,
+		LockedUntil: lockedUntil,
+	}); err != nil {
+		slog.Error("recording login failure failed", slog.Any("err", err))
+	}
+	return errInvalidCredentials
 }
 
 // Refresh validates a refresh token, spends it, and issues a replacement. The admin row is
@@ -450,4 +526,9 @@ func IsInvalidCredentials(err error) bool {
 // IsInvalidToken reports whether err is the token failure Refresh returns.
 func IsInvalidToken(err error) bool {
 	return errors.Is(err, errInvalidToken)
+}
+
+// IsAccountLocked reports whether err is the backoff failure Login returns.
+func IsAccountLocked(err error) bool {
+	return errors.Is(err, errAccountLocked)
 }
