@@ -391,6 +391,7 @@ sequenceDiagram
     A->>DB: GetAdminByEmail
     A->>A: bcrypt compare on every path, even for an unknown email
     A->>DB: ClearLoginAttempts on success, RecordLoginFailure on either failure
+    A->>DB: ExtendLoginLock, from the count the increment returned, once past the threshold
     A->>DB: CreateRefreshToken, a ledger row under a new family_id
     A-->>OP: access_token and admin profile in the body, refresh token as a Set-Cookie
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token

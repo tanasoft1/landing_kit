@@ -19,6 +19,25 @@ func (q *Queries) ClearLoginAttempts(ctx context.Context, email string) error {
 	return err
 }
 
+const extendLoginLock = `-- name: ExtendLoginLock :exec
+UPDATE login_attempts
+SET locked_until = GREATEST(COALESCE(locked_until, $1), $1)
+WHERE email = $2
+`
+
+type ExtendLoginLockParams struct {
+	LockedUntil *time.Time `json:"locked_until"`
+	Email       string     `json:"email"`
+}
+
+// Only ever extends. Concurrent failures compute different windows from different counts, and the
+// longest one is the one that should stand: taking the last writer instead would let a request
+// that incremented to 5 shorten a lock a request that incremented to 20 had already set.
+func (q *Queries) ExtendLoginLock(ctx context.Context, arg ExtendLoginLockParams) error {
+	_, err := q.db.Exec(ctx, extendLoginLock, arg.LockedUntil, arg.Email)
+	return err
+}
+
 const getLoginAttempt = `-- name: GetLoginAttempt :one
 SELECT email, failed_count, locked_until FROM login_attempts WHERE email = $1
 `
@@ -42,23 +61,19 @@ func (q *Queries) PruneLoginAttempts(ctx context.Context) error {
 }
 
 const recordLoginFailure = `-- name: RecordLoginFailure :one
-INSERT INTO login_attempts (email, failed_count, locked_until)
-VALUES ($1, 1, $2)
+INSERT INTO login_attempts (email, failed_count)
+VALUES ($1, 1)
 ON CONFLICT (email) DO UPDATE
-    SET failed_count = login_attempts.failed_count + 1,
-        locked_until = $2
+    SET failed_count = login_attempts.failed_count + 1
 RETURNING email, failed_count, locked_until
 `
 
-type RecordLoginFailureParams struct {
-	Email       string     `json:"email"`
-	LockedUntil *time.Time `json:"locked_until"`
-}
-
-// One statement so two concurrent failures cannot both read 2 and both write 3. The caller
-// supplies locked_until because the backoff curve is policy and belongs in Go, not in SQL.
-func (q *Queries) RecordLoginFailure(ctx context.Context, arg RecordLoginFailureParams) (LoginAttempt, error) {
-	row := q.db.QueryRow(ctx, recordLoginFailure, arg.Email, arg.LockedUntil)
+// One statement so two concurrent failures cannot both read 2 and both write 3. It touches only
+// the count: the returned row carries the post-increment value, which is the number the caller
+// feeds to the backoff curve, and the lock itself is written by ExtendLoginLock afterwards. The
+// curve stays in Go because it is policy, not storage.
+func (q *Queries) RecordLoginFailure(ctx context.Context, email string) (LoginAttempt, error) {
+	row := q.db.QueryRow(ctx, recordLoginFailure, email)
 	var i LoginAttempt
 	err := row.Scan(&i.Email, &i.FailedCount, &i.LockedUntil)
 	return i, err

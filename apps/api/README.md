@@ -132,10 +132,12 @@ or empty secret makes admin tokens forgeable. Generate a real one before deployi
 `POST /api/auth/login` and `POST /api/auth/refresh` are rate limited per client, same as the contact
 form, so repeated wrong guesses get throttled rather than retried without limit. Login also backs
 off per email, which per-client limiting alone cannot do: from the fifth failure that address is
-refused for a minute, doubling with each further failure up to fifteen, so an attacker spread across
-many addresses gains nothing. Both limits answer with the same 429. `POST /api/auth/logout` is not
-limited: it is nothing to guess at, and throttling it would leave someone stuck in a session they
-are trying to end.
+refused for a minute, doubling with each further failure up to fifteen. An attacker who spreads
+guesses across many client addresses walks past the per-client limit untouched, because every
+address is a fresh bucket to it; what stops them is that lock on the account they are guessing at,
+which counts failures however many addresses they arrived from. Both limits answer with the same
+429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would
+leave someone stuck in a session they are trying to end.
 
 `GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has

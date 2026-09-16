@@ -418,16 +418,41 @@ against five times, so it tells them only about their own attempts, and adding a
 permanent lock hands anyone who knows the admin's email an indefinite denial of service — an
 authentication problem traded for an availability one.
 
-`lockDuration` shifts `time.Minute` left by the failure count, so its `d <= 0` test is not
-defensive noise: `time.Minute << 60` overflows to a negative duration, and an attacker who kept
-failing would otherwise reach a lock that expires in the past.
+The count the window is computed from comes from the row `RecordLoginFailure` returns, not from the
+row `Login` read on the way in, and that is the difference between a working backoff and a
+decorative one. Twenty requests firing at once all read a count of zero up front, so a window
+derived from that read is "not yet" twenty times over and the address finishes the burst with no
+lock at all. Read back from the increment, each request gets its own place in the sequence, and
+`ExtendLoginLock` writes the window in a second statement, under a `GREATEST` so the longest window
+stands rather than the last one written. The price is one more round trip on a failed login past
+the threshold, next to the ~200ms of bcrypt that request has already spent.
 
-`ClearLoginAttempts` empties the row on a successful sign-in and `PruneLoginAttempts` drops rows
-whose lock lapsed over a day ago, both on the login path. That bounds the table by "someone signs in
-from time to time", which is not a guarantee: a spray against a site whose admin never logs in still
-accumulates rows, capped only by disk. Acceptable at this scale, and written down so it is a known
-limit rather than a surprise. If it ever matters, the prune belongs on a timer instead of on a
-login.
+What that does not buy is a burst costing one guess. A request already past the lock check when the
+lock lands is not refused retroactively, so N simultaneous guesses still get N answers: twenty at
+once measure as twenty 401s, after which the address is locked for fifteen minutes and the next
+twenty are all refused. The bound is N guesses per window, not one. Closing that needs the check and
+the increment to happen in the same statement, which is a larger change than the backoff itself.
+
+`lockDuration` shifts `time.Minute` left by `failures - lockAfterFailures`, not by the failure
+count, and both of its guards are load bearing for different reasons. Past 32 failures the shift
+runs off the end of an int64: between 33 and 57 the result is negative for fifteen of those counts
+and, for the other ten, a positive value far above the cap, and from 58 up it is exactly zero
+(`time.Minute << 60` is `0s`, not a negative number). `d > maxLockDuration` catches the huge
+positives and nothing else. Only `d <= 0` catches the negatives and the zeros, and without it an
+attacker who kept failing would reach a lock that had already expired.
+
+`ClearLoginAttempts` empties the row on a successful sign-in, and `PruneLoginAttempts`, also on the
+login path, drops rows whose lock lapsed more than a day ago. Neither one reaches the rows a spray
+actually leaves behind. The prune's predicate is `locked_until IS NOT NULL`, so a row that never
+reached a fifth failure is excluded from it permanently, no matter how often anyone signs in. The
+cheapest spray there is, one guess per address, writes exactly those rows. A million addresses
+guessed once each leave a million rows that nothing ever collects.
+
+Collecting them needs an `updated_at` column on `login_attempts` to age rows out by, which is a
+migration, so it is not done here. It is a known limit rather than a surprise: harmless at this
+scale, worth fixing before the table meets a determined sprayer. Whoever does it should move the
+prune onto a timer at the same time, since a prune that only runs on a successful login cannot
+collect rows on a site nobody signs in to.
 
 The refresh token never appears in a response body. `Login` and `Refresh` both write it with
 `setRefreshCookie` (`internal/http/handlers/auth/cookie.go`) as `HttpOnly; Secure; SameSite=Strict;

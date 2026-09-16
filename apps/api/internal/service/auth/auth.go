@@ -142,9 +142,9 @@ func New(pool *pgxpool.Pool, queries *sqlc.Queries, tokenService *secure.TokenSe
 // and userAgent are recorded against the attempt, successful or not, and are never used to decide
 // whether it succeeds.
 func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent string) (*LoginResult, error) {
-	// Read once, up front. The count also feeds the backoff computed below, which is why this
-	// runs even when the email turns out to be unregistered: rows exist for every failed email,
-	// registered or not, so a lockout can never reveal that an account exists.
+	// Read the lock before anything else, and read it for every email rather than only for
+	// registered ones: rows exist for any address that has failed, registered or not, so a
+	// lockout can never reveal that an account exists.
 	attempt, attemptErr := s.queries.GetLoginAttempt(ctx, req.Email)
 	if attemptErr != nil && !errors.Is(attemptErr, pgx.ErrNoRows) {
 		slog.Error("reading login attempts failed", slog.Any("err", attemptErr))
@@ -164,7 +164,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 			utils.CheckPasswordHash(req.Password, dummyPasswordHash)
 			slog.Warn("login attempt with unknown email")
 			s.audit.Record(ctx, auditsvc.EventLoginFailed, nil, ip, userAgent)
-			return nil, s.noteFailure(ctx, req.Email, attempt.FailedCount)
+			return nil, s.noteFailure(ctx, req.Email)
 		}
 		slog.Error("failed to query admin during login", slog.Any("err", err))
 		return nil, fmt.Errorf("get admin by email: %w", err)
@@ -173,7 +173,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	if !utils.CheckPasswordHash(req.Password, admin.PasswordHash) {
 		slog.Warn("login attempt with invalid password", slog.String("admin_id", admin.ID.String()))
 		s.audit.Record(ctx, auditsvc.EventLoginFailed, &admin.ID, ip, userAgent)
-		return nil, s.noteFailure(ctx, req.Email, attempt.FailedCount)
+		return nil, s.noteFailure(ctx, req.Email)
 	}
 
 	if err := s.queries.ClearLoginAttempts(ctx, req.Email); err != nil {
@@ -220,22 +220,34 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 
 // noteFailure records a failed attempt and returns the error Login should surface.
 //
-// The new count is derived from the count read at the top of Login rather than from the row this
-// writes. Two simultaneous failures can therefore both compute the same lock window, making the
-// backoff momentarily lenient under a race. That is the right way to be wrong here: the
-// alternative is a second round trip on every failed login to tighten a window an attacker
-// reaches five guesses later anyway.
-func (s *Service) noteFailure(ctx context.Context, email string, priorCount int32) error {
-	var lockedUntil *time.Time
-	if d := lockDuration(priorCount + 1); d > 0 {
-		until := time.Now().Add(d)
-		lockedUntil = &until
-	}
-	if _, err := s.queries.RecordLoginFailure(ctx, sqlc.RecordLoginFailureParams{
-		Email:       email,
-		LockedUntil: lockedUntil,
-	}); err != nil {
+// The count that feeds the backoff comes from the row the increment itself returns, not from the
+// row read at the top of Login. That distinction is the whole defence. A count read earlier is
+// already stale by the time the window is computed, so twenty requests firing at once would all
+// read zero, all compute "no lock yet", and all write one -- twenty free guesses against a fresh
+// email, which is precisely the many-address attacker this backoff exists to stop. Taking the
+// count from the write instead gives each request its own position in the sequence, so the
+// twentieth locks for the twentieth failure's window no matter how close together they arrive.
+//
+// The lock is a second statement rather than a column on the first because the window is not
+// known until the increment has answered. It costs one more round trip on a failed login past the
+// threshold, which is nothing beside the ~200ms of bcrypt the same request has already spent. A
+// write failure is logged, not returned: the caller supplied bad credentials either way, and
+// refusing to answer would hand an attacker a way to tell a bookkeeping error from a wrong
+// password.
+func (s *Service) noteFailure(ctx context.Context, email string) error {
+	attempt, err := s.queries.RecordLoginFailure(ctx, email)
+	if err != nil {
 		slog.Error("recording login failure failed", slog.Any("err", err))
+		return errInvalidCredentials
+	}
+	if d := lockDuration(attempt.FailedCount); d > 0 {
+		until := time.Now().Add(d)
+		if err := s.queries.ExtendLoginLock(ctx, sqlc.ExtendLoginLockParams{
+			Email:       email,
+			LockedUntil: &until,
+		}); err != nil {
+			slog.Error("locking an email after repeated failures failed", slog.Any("err", err))
+		}
 	}
 	return errInvalidCredentials
 }
