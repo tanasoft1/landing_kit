@@ -400,6 +400,35 @@ access token, so it still works once the access token has expired, which is when
 likely to click Sign out, and a throttle there would strand them in a session they are trying to
 end. There is nothing to guess at either: it reveals nothing and grants nothing.
 
+Per client is not the whole of it: spread across a thousand addresses, that allowance is five
+thousand guesses at one account. `login_attempts` adds backoff per email on top, in
+`internal/service/auth`. `Login` reads the row before `GetAdminByEmail`, `noteFailure` writes one on
+both credential-failure branches, and from the fifth failure the email is refused for a minute,
+doubling with each further failure to a fifteen-minute cap (`lockDuration`). A refused email gets
+the same `rate limited` 429 the limiter returns, so a client needs one case rather than two.
+
+Four things about that shape are load bearing. The read happens before the account lookup and does
+not depend on the account existing, and the write happens on **both** failure branches, so a row
+exists for an unregistered email too — otherwise the presence of a lockout would prove an account
+exists, which is exactly the leak `dummyPasswordHash` closes on the timing side. Both branches also
+still cost one bcrypt each, for the same reason. The early return for a refused email is fast, and
+that is fine rather than an oracle: it is keyed on an email the caller themselves just failed
+against five times, so it tells them only about their own attempts, and adding a bcrypt call to
+"match timing" there would be cargo cult. And the curve caps instead of latching, because a
+permanent lock hands anyone who knows the admin's email an indefinite denial of service — an
+authentication problem traded for an availability one.
+
+`lockDuration` shifts `time.Minute` left by the failure count, so its `d <= 0` test is not
+defensive noise: `time.Minute << 60` overflows to a negative duration, and an attacker who kept
+failing would otherwise reach a lock that expires in the past.
+
+`ClearLoginAttempts` empties the row on a successful sign-in and `PruneLoginAttempts` drops rows
+whose lock lapsed over a day ago, both on the login path. That bounds the table by "someone signs in
+from time to time", which is not a guarantee: a spray against a site whose admin never logs in still
+accumulates rows, capped only by disk. Acceptable at this scale, and written down so it is a known
+limit rather than a surprise. If it ever matters, the prune belongs on a timer instead of on a
+login.
+
 The refresh token never appears in a response body. `Login` and `Refresh` both write it with
 `setRefreshCookie` (`internal/http/handlers/auth/cookie.go`) as `HttpOnly; Secure; SameSite=Strict;
 Path=/api/auth`, and `models.RsAuth` carries only the access token and the admin profile. The token
