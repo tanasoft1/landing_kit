@@ -143,7 +143,16 @@ leave someone stuck in a session they are trying to end.
 
 `GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has
-ever received.
+ever received. It answers with an object, `{"items": [...], "total": N}`, rather than a bare array.
+`total` is the size of the whole table, not of the page, so a client can show a range or a page
+count instead of only a Next button. `items` is always an array and never `null`. An empty inbox is
+the likeliest state on a fresh deploy, and a client that maps over the list should not need a guard
+for it.
+
+Every admin response carries `Cache-Control: no-store`. These pages hold names, emails, message
+bodies, IP addresses and user agents, and a shared proxy or a browser's back-forward cache keeping
+a copy of that is a leak nobody would notice until it mattered. The header is set on the whole
+admin group rather than per handler, so a route added later can't forget it.
 
 ## Serving the site
 

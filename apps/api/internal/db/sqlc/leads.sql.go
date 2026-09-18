@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countLeads = `-- name: CountLeads :one
+SELECT count(*) FROM leads
+`
+
+func (q *Queries) CountLeads(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countLeads)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createLead = `-- name: CreateLead :one
 INSERT INTO leads (id, name, email, message, locale, source_page, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

@@ -60,3 +60,13 @@ type RsLead struct {
 	UserAgent  string    `json:"user_agent,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
+
+// RsLeadPage is what GET /api/admin/leads returns: one page plus the size of the whole set.
+//
+// An object rather than a bare array. Without Total the client can render a Next button but never
+// a range or a page count, and it cannot tell "this page is short because it is the last one" from
+// "this page is short because something went wrong".
+type RsLeadPage struct {
+	Items []RsLead `json:"items"`
+	Total int64    `json:"total"`
+}

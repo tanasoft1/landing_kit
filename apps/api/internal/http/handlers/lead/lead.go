@@ -95,9 +95,10 @@ const (
 	MaxListLimit     = 200
 )
 
-// List returns leads newest-first, behind AuthMiddleware. limit and offset come from the query
-// string: limit defaults to DefaultListLimit when absent or non-positive, and is clamped to
-// MaxListLimit no matter how large a value is requested.
+// List returns one page of leads newest-first, behind AuthMiddleware, as a models.RsLeadPage:
+// the page itself plus the total row count, so the caller can render a range or a page count.
+// limit and offset come from the query string: limit defaults to DefaultListLimit when absent or
+// non-positive, and is clamped to MaxListLimit no matter how large a value is requested.
 func (h *Handler) List(c *fiber.Ctx) error {
 	limit := c.QueryInt("limit", DefaultListLimit)
 	if limit <= 0 {
@@ -119,7 +120,7 @@ func (h *Handler) List(c *fiber.Ctx) error {
 		offset = math.MaxInt32
 	}
 
-	leads, err := h.svc.List(c.Context(), int32(limit), int32(offset))
+	page, err := h.svc.List(c.Context(), int32(limit), int32(offset))
 	if err != nil {
 		slog.Error("list leads failed", slog.Any("err", err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
@@ -127,5 +128,5 @@ func (h *Handler) List(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: leads})
+	return c.Status(fiber.StatusOK).JSON(models.SuccessResponse{Success: true, Data: page})
 }
