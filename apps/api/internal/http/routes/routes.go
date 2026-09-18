@@ -19,7 +19,7 @@ import (
 // No global rate limiter. The limited routes are POST /api/leads and the two /api/auth routes,
 // and each needs a key generator that cannot collapse callers into one bucket (see
 // internal/http/routes/public.go).
-func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService) {
+func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService, isProduction bool) {
 	app.Use(recover.New())
 	app.Use(logger.New())
 	app.Use(helmet.New(helmet.Config{
@@ -32,6 +32,7 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 		CrossOriginEmbedderPolicy: "unsafe-none",
 		CrossOriginResourcePolicy: "cross-origin",
 	}))
+	app.Use(securityHeaders(isProduction))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins,
 		// Authorization is listed because every /api/admin/* route reads the access token from

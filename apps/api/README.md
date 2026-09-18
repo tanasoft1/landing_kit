@@ -177,6 +177,16 @@ If you serve the site this way, do not put `helmet`'s `CrossOriginEmbedderPolicy
 loads — third-party widgets, CDN assets, embedded iframes — with no error anywhere on the server
 side; the site just looks broken in the browser for no visible reason.
 
+The content security policy is strict for an unrelated reason, and it is the other half of the
+same story. `contentSecurityPolicy` in `internal/http/routes/headers.go` allows same-origin
+subresources and nothing else, which is correct for the site as generated — every script, style,
+image and font it loads is served from this binary. Add a third-party script (analytics, a chat
+widget), an image or font from a CDN, or an embedded frame, and you have to name that host in the
+matching directive: `script-src`, `img-src`, `font-src` or `frame-src`. Skip that step and the
+failure looks exactly like the one above — the browser blocks the resource, the server logs
+nothing because it never saw the request, and the only evidence is a CSP violation in the browser
+console.
+
 ## Docker
 
 ```bash
