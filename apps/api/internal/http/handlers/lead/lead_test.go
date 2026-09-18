@@ -66,7 +66,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	}
 
 	app := fiber.New()
-	routes.Setup(app, h, "http://localhost:5173", tokenService)
+	routes.Setup(app, h, "http://localhost:5173", tokenService, false)
 
 	return app, db, tokenService
 }
