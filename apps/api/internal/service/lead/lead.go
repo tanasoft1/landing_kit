@@ -82,16 +82,29 @@ func (s *Service) Create(ctx context.Context, in Input) error {
 	return nil
 }
 
-// List returns leads newest-first as models.RsLead. limit and offset are used exactly as given:
-// capping the page size is the caller's job (see the clamp in
+// List returns one page of leads, newest first, plus the total row count. limit and offset are
+// used exactly as given: capping the page size is the caller's job (see the clamp in
 // internal/http/handlers/lead.Handler.List), because only the caller knows whether limit arrived
 // from a trusted source or an admin-supplied query string.
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]models.RsLead, error) {
+//
+// Two queries, not a window function. count(*) over a table this size is trivially cheap, and
+// keeping it separate means the paging query stays the plain LIMIT/OFFSET one with the id
+// tiebreaker its own comment explains. The two reads are not one snapshot, so a lead inserted
+// between them makes Total disagree with len(Items) by however many arrived in that gap. A row
+// count shown next to a page of an inbox does not justify a transaction to close that gap.
+func (s *Service) List(ctx context.Context, limit, offset int32) (*models.RsLeadPage, error) {
 	rows, err := s.q.ListLeads(ctx, sqlc.ListLeadsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("list leads: %w", err)
 	}
 
+	total, err := s.q.CountLeads(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count leads: %w", err)
+	}
+
+	// Never nil. A nil slice marshals to `null`, and a client that does `data.items.map(...)`
+	// crashes on an empty inbox, which is the single most likely state on a fresh deploy.
 	leads := make([]models.RsLead, 0, len(rows))
 	for _, row := range rows {
 		lead := models.RsLead{
@@ -113,5 +126,5 @@ func (s *Service) List(ctx context.Context, limit, offset int32) ([]models.RsLea
 		}
 		leads = append(leads, lead)
 	}
-	return leads, nil
+	return &models.RsLeadPage{Items: leads, Total: total}, nil
 }

@@ -63,12 +63,19 @@ func TestAdminLeadsReturnsSeededLeadWithValidToken(t *testing.T) {
 		t.Fatal("Success = false, want true")
 	}
 
-	leads, ok := body.Data.([]any)
+	page, ok := body.Data.(map[string]any)
 	if !ok {
-		t.Fatalf("Data = %T, want a list", body.Data)
+		t.Fatalf("Data = %T, want an object", body.Data)
+	}
+	leads, ok := page["items"].([]any)
+	if !ok {
+		t.Fatalf("items = %T, want a list", page["items"])
 	}
 	if len(leads) != 1 {
 		t.Fatalf("got %d leads, want 1", len(leads))
+	}
+	if page["total"] != float64(1) {
+		t.Errorf("total = %v, want 1", page["total"])
 	}
 	row, ok := leads[0].(map[string]any)
 	if !ok {
@@ -122,11 +129,19 @@ func TestAdminLeadsClampsAnOversizedLimit(t *testing.T) {
 
 	var body models.SuccessResponse
 	res.Decode(&body)
-	leads, ok := body.Data.([]any)
+	page, ok := body.Data.(map[string]any)
 	if !ok {
-		t.Fatalf("Data = %T, want a list", body.Data)
+		t.Fatalf("Data = %T, want an object", body.Data)
+	}
+	leads, ok := page["items"].([]any)
+	if !ok {
+		t.Fatalf("items = %T, want a list", page["items"])
 	}
 	if len(leads) != 200 {
 		t.Fatalf("got %d leads for limit=10000, want 200 (the clamp)", len(leads))
+	}
+	// total counts the whole table, not the page: 205 seeded, 200 returned.
+	if page["total"] != float64(205) {
+		t.Errorf("total = %v, want 205", page["total"])
 	}
 }

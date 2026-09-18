@@ -11,3 +11,6 @@ RETURNING *;
 SELECT * FROM leads
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2;
+
+-- name: CountLeads :one
+SELECT count(*) FROM leads;
