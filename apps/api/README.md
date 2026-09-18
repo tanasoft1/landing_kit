@@ -149,10 +149,11 @@ count instead of only a Next button. `items` is always an array and never `null`
 the likeliest state on a fresh deploy, and a client that maps over the list should not need a guard
 for it.
 
-Every admin response carries `Cache-Control: no-store`. These pages hold names, emails, message
-bodies, IP addresses and user agents, and a shared proxy or a browser's back-forward cache keeping
-a copy of that is a leak nobody would notice until it mattered. The header is set on the whole
-admin group rather than per handler, so a route added later can't forget it.
+`Cache-Control: no-store` is set on the whole `/api/admin` group, ahead of the token check, so the
+401 from a missing or invalid token carries it as well as the 200s do. These responses hold names,
+emails, message bodies, IP addresses and user agents, and a shared proxy or a browser's
+back-forward cache keeping a copy of that is a leak nobody would notice until it mattered. Setting
+it on the group rather than per handler is what stops a route added later from forgetting it.
 
 ## Serving the site
 
