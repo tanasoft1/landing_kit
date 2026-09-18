@@ -181,8 +181,9 @@ The content security policy is strict for an unrelated reason, and it is the oth
 same story. `contentSecurityPolicy` in `internal/http/routes/headers.go` allows same-origin
 subresources and nothing else, which is correct for the site as generated — every script, style,
 image and font it loads is served from this binary. Add a third-party script (analytics, a chat
-widget), an image or font from a CDN, or an embedded frame, and you have to name that host in the
-matching directive: `script-src`, `img-src`, `font-src` or `frame-src`. Skip that step and the
+widget) or an image or font from a CDN, and you have to name that host in the matching directive:
+`script-src`, `img-src` or `font-src`. Embed a frame and you add a `frame-src` line, because there
+is none today -- frames fall through to `default-src 'self'`. Skip either step and the
 failure looks exactly like the one above — the browser blocks the resource, the server logs
 nothing because it never saw the request, and the only evidence is a CSP violation in the browser
 console.

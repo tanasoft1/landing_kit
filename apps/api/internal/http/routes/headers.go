@@ -36,9 +36,18 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"frame-ancestors 'none'; " +
 	"form-action 'self'"
 
-// hstsValue is two years with subdomains, the usual preload-eligible value. Production only:
-// sending it from a development server over plain HTTP does nothing, and sending it from a
-// staging box on a shared parent domain would pin HTTPS for siblings that may not have it.
+// hstsValue is two years with subdomains, the usual preload-eligible value.
+//
+// Sent for every APP_ENV except development, the same rule the CORS_ORIGINS check in
+// conf/config.go applies and for the same reason: a staging deploy is a real deploy over real
+// HTTPS and worth pinning. Development is excluded because a dev server speaks plain HTTP, where
+// the header does nothing at all.
+//
+// What it costs is worth knowing before the first deploy that sends it. The browser then refuses
+// plain HTTP to this host and to its subdomains for two years after the last response it saw, and
+// backing out means serving max-age=0 until every visitor's cached entry expires -- switching the
+// header off does not undo it. A sibling host is unaffected either way: includeSubDomains reaches
+// a host's own subdomains, never its parent's other children.
 const hstsValue = "max-age=63072000; includeSubDomains"
 
 // securityHeaders sets the headers helmet is not configured for.
