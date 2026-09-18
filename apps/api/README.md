@@ -179,14 +179,19 @@ side; the site just looks broken in the browser for no visible reason.
 
 The content security policy is strict for an unrelated reason, and it is the other half of the
 same story. `contentSecurityPolicy` in `internal/http/routes/headers.go` allows same-origin
-subresources and nothing else, which is correct for the site as generated — every script, style,
-image and font it loads is served from this binary. Add a third-party script (analytics, a chat
-widget) or an image or font from a CDN, and you have to name that host in the matching directive:
-`script-src`, `img-src` or `font-src`. Embed a frame and you add a `frame-src` line, because there
-is none today -- frames fall through to `default-src 'self'`. Skip either step and the
-failure looks exactly like the one above — the browser blocks the resource, the server logs
-nothing because it never saw the request, and the only evidence is a CSP violation in the browser
-console.
+subresources, plus `data:` images, and nothing else. That is correct for the site as generated,
+where every script, style, image and font is served from this binary.
+
+Add a third-party script (analytics, a chat widget) or an image or font from a CDN, and you have
+to name that host in the matching directive: `script-src`, `img-src` or `font-src`. Nearly all of
+them also need `connect-src`, which is the one that catches people out. An analytics snippet loads
+its script from one host and then beacons events back to another, so allowing `script-src` alone
+gets it running and still drops every event it sends. Embed a frame and you add a `frame-src`
+line, because there is none today and frames fall through to `default-src 'self'`.
+
+Skip any of that and the failure looks exactly like the one above — the browser blocks the
+resource, the server logs nothing because it never saw the request, and the only evidence is a CSP
+violation in the browser console.
 
 ## Docker
 
