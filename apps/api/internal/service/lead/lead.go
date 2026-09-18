@@ -87,10 +87,10 @@ func (s *Service) Create(ctx context.Context, in Input) error {
 // internal/http/handlers/lead.Handler.List), because only the caller knows whether limit arrived
 // from a trusted source or an admin-supplied query string.
 //
-// Two queries, not a window function. count(*) over a table this size is trivially cheap, and
-// keeping it separate means the paging query stays the plain LIMIT/OFFSET one with the id
-// tiebreaker its own comment explains. The two reads are not one snapshot, so a lead inserted
-// between them makes Total disagree with len(Items) by however many arrived in that gap. A row
+// Two queries, not a window function. count(*) scans every live row, which is cheap at the scale
+// a contact form fills, and keeping it separate means the paging query stays the plain
+// LIMIT/OFFSET one with the id tiebreaker its own comment explains. The two reads come from
+// different snapshots, so Total can be off by whatever was inserted or deleted between them. A row
 // count shown next to a page of an inbox does not justify a transaction to close that gap.
 func (s *Service) List(ctx context.Context, limit, offset int32) (*models.RsLeadPage, error) {
 	rows, err := s.q.ListLeads(ctx, sqlc.ListLeadsParams{Limit: limit, Offset: offset})
