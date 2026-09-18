@@ -47,7 +47,7 @@
   "api/internal/http/models/auth.go": "d265ad380db88be5d32a2781e5dbc820051debc572de2f6db693c54c1761df6c",
   "api/internal/http/models/error.go": "fc92c1952ffb5e57e08a767b0ad26a1e11b940adfc150e6ac191c933b118d3c3",
   "api/internal/http/models/lead.go": "1f3422ae5eb20a3153db61332a35901ee6284e8922157b758365ff6778121cbb",
-  "api/internal/http/routes/admin.go": "f80c6d84fe5fd0d3c3a3f6ad7529981d73c14fb2a1ac624cc6f6657ba7b3e2ac",
+  "api/internal/http/routes/admin.go": "38d67250c3ded059c41dcebebe5a27c852433bb316f234301f65656e1fa2406b",
   "api/internal/http/routes/public.go": "5e92b64a568b33f4aa1eb840504b24e972a93e385805da502bf09bd24f336597",
   "api/internal/http/routes/routes.go": "55cc09ef68eb1338ea84e44b837f42c801f372d301cdd4950c859e3e7199eee0",
   "api/internal/service/audit/audit.go": "666bd0ad473f3c6b93928ad80030ae50cffac801ad8b9695718be44fd1dae9e4",
