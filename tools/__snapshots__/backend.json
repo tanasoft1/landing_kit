@@ -63,7 +63,7 @@
   "api/internal/service/notify/ses.go": "5a69799fa2d27b2b6e6b3c3fb211d5d16fc5bc48b930f6ed6d00189c1d3fc50f",
   "api/internal/service/services.go": "8f381e7ca19810d0b923c8433d6dc1e1d1b931a9edc5d3cb68fee2e25e999286",
   "api/internal/static/dist/.placeholder": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "api/internal/static/static.go": "e603cdc93096a67c53b358ada27a025a0066ff5d89057c7cb8a476171d1ce053",
+  "api/internal/static/static.go": "d7eee568986ff3e92ee78300470819b62ed7568d18bce8815791616ef274609b",
   "api/internal/static/static_test.go": "9c8c5de85941548b62637916dc90823673255131457b0871585c36ddc23e8230",
   "api/internal/testsupport/db.go": "01bc5e393d1c7d62236e11991a720f5f878375df400aff4bba5e00ad2b9370a8",
   "api/internal/utils/hash.go": "8ac49e28d5448ab949dbc75ddf5ee64dbe7135aa139e59d1c247ff36591e0a5c",
