@@ -49,23 +49,23 @@ const BLOCK_RUNTIME_DEPS = { contact: ['react-hook-form'] }
 /**
  * Runtime, but only when the admin panel was asked for.
  *
- * Same shape as BLOCK_RUNTIME_DEPS above and for the same reason: a project that answered `none`
- * or `api` has no panel, so shipping it Radix and TanStack Table would be thirteen packages it
- * can never import. The CLASSIFIED check below is what keeps this list honest in both
- * directions — a package added to apps/web and left out of here fails the CLI, and one named
- * here but renamed upstream fails it too.
+ * A flat list rather than BLOCK_RUNTIME_DEPS's object, because there is one panel and not one
+ * entry per block, but it exists for the same reason: a project that answered `none` or `api`
+ * has no panel, so shipping it Radix and TanStack Table would be a dozen-odd packages it can
+ * never import. The CLASSIFIED check below is what keeps this list honest in both directions — a
+ * package added to apps/web and left out of here fails the CLI, and one named here but renamed
+ * upstream fails it too.
  *
- * Thirteen and not fourteen because `react-hook-form` is deliberately in both this list and
- * BLOCK_RUNTIME_DEPS.contact, so a contact-block project already has it. The panel's login form
- * needs it whether or not the contact block was selected, and `pickDeps` builds an object, so
- * naming it twice is harmless.
+ * `react-hook-form` is deliberately in both this list and BLOCK_RUNTIME_DEPS.contact, so how many
+ * packages the panel actually adds depends on whether the contact block was picked too. The
+ * panel's login form needs it either way, and `pickDeps` builds an object, so naming it twice is
+ * harmless.
  */
 const ADMIN_RUNTIME_DEPS = [
   '@hookform/resolvers',
   '@radix-ui/react-dialog',
   '@radix-ui/react-dropdown-menu',
   '@radix-ui/react-label',
-  '@radix-ui/react-select',
   '@radix-ui/react-separator',
   '@radix-ui/react-slot',
   '@tanstack/react-table',
@@ -227,9 +227,9 @@ function kitManifest(kitRoot) {
     if (!CLASSIFIED.includes(name)) {
       throw new Error(
         `Kit apps/web/package.json lists '${name}', which cli/generate.mjs does not classify ` +
-          'as runtime, admin-only runtime, build or excluded. Add it to RUNTIME_DEPS, ' +
-          'BLOCK_RUNTIME_DEPS, ADMIN_RUNTIME_DEPS, BUILD_DEPS or EXCLUDED_DEPS — otherwise ' +
-          'every generated project silently goes without it',
+          'as runtime, block-only runtime, admin-only runtime, build or excluded. Add it to ' +
+          'RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, ADMIN_RUNTIME_DEPS, BUILD_DEPS or EXCLUDED_DEPS ' +
+          '— otherwise every generated project silently goes without it',
       )
     }
   }
