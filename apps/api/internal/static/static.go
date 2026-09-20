@@ -97,8 +97,10 @@ func Handler() fiber.Handler {
 		// belongs to the site, and an unknown path below it must reach the site's own Not Found
 		// page rather than the panel's skeleton.
 		if hasAdmin && (path == "/admin" || strings.HasPrefix(path, "/admin/")) {
-			// The panel is never cached and never indexed. Its markup is a skeleton, but a
-			// stale one served after a deploy would hydrate against a mismatched bundle.
+			// Never cached. The markup is only a skeleton, but a stale one served after a
+			// deploy hydrates against a bundle that no longer matches it. Keeping crawlers
+			// out is a separate mechanism and not this line's job: the panel's route carries
+			// its own noindex meta, which a crawler has to fetch the page to read.
 			c.Set(fiber.HeaderCacheControl, "no-store")
 			return adminHandler(c)
 		}
