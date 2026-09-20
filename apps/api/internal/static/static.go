@@ -39,6 +39,16 @@ func HasSite() bool {
 	return err == nil
 }
 
+// HasAdmin reports whether the embedded build includes the admin panel's shell.
+//
+// Checked separately from HasSite because the two are independent: a project scaffolded with
+// --backend=api embeds a site with no panel in it, and mounting an admin fallback that has no
+// admin/index.html to serve would answer every /admin path with a directory miss.
+func HasAdmin() bool {
+	_, err := distFS.Open("dist/admin/index.html")
+	return err == nil
+}
+
 // Handler serves the embedded site. Call only when HasSite reports true: with just the
 // placeholder, dist has no index.html, so filesystem.New would have nothing to fall back to on
 // every request.
@@ -63,9 +73,34 @@ func Handler() fiber.Handler {
 		NotFoundFile: "index.html",
 		Browse:       false,
 	})
+
+	// A second handler with a different fallback, for one reason: the root index.html is the
+	// prerendered HOME PAGE. Falling back to it for /admin/leads paints the hero, then hydrates,
+	// then swaps in the panel -- a flash of the wrong site on every hard load of an admin URL.
+	// admin/index.html is the prerendered panel shell, which renders a skeleton, so the same
+	// fallback shows a loading state instead.
+	adminHandler := filesystem.New(filesystem.Config{
+		Root:         http.FS(sub),
+		NotFoundFile: "admin/index.html",
+		Browse:       false,
+	})
+	// Read once at construction: the embedded filesystem cannot change while the process runs, so
+	// checking it per request would be a wasted Open on the hot path.
+	hasAdmin := HasAdmin()
+
 	return func(c *fiber.Ctx) error {
-		if strings.HasPrefix(c.Path(), "/api") {
+		path := c.Path()
+		if strings.HasPrefix(path, "/api") {
 			return c.Next()
+		}
+		// Matched on whole segments, not as a bare prefix: a site page under /administration/
+		// belongs to the site, and an unknown path below it must reach the site's own Not Found
+		// page rather than the panel's skeleton.
+		if hasAdmin && (path == "/admin" || strings.HasPrefix(path, "/admin/")) {
+			// The panel is never cached and never indexed. Its markup is a skeleton, but a
+			// stale one served after a deploy would hydrate against a mismatched bundle.
+			c.Set(fiber.HeaderCacheControl, "no-store")
+			return adminHandler(c)
 		}
 		return fsHandler(c)
 	}
