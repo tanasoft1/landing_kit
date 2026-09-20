@@ -42,8 +42,8 @@ func HasSite() bool {
 // HasAdmin reports whether the embedded build includes the admin panel's shell.
 //
 // Checked separately from HasSite because the two are independent: a project scaffolded with
-// --backend=api embeds a site with no panel in it, and mounting an admin fallback that has no
-// admin/index.html to serve would answer every /admin path with a directory miss.
+// --backend=api embeds a site with no panel in it, and mounting an admin fallback with no
+// admin/index.html behind it would answer every /admin path with a bare 404.
 func HasAdmin() bool {
 	_, err := distFS.Open("dist/admin/index.html")
 	return err == nil
@@ -98,9 +98,9 @@ func Handler() fiber.Handler {
 		// page rather than the panel's skeleton.
 		if hasAdmin && (path == "/admin" || strings.HasPrefix(path, "/admin/")) {
 			// Never cached. The markup is only a skeleton, but a stale one served after a
-			// deploy hydrates against a bundle that no longer matches it. Keeping crawlers
-			// out is a separate mechanism and not this line's job: the panel's route carries
-			// its own noindex meta, which a crawler has to fetch the page to read.
+			// deploy hydrates against a bundle that no longer matches it. Caching is all this
+			// line does. Whether the panel gets indexed is decided in the frontend's route
+			// head, not by any header here.
 			c.Set(fiber.HeaderCacheControl, "no-store")
 			return adminHandler(c)
 		}
