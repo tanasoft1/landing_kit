@@ -81,7 +81,11 @@ func securityHeaders(isProduction bool) fiber.Handler {
 		// marketing site so an outbound link still carries the origin and ordinary referral
 		// attribution keeps working. The panel gets helmet's stricter value back, because an
 		// admin URL must never reach a third party through a link at all.
-		if strings.HasPrefix(c.Path(), "/admin") {
+		//
+		// Matched on whole segments, the same boundary internal/static uses to pick the panel's
+		// shell. A bare prefix would also catch a site page at /administration and quietly cost
+		// it the referral attribution this branch exists to preserve.
+		if path := c.Path(); path == "/admin" || strings.HasPrefix(path, "/admin/") {
 			c.Set(fiber.HeaderReferrerPolicy, "no-referrer")
 		}
 
