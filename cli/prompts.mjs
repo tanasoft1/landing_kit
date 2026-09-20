@@ -25,7 +25,11 @@ const CHOICES = {
   theme: ['both', 'light', 'dark'],
   preset: ['editorial', 'warm'],
   // 'none' first: `pickChoice` opens on DEFAULTS, and the default must be the first option shown.
-  backend: ['none', 'api'],
+  // 'admin' last because the three are a ladder, not three peers: the panel authenticates against
+  // /api/auth/login and reads /api/admin/leads, so it cannot exist without the API. Modelling it
+  // as a level rather than a separate question is what makes "panel with no backend"
+  // unrepresentable instead of merely rejected.
+  backend: ['none', 'api', 'admin'],
 }
 const DEFAULTS = { pages: 'multi', theme: 'both', preset: 'editorial', backend: 'none' }
 const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset', backend: 'Backend' }
@@ -43,6 +47,7 @@ const HINTS = {
   warm: 'Amber and rounder, with a soft shadow',
   none: 'Static site only',
   api: 'Go service and Postgres, stores contact form submissions',
+  admin: 'The API plus an admin panel for reading leads',
 }
 
 const VARIANT_HINTS = {
