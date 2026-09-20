@@ -34,7 +34,8 @@ Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
   --theme=both|light|dark    Toggle, or pin one palette      (default: both)
   --preset=editorial|warm    Token preset                    (default: editorial)
-  --backend=none|api         Static site, or +Go service     (default: none)
+  --backend=none|api|admin   Static site, +Go service,       (default: none)
+                             +admin panel for reading leads
   --blocks=a,b,c             Blocks to include               (default: all four)
                              Not a free choice — see Blocks below
   --add-blocks=a,b           Blocks of your own, any number  (default: none)

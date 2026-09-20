@@ -22,9 +22,9 @@ import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER, CUSTOM_VARIANT } from './prompts.mj
 // runtime, so nothing it depends on should be downloaded by a `pnpm dlx` that only copies files.
 // A generated project is an app and wants the ordinary split, which is the exact opposite. So the
 // versions come from the kit's manifest — one source of truth, no drift — and the *grouping* comes
-// from the three lists below.
+// from the lists below.
 //
-// Every name in all three lists must exist in the kit's manifest, and every name in the kit's
+// Every name in every list must exist in the kit's manifest, and every name in the kit's
 // manifest must appear in one of them. Both directions matter and they catch different mistakes: a
 // rename upstream would silently drop a dependency from every generated project, and a package
 // ADDED to the kit would silently never reach one. Neither has any other signal.
@@ -45,6 +45,37 @@ const RUNTIME_DEPS = [
 
 /** Runtime, but only when the block that needs it was selected. */
 const BLOCK_RUNTIME_DEPS = { contact: ['react-hook-form'] }
+
+/**
+ * Runtime, but only when the admin panel was asked for.
+ *
+ * Same shape as BLOCK_RUNTIME_DEPS above and for the same reason: a project that answered `none`
+ * or `api` has no panel, so shipping it Radix and TanStack Table would be thirteen packages it
+ * can never import. The CLASSIFIED check below is what keeps this list honest in both
+ * directions — a package added to apps/web and left out of here fails the CLI, and one named
+ * here but renamed upstream fails it too.
+ *
+ * Thirteen and not fourteen because `react-hook-form` is deliberately in both this list and
+ * BLOCK_RUNTIME_DEPS.contact, so a contact-block project already has it. The panel's login form
+ * needs it whether or not the contact block was selected, and `pickDeps` builds an object, so
+ * naming it twice is harmless.
+ */
+const ADMIN_RUNTIME_DEPS = [
+  '@hookform/resolvers',
+  '@radix-ui/react-dialog',
+  '@radix-ui/react-dropdown-menu',
+  '@radix-ui/react-label',
+  '@radix-ui/react-select',
+  '@radix-ui/react-separator',
+  '@radix-ui/react-slot',
+  '@tanstack/react-table',
+  'class-variance-authority',
+  'clsx',
+  'lucide-react',
+  'react-hook-form',
+  'sonner',
+  'tailwind-merge',
+]
 
 /** Needed to build, lint and type-check the project; never bundled. */
 const BUILD_DEPS = [
@@ -67,6 +98,7 @@ const EXCLUDED_DEPS = ['@lhci/cli']
 const CLASSIFIED = [
   ...RUNTIME_DEPS,
   ...Object.values(BLOCK_RUNTIME_DEPS).flat(),
+  ...ADMIN_RUNTIME_DEPS,
   ...BUILD_DEPS,
   ...EXCLUDED_DEPS,
 ]
@@ -195,9 +227,9 @@ function kitManifest(kitRoot) {
     if (!CLASSIFIED.includes(name)) {
       throw new Error(
         `Kit apps/web/package.json lists '${name}', which cli/generate.mjs does not classify ` +
-          'as runtime, build or excluded. Add it to RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, ' +
-          'BUILD_DEPS or EXCLUDED_DEPS — otherwise every generated project silently goes ' +
-          'without it',
+          'as runtime, admin-only runtime, build or excluded. Add it to RUNTIME_DEPS, ' +
+          'BLOCK_RUNTIME_DEPS, ADMIN_RUNTIME_DEPS, BUILD_DEPS or EXCLUDED_DEPS — otherwise ' +
+          'every generated project silently goes without it',
       )
     }
   }
@@ -230,6 +262,8 @@ function packageJson(outDir, answers, { deps }) {
   for (const [block, extra] of Object.entries(BLOCK_RUNTIME_DEPS)) {
     if (answers.blocks.includes(block)) runtime.push(...extra)
   }
+  const hasAdmin = answers.backend === 'admin'
+  if (hasAdmin) runtime.push(...ADMIN_RUNTIME_DEPS)
   const hasBackend = (answers.backend ?? 'none') !== 'none'
   // Chains the binaries directly rather than `pnpm lint && pnpm typecheck && …`. Naming the
   // package manager here would hard-require pnpm: `npm run verify` would die on
