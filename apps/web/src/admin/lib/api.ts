@@ -33,7 +33,21 @@ async function performRefresh(): Promise<boolean> {
     clearSession()
     return false
   }
-  const body = (await res.json()) as Envelope<AuthData>
+  let body: Envelope<AuthData>
+  try {
+    body = (await res.json()) as Envelope<AuthData>
+  } catch {
+    // A 200 that will not parse did not come from the handler: a tunnel, a gateway, or a proxy
+    // answering text/html while the API restarts. There is no token in it, so this is a failed
+    // refresh like any other. Letting the SyntaxError escape instead would fly straight out of
+    // `apiFetch`, past both `clearSession` and the 401 throw, and leave the panel rendering as
+    // signed in while it holds a dead token and 401s on everything it asks for.
+    //
+    // It does not wedge the single flight either: `.finally` below clears the slot on rejection
+    // as well as on resolution.
+    clearSession()
+    return false
+  }
   setSession({ accessToken: body.data.access_token, email: body.data.admin.email })
   return true
 }
@@ -58,8 +72,9 @@ export function refreshSession(): Promise<boolean> {
  * Calls the API and returns the unwrapped `data`.
  *
  * `retry` exists so the 401 path cannot recurse forever, and so callers who must not retry can
- * say so. Login is one: a 401 there means the password was wrong, and refreshing in response
- * would be answering an authentication failure with a credential the caller does not have.
+ * say so. Login is one: a 401 there means the password was wrong, and no refresh turns a wrong
+ * password into a right one. The retry would 401 again for certain, having spent one of the five
+ * refresh attempts the API allows per fifteen minutes and rotated the token for nothing.
  */
 export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(init.headers)
@@ -82,10 +97,26 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     throw new ApiError(401, 'unauthorized', '')
   }
 
-  if (!res.ok) throw await toApiError(res)
+  if (!res.ok) {
+    // Every 401 exit clears the session, not only the refresh-failed one above. A 401 reaching
+    // here is either a caller that asked not to retry, or the retry after a refresh that
+    // succeeded. That second case is the one worth naming: refresh validates the token family,
+    // not the admin row, so deleting the admin between the two calls leaves a valid-looking
+    // refresh and a 401 on the retry. Without this the panel would show the error and carry on
+    // rendering as signed in with a credential the server has stopped honouring.
+    if (res.status === 401) clearSession()
+    throw await toApiError(res)
+  }
 
-  const body = (await res.json()) as Envelope<T>
-  return body.data
+  try {
+    const body = (await res.json()) as Envelope<T>
+    return body.data
+  } catch {
+    // Same case as `performRefresh`: an ok response that will not parse came from something
+    // other than the handler. Callers branch on `ApiError`, so throwing one with the real status
+    // keeps them on a path they have, instead of handing them a `SyntaxError` they do not.
+    throw new ApiError(res.status, 'unknown', '')
+  }
 }
 
 export async function login(email: string, password: string): Promise<void> {
