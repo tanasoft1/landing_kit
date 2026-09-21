@@ -30,6 +30,18 @@ export default defineConfig({
   // static `imports`, which is how the shared `motion` chunk gets discovered too), so the
   // prerendered <head> can `modulepreload` exactly the chunks a given page's blocks need.
   build: { manifest: true },
+  // Development speaks to the API through this origin, so the browser makes no cross-origin
+  // request. Production already works that way: the Go binary serves the site and the API
+  // together. Matching it here is what lets the refresh cookie be SameSite=Strict in both, and
+  // it is why the panel needs no API base URL and the Go CORS config needs no changes.
+  //
+  // changeOrigin stays false on purpose. Rewriting the Host header would put the cookie on a
+  // different domain than the page, and the browser would refuse to send it back.
+  server: {
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: false },
+    },
+  },
   resolve: {
     alias: {
       '@/motion':
