@@ -477,16 +477,15 @@ function viteConfigTs(answers) {
   // builds `answers` by hand rather than through `resolveAnswers`.
   const devProxy =
     (answers.backend ?? 'none') === 'admin'
-      ? `  // Development speaks to the API through this origin, so the browser makes no cross-origin
-  // request. Production already works that way: the Go binary serves the site and the API
-  // together. Matching it here is what lets the refresh cookie be SameSite=Strict in both, and
-  // it is why the panel needs no API base URL and the Go CORS config needs no changes.
+      ? `  // The panel calls the API with relative paths, so this makes development same-origin the way
+  // production already is, where the Go binary serves the site and the API together.
   //
-  // changeOrigin stays false on purpose. Rewriting the Host header would put the cookie on a
-  // different domain than the page, and the browser would refuse to send it back.
+  // Same-origin is what makes \`credentials: 'same-origin'\` enough to send the refresh cookie. It
+  // is also why nothing the panel sends is preflighted, why development needs no entry in the
+  // API's origin allowlist, and why the panel has no base URL to configure.
   server: {
     proxy: {
-      '/api': { target: 'http://localhost:3000', changeOrigin: false },
+      '/api': { target: 'http://localhost:3000' },
     },
   },
 `
