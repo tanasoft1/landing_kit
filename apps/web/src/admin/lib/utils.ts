@@ -8,8 +8,9 @@ import { twMerge } from 'tailwind-merge'
  *
  * Written by hand rather than by the shadcn CLI, which as of 4.21 no longer emits this file: it
  * writes `import { cn } from 'cn'` and installs an npm package by that name instead. This is the
- * file `components.json`'s `utils` alias names, and every component under `src/admin/ui/` imports
- * it, so the one-package dependency is not worth taking.
+ * file `components.json`'s `utils` alias names, and eleven of the twelve components under
+ * `src/admin/ui/` import it -- all but `sonner.tsx`, which composes no class strings -- so the
+ * one-package dependency is not worth taking.
  */
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))

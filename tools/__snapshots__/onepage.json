@@ -62,7 +62,7 @@
   "src/routes/docs.tsx": "64e0b57006fa543baf30a382c4161c7295bd4264789113bce050bdad38e0856c",
   "src/routes/index.tsx": "94e0aa799f91f568dec4d2aee2b0d441db750c49fed5c4ad5a7d97ab8f787933",
   "src/styles/presets/warm.css": "5c912758572517ce43a41d496bdf51802c312137522908f4b991b2298c2c152f",
-  "src/styles/theme.css": "7ac7f7ac251c11f4e7867f7d44538f0015d7860cbb977ce1cbdd66a9be9aa768",
+  "src/styles/theme.css": "1d2b7b5b220518d2d0aacfaf7ab01a6bbe6f02e2ab58ad0fa59a97d3ecd0a2c5",
   "tsconfig.json": "294a03058b48b6c5875233e9717ee38d646d0fbcfb835e2306d10a326ed0737a",
   "vite.config.ts": "5801862f4069053e58fe105557097ca10c7cf3b379fe0950a8b1e24f3cb29868"
 }

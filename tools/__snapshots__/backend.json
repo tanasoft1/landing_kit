@@ -144,7 +144,7 @@
   "src/routes/docs.tsx": "64e0b57006fa543baf30a382c4161c7295bd4264789113bce050bdad38e0856c",
   "src/routes/index.tsx": "94e0aa799f91f568dec4d2aee2b0d441db750c49fed5c4ad5a7d97ab8f787933",
   "src/styles/presets/editorial.css": "d778bcd25027577c226a22be249c6d4698dad13b442afcb65f7ed9752db50db8",
-  "src/styles/theme.css": "7c3424f49fefdb80f24998f20122a02d04637ec82767a222ad4f5d8eb683fc74",
+  "src/styles/theme.css": "de5e7f456fb5ca2675c2f38c7b39b0715889cb5f8ed46cd59e1d12bd207950fb",
   "tsconfig.json": "b6fd400d5a9f977b4a4feebf9709fe63dad4f51054ff40425d7a3a073e8d3735",
   "vite.config.ts": "5801862f4069053e58fe105557097ca10c7cf3b379fe0950a8b1e24f3cb29868"
 }

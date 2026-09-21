@@ -344,7 +344,7 @@ function transformThemeCss(text, answers) {
   // And the paragraph justifying that line goes with it. A comment explaining code that is not
   // there is worse than no comment: the next reader looks for the `@source` it describes, does not
   // find it, and has to work out which of the two is wrong.
-  return replaceExactText(
+  let out = replaceExactText(
     lines.join('\n'),
     file,
     '   here: `.css` is outside the globs below.)\n\n' +
@@ -352,6 +352,32 @@ function transformThemeCss(text, answers) {
       'lose\n   styles from a config that renders a class. */',
     '   here: `.css` is outside the globs below.) */',
   )
+  // Same rule again for the shadcn token block: this file ships to every project, and the
+  // paragraph above those nine aliases explains them by reference to an admin panel a project on
+  // `none` or `api` does not have. The aliases themselves stay — they cost nothing, which is what
+  // the shortened version says — but a reader should not have to work out what panel they are
+  // being told about.
+  if (answers.backend !== 'admin') {
+    out = replaceExactText(
+      out,
+      `${file} (shadcn token block)`,
+      `  /* Names shadcn/ui's components use, aliased onto tokens the presets already define rather than
+     given values of their own. A new colour would need its own contrast measurement in both
+     presets and both themes, and the panel has no surface the existing palette does not cover.
+     Aliasing here rather than in each preset also leaves the preset files, and the conventions
+     rule that checks their token surface is complete, untouched.
+
+     These cost a non-admin project nothing at build time: with \`source(none)\` and the @source
+     glob above, Tailwind only emits a utility some file actually uses, and a project with no
+     panel has no file using them. */`,
+      `  /* Names shadcn/ui's components use, aliased onto tokens the presets already define rather than
+     given values of their own, so adding a shadcn component needs no palette work first.
+
+     Nothing in this project uses them yet, and that costs nothing: with \`source(none)\` and the
+     @source glob above, Tailwind only emits a utility some file actually renders. */`,
+    )
+  }
+  return out
 }
 
 // --- src/components/docs/config-reference.tsx ---------------------------------------------------
@@ -505,11 +531,16 @@ function transformBiomeJson(text) {
 // live and pointing them anywhere else would scatter the panel across two trees. A project without
 // the panel has no `src/admin`, so shipping those aliases unchanged would hand it a config whose
 // every path is a directory it does not have: `pnpm dlx shadcn add button` there writes
-// `src/admin/ui/button.tsx` importing `@/admin/lib/utils`, and creates an admin-shaped tree in a
-// project that never asked for one.
+// `src/admin/ui/button.tsx`, building an admin-shaped tree in a project that never asked for one.
 //
-// Reverted to shadcn's own defaults rather than dropped, so a non-admin project can still add a
-// component and have it land somewhere sensible.
+// Reverted to shadcn's own defaults rather than dropped, which restores exactly what shipped
+// before the panel existed. Be aware of what that destination is: `check-conventions.mjs` walks
+// `src/components`, and shadcn's components fail it -- every `cn('...', className)` call trips the
+// "inline the classes or use a literal" rule, and `sheet.tsx` also uses a bracket value. So a
+// non-admin project that adds a component has to either inline those classes or widen the
+// checker. That is this kit's pre-existing stance on `src/components`, not something the panel
+// introduced, and quietly relocating the aliases somewhere the checker does not look would hide
+// it rather than settle it.
 function transformComponentsJson(text, answers) {
   if (answers.backend === 'admin') return text
   return replaceExactText(
@@ -617,8 +648,13 @@ function copyInto(kitRoot, outDir, answers) {
 
   // The panel's own tree, and only for the answer that asked for it. A project on `api` or `none`
   // gets no `src/admin` at all — not an empty one, and not one whose imports resolve to packages
-  // `cli/generate.mjs` deliberately left out of its `package.json`. The package gate and this one
-  // are halves of the same promise, and either alone would break the project it half-applied to.
+  // `cli/generate.mjs` deliberately left out of its `package.json`.
+  //
+  // This gate and the package gate fail differently, and only this one is fatal. Without it a
+  // non-admin project carries `src/admin` importing thirteen packages its `package.json` does not
+  // list, and both `tsc` and `vite build` stop. Without the package gate it installs thirteen
+  // packages nothing imports, which is waste the list in `cli/generate.mjs` argues against but
+  // still builds and runs.
   if (answers.backend === 'admin') {
     for (const dir of ADMIN_COPY_DIRS) copyTree(kitRoot, outDir, dir, written, keep)
   }
