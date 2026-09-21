@@ -60,6 +60,25 @@
   --color-destructive: var(--c-destructive);
   --color-success: var(--c-success);
 
+  /* Names shadcn/ui's components use, aliased onto tokens the presets already define rather than
+     given values of their own. A new colour would need its own contrast measurement in both
+     presets and both themes, and the panel has no surface the existing palette does not cover.
+     Aliasing here rather than in each preset also leaves the preset files, and the conventions
+     rule that checks their token surface is complete, untouched.
+
+     These cost a non-admin project nothing at build time: with `source(none)` and the @source
+     glob above, Tailwind only emits a utility some file actually uses, and a project with no
+     panel has no file using them. */
+  --color-card: var(--c-background);
+  --color-card-foreground: var(--c-foreground);
+  --color-popover: var(--c-background);
+  --color-popover-foreground: var(--c-foreground);
+  --color-secondary: var(--c-muted);
+  --color-secondary-foreground: var(--c-foreground);
+  --color-accent-foreground: var(--c-foreground);
+  --color-input: var(--c-border);
+  --color-destructive-foreground: var(--c-primary-foreground);
+
   --font-display: var(--face-display);
   --font-body: var(--face-body);
 
