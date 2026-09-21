@@ -8,9 +8,15 @@ export type Session = {
 /**
  * A single frozen empty value, not a fresh object each time.
  *
- * `useSyncExternalStore` compares snapshots by reference and re-renders when they differ. A
- * getter that built `{ accessToken: null, email: null }` on every call would return a new
- * reference every time React checked, which React reads as "changed again" and loops forever.
+ * Single, because `useSyncExternalStore` compares snapshots with `Object.is` and re-renders when
+ * they differ. For an object that is a reference comparison, so a getter that built
+ * `{ accessToken: null, email: null }` on every call would hand React a new reference every time
+ * it checked. React 19 warns that `getSnapshot` should be cached and then throws "Maximum update
+ * depth exceeded".
+ *
+ * Frozen, because both `state` and `clearSession` point at this one object. Without the freeze a
+ * caller that wrote `session.accessToken = 'x'` would corrupt the empty session for every
+ * consumer that reads it afterwards.
  */
 const EMPTY: Session = Object.freeze({ accessToken: null, email: null })
 
@@ -26,7 +32,11 @@ let state: Session = EMPTY
 const listeners = new Set<() => void>()
 
 function emit(): void {
-  for (const listener of listeners) listener()
+  // Iterate a copy, not the live Set. A listener that unsubscribes and resubscribes inside its own
+  // handler is visited again by a live-Set iteration and spins. Nothing does that today, because
+  // React schedules work rather than resubscribing from a notification; the copy is what keeps
+  // that from becoming a hang if a non-React subscriber ever does.
+  for (const listener of [...listeners]) listener()
 }
 
 export function getSession(): Session {
@@ -34,12 +44,13 @@ export function getSession(): Session {
 }
 
 /**
- * The snapshot React uses while server-rendering.
+ * The snapshot React uses when it server-renders, and again on the client when it hydrates.
  *
- * Separate from `getSession` and always empty, because `state` is module-level and a server
- * process shares it across every render it performs. Today `/admin` is prerendered once with no
- * session, so the two would agree anyway; this keeps them agreeing if the panel is ever rendered
- * per request.
+ * Not only a server concern, which is why this cannot be deleted as a duplicate of `getSession`.
+ * React calls `getServerSnapshot` for the hydrating render too, so this is what guarantees the
+ * panel's first client render is empty whatever `state` already holds. On the server it matters
+ * for a second reason: `state` is module-level, so one process shares it across every render it
+ * performs, and a getter reading it would leak one request's session into another's HTML.
  */
 function getServerSession(): Session {
   return EMPTY
