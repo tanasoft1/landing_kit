@@ -476,9 +476,11 @@ empty or shorter-than-32-character secret whenever `APP_ENV` is not `development
 asymmetry applies to `CORS_ORIGINS`, whose development default is refused outside development,
 because a deploy that forgets it boots cleanly, answers `/api/health` with 200, and drops every real
 submission at preflight with no server-side log line at all. A `*` entry in `CORS_ORIGINS` is
-refused everywhere instead, development included, because the admin session cookie rides on
-credentialed CORS and a wildcard origin on a credentialed response is both invalid per the spec and
-a handout of any logged-in admin session to any site the browser visits.
+refused everywhere instead, development included, because a wildcard origin on a credentialed
+response is both invalid per the spec and, for any deployment that did put a session cookie on
+credentialed CORS, a handout of that session to every site the browser visits. Nothing the kit
+generates is such a deployment today, which is why this reads as a consequence rather than a
+description of the panel.
 
 ## 7. Data model
 
