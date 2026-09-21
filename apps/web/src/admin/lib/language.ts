@@ -11,18 +11,20 @@ const isLanguage = (value: unknown): value is PanelLanguage => value === 'mn' ||
 /**
  * The default, used for the very first render on both the server and the client.
  *
- * Deliberately NOT read from localStorage here. TanStack Start server-renders this route per
- * request, so a module that initialised itself from storage would produce one language in the
+ * Deliberately NOT read from localStorage here. The panel's first HTML is produced where no
+ * browser storage exists — per request on the server, or at build time once the panel is
+ * prerendered — so a module that initialised itself from storage would put one language in that
  * HTML and possibly another once the client took over, and React would report a hydration
- * mismatch. `loadStoredLanguage` below applies the stored preference after mount instead, which
+ * mismatch. Neither rendering mode escapes it, which is why this says nothing about which one is
+ * in use. `loadStoredLanguage` below applies the stored preference after mount instead, which
  * costs at most one frame in the wrong language.
  *
  * Assigned straight from the config, with no guard. `PanelLanguage` and `Locale` are separate
  * types answering different questions, but they hold the same members, so a project that widens
- * `Locale` gets a type error on this line saying the panel has no dictionary for the new
- * language. That is the point. It fails loudly alongside the other "add your new locale" errors
- * that widening raises across the blocks and page configs, rather than silently falling back to
- * Mongolian with no signal.
+ * `Locale` gets a type error on this line — `Locale` is no longer assignable to `PanelLanguage`,
+ * which is the panel saying it has no dictionary for the new language. That is the point. It
+ * fails loudly alongside the other "add your new locale" errors that widening raises across the
+ * blocks and page configs, rather than silently falling back to Mongolian with no signal.
  */
 let state: PanelLanguage = site.defaultLocale
 
