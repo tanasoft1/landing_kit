@@ -462,7 +462,36 @@ function assertDockerComposeMatchesKit(kitRoot, generated) {
 // implementation per boundary, so every branch the kit's own vite.config.ts carries has already
 // been decided by the answers. The comments that survive are the ones explaining a decision the
 // code cannot explain itself.
-function viteConfigTs() {
+function viteConfigTs(answers) {
+  // The dev proxy is gated on `admin`, not on "has a backend". The panel's API client calls
+  // relative paths (`/api/...`), so development has to be same-origin with production for its
+  // refresh cookie to stay SameSite=Strict in both.
+  //
+  // `--backend=api` deliberately gets no proxy. That project's contact form posts to an absolute
+  // `VITE_CONTACT_ENDPOINT` (src/integrations/submit.endpoint.ts) and reaches Fiber through CORS,
+  // which already works. Adding a proxy would silently change what a relative value in that
+  // variable means for someone who has already set one. The omission is a decision, not an
+  // oversight.
+  //
+  // `?? 'none'` for the same reason as the rest of this file: belt-and-braces for a caller that
+  // builds `answers` by hand rather than through `resolveAnswers`.
+  const devProxy =
+    (answers.backend ?? 'none') === 'admin'
+      ? `  // Development speaks to the API through this origin, so the browser makes no cross-origin
+  // request. Production already works that way: the Go binary serves the site and the API
+  // together. Matching it here is what lets the refresh cookie be SameSite=Strict in both, and
+  // it is why the panel needs no API base URL and the Go CORS config needs no changes.
+  //
+  // changeOrigin stays false on purpose. Rewriting the Host header would put the cookie on a
+  // different domain than the page, and the browser would refuse to send it back.
+  server: {
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: false },
+    },
+  },
+`
+      : ''
+
   return `import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
@@ -481,7 +510,7 @@ export default defineConfig({
   // maps each block's \`variants.ts\` to its built chunk, so the prerendered <head> can
   // modulepreload exactly the chunks a page's blocks need.
   build: { manifest: true },
-  resolve: {
+${devProxy}  resolve: {
     alias: {
       '@/motion': r('./src/integrations/motion.animated.tsx'),
       // Read from the config, not frozen at scaffold time: changing \`theme.mode\` in
@@ -1193,7 +1222,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
     ['package.json', packageJson(outDir, answers, manifest)],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
     ['.gitignore', hasBackend ? GITIGNORE + API_STATIC_DIST_GITIGNORE : GITIGNORE],
-    ['vite.config.ts', viteConfigTs()],
+    ['vite.config.ts', viteConfigTs(answers)],
     ['tsconfig.json', tsconfig],
     ['src/blocks/registry.ts', registryTs(answers)],
     ['src/blocks/block-modules.ts', blockModulesTs(answers)],
