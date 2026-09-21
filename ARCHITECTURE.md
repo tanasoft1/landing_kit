@@ -462,11 +462,14 @@ Eight properties of this path are deliberate and easy to undo by accident:
   `Authorization` header no cross-site form can set. `Secure` comes off only under
   `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all over
   plain HTTP.
-- **The cookie only crosses origins because CORS allows credentials.** `cors.Config` sets
-  `AllowCredentials: true`, without which a browser would refuse to store the `Set-Cookie` and
-  refuse to send it back, breaking login, refresh and logout for the Vite dev server on `:5173`
-  talking to the API on `:3000`. Topology C below is same-origin and would never notice. The cost
-  is that `CORS_ORIGINS` can no longer be a wildcard, which `conf.Load` now refuses.
+- **A cross-origin panel would need `AllowCredentials`, and nothing the kit generates is one.**
+  `cors.Config` sets `AllowCredentials: true`, without which a browser refuses to store a
+  `Set-Cookie` from a cross-origin response and refuses to send it back. The panel never takes
+  that path: it reaches the API through Vite's `/api` proxy in development
+  (`apps/web/vite.config.ts`) and through the single binary in production, so it is same-origin in
+  both, and a `--backend=api` project's contact form carries no cookies at all. The setting is
+  there for a deployment that serves the panel from a different origin than the API. The cost is
+  that `CORS_ORIGINS` can no longer be a wildcard, which `conf.Load` now refuses.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same

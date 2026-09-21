@@ -564,9 +564,11 @@ plus `ca-certificates` (SES calls over TLS) and `tzdata`. Neither toolchain reac
 `docker-compose.yml`'s `api` service depends on `db` with `condition: service_healthy`, because the
 migrate-on-startup call in `cmd/main.go`'s `run()` would otherwise race Postgres's own startup on the
 container's first boot. Inside that one container the site and the API share one origin, so
-`CORS_ORIGINS` has far less to do than in local development, where the Vite dev server and this API
-are two different origins — a request from the served site to its own `/api/leads` is same-origin
-and never goes through CORS at all.
+`CORS_ORIGINS` has far less to do than in the local development of a `--backend=api` project, where
+the Vite dev server and this API are two different origins. A `--backend=admin` project is not in
+that position: its `vite.config.ts` proxies `/api` here, so the panel is same-origin in development
+too. Either way, a request from the served site to its own `/api/leads` is same-origin and never
+goes through CORS at all.
 
 Two scaffolder gaps surfaced when `apps/api/internal/static/` and the `api` compose service were
 added, both in `cli/`, not `apps/api/`: `cli/kit-manifest.mjs`'s `NEVER_COPY_ANYWHERE` refuses any
