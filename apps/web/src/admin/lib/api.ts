@@ -33,22 +33,25 @@ async function performRefresh(): Promise<boolean> {
     clearSession()
     return false
   }
-  let body: Envelope<AuthData>
   try {
-    body = (await res.json()) as Envelope<AuthData>
+    const body = (await res.json()) as Envelope<AuthData>
+    setSession({ accessToken: body.data.access_token, email: body.data.admin.email })
   } catch {
-    // A 200 that will not parse did not come from the handler: a tunnel, a gateway, or a proxy
-    // answering text/html while the API restarts. There is no token in it, so this is a failed
-    // refresh like any other. Letting the SyntaxError escape instead would fly straight out of
-    // `apiFetch`, past both `clearSession` and the 401 throw, and leave the panel rendering as
-    // signed in while it holds a dead token and 401s on everything it asks for.
+    // A 200 that did not come from the handler: a tunnel, a gateway, or a proxy answering
+    // text/html while the API restarts. There is no token in it, so this is a failed refresh like
+    // any other. Letting the error escape instead would fly straight out of `apiFetch`, past both
+    // `clearSession` and the 401 throw, and leave the panel rendering as signed in while it holds
+    // a dead token and 401s on everything it asks for.
     //
-    // It does not wedge the single flight either: `.finally` below clears the slot on rejection
-    // as well as on resolution.
+    // `setSession` is inside the try, not after it, because unparseable and unusable are the same
+    // failure. A body of `null` or `{}` parses fine and then throws a TypeError on `body.data`,
+    // which would escape by exactly the route the catch exists to close.
+    //
+    // None of this wedges the single flight: `.finally` below clears the slot on rejection as
+    // well as on resolution.
     clearSession()
     return false
   }
-  setSession({ accessToken: body.data.access_token, email: body.data.admin.email })
   return true
 }
 
@@ -98,12 +101,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
   }
 
   if (!res.ok) {
-    // Every 401 exit clears the session, not only the refresh-failed one above. A 401 reaching
-    // here is either a caller that asked not to retry, or the retry after a refresh that
-    // succeeded. That second case is the one worth naming: refresh validates the token family,
-    // not the admin row, so deleting the admin between the two calls leaves a valid-looking
-    // refresh and a 401 on the retry. Without this the panel would show the error and carry on
-    // rendering as signed in with a credential the server has stopped honouring.
+    // Every 401 exit clears the session, not only the refresh-failed one above. A 401 we will not
+    // retry means the credential is not working, and clearing beats rendering as signed in while
+    // every request fails.
+    //
+    // In practice this reaches the `retry = false` callers, which today are `login` and `logout`.
+    // On the login screen the session is already empty, so nothing observable changes there. The
+    // line is here so the rule holds for whatever calls with `retry = false` next.
     if (res.status === 401) clearSession()
     throw await toApiError(res)
   }

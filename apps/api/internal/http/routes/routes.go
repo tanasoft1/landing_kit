@@ -43,10 +43,12 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 		// What this buys: the admin refresh token lives in a cookie (see
 		// internal/http/handlers/auth/cookie.go), and a browser neither stores nor sends a cookie
 		// on a cross-origin request unless the response says
-		// Access-Control-Allow-Credentials: true. The admin panel is no longer such a client: it
-		// reaches this API through Vite's /api proxy (apps/web/vite.config.ts), so development is
-		// same-origin, the way a deployment serving the site and the API from one binary already
-		// is.
+		// Access-Control-Allow-Credentials: true. Nothing the kit itself generates is such a
+		// client any more: the panel reaches this API through Vite's /api proxy
+		// (apps/web/vite.config.ts) in development and through the one binary in production, so it
+		// is same-origin both times, and a --backend=api project's contact form posts no cookies
+		// at all. This is here for the deployment that serves the panel from a different origin
+		// than the API, which nothing in this repo does but nothing in this repo forbids either.
 		//
 		// What this forbids: the origin allowlist can never be "*". A credentialed request
 		// honoured from any origin would hand a logged-in admin session to every site a browser

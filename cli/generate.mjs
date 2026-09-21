@@ -464,8 +464,10 @@ function assertDockerComposeMatchesKit(kitRoot, generated) {
 // code cannot explain itself.
 function viteConfigTs(answers) {
   // The dev proxy is gated on `admin`, not on "has a backend". The panel's API client calls
-  // relative paths (`/api/...`), so development has to be same-origin with production for its
-  // refresh cookie to stay SameSite=Strict in both.
+  // relative paths (`/api/...`), and in production the Go binary serves the site and the API
+  // together, so those paths resolve. Development has no such server, and the proxy is what
+  // gives it the same origin: `credentials: 'same-origin'` is then enough to send the refresh
+  // cookie, nothing is preflighted, and there is no allowlist entry or base URL to keep in sync.
   //
   // `--backend=api` deliberately gets no proxy. That project's contact form posts to an absolute
   // `VITE_CONTACT_ENDPOINT` (src/integrations/submit.endpoint.ts) and reaches Fiber through CORS,
