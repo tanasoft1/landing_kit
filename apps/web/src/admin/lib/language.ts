@@ -5,28 +5,26 @@ export type PanelLanguage = 'mn' | 'en'
 
 const STORAGE_KEY = 'kit-admin-lang'
 
-/**
- * Narrows to a language the panel actually has a dictionary for.
- *
- * Not redundant, even though `site.defaultLocale` is typed `Locale` and `Locale` is the same
- * union as `PanelLanguage` today. The two types answer different questions: `PanelLanguage` is
- * the set of languages the panel ships strings for, `Locale` is the set of languages the site is
- * published in. They coincide by accident, not by rule. A project that adds a third locale
- * widens `Locale` and, without this guard, would hand `useT` a key `DICTIONARIES` has no entry
- * for — a crash at the first render of the panel. Keep the guard and its `'mn'` fallback, and do
- * not merge the two types.
- */
+/** Narrows a value of unknown provenance to a language the panel has a dictionary for. */
 const isLanguage = (value: unknown): value is PanelLanguage => value === 'mn' || value === 'en'
 
 /**
  * The default, used for the very first render on both the server and the client.
  *
- * Deliberately NOT read from localStorage here. The panel shell is prerendered, so a module that
- * initialised itself from storage would render one language on the server and possibly another
- * on the client, and React would report a hydration mismatch. `loadStoredLanguage` below applies
- * the stored preference after mount instead, which costs at most one frame in the wrong language.
+ * Deliberately NOT read from localStorage here. TanStack Start server-renders this route per
+ * request, so a module that initialised itself from storage would produce one language in the
+ * HTML and possibly another once the client took over, and React would report a hydration
+ * mismatch. `loadStoredLanguage` below applies the stored preference after mount instead, which
+ * costs at most one frame in the wrong language.
+ *
+ * Assigned straight from the config, with no guard. `PanelLanguage` and `Locale` are separate
+ * types answering different questions, but they hold the same members, so a project that widens
+ * `Locale` gets a type error on this line saying the panel has no dictionary for the new
+ * language. That is the point. It fails loudly alongside the other "add your new locale" errors
+ * that widening raises across the blocks and page configs, rather than silently falling back to
+ * Mongolian with no signal.
  */
-let state: PanelLanguage = isLanguage(site.defaultLocale) ? site.defaultLocale : 'mn'
+let state: PanelLanguage = site.defaultLocale
 
 const listeners = new Set<() => void>()
 
@@ -43,7 +41,8 @@ export function setLanguage(next: PanelLanguage): void {
     // language for this tab; only remembering it fails, and that is not worth an error to a user
     // who just clicked a language toggle.
   }
-  for (const listener of listeners) listener()
+  // Iterate a copy. See the note in session.ts's emit.
+  for (const listener of [...listeners]) listener()
 }
 
 /**
@@ -51,13 +50,21 @@ export function setLanguage(next: PanelLanguage): void {
  *
  * Split from module initialisation so the first render is identical on the server and the
  * client. See the comment on `state` above.
+ *
+ * `isLanguage` is load-bearing here, and only here. `localStorage.getItem` returns
+ * `string | null` and no type can promise more, because the value was written by an earlier
+ * version of this code on someone's machine. Suppose a project adds a third locale with a
+ * dictionary, a user picks it, and `kit-admin-lang` now holds that value; the project later drops
+ * the locale. The next load reads the stale value back, `DICTIONARIES[stale]` is `undefined`, and
+ * the first `t.panelTitle` throws. The guard turns that into the default language. Storage is the
+ * untrusted input, not site.config.ts.
  */
 export function loadStoredLanguage(): void {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (isLanguage(stored) && stored !== state) {
       state = stored
-      for (const listener of listeners) listener()
+      for (const listener of [...listeners]) listener()
     }
   } catch {
     // Same reasoning as setLanguage: unreadable storage means the default, not a failure.

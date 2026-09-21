@@ -4,8 +4,7 @@ import type { mn } from './mn'
  * `satisfies Record<keyof typeof mn, string>` rather than a plain object.
  *
  * A key added to mn.ts and forgotten here is then a type error on this line, instead of a blank
- * label nobody notices until someone switches the panel to English. The import is type-only, so
- * this does not pull the Mongolian dictionary into the English bundle path.
+ * label nobody notices until someone switches the panel to English.
  */
 export const en = {
   panelTitle: 'Admin',

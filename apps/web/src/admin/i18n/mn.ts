@@ -2,8 +2,8 @@
  * Every string the panel renders. Flat and keyed, not nested, so `keyof typeof mn` is the whole
  * surface and `en.ts` can be pinned to it.
  *
- * Ranges and counts are composed from numbers at the call site rather than templated here, so
- * this file needs no interpolation machinery for one label.
+ * Every value is a finished string. Where a label needs a number in it, the call site composes
+ * the two, so this file carries no placeholders and needs no interpolation machinery.
  */
 export const mn = {
   panelTitle: 'Удирдлага',

@@ -8,7 +8,7 @@ const DICTIONARIES = { mn, en }
  * Returns the active dictionary, so callers write `t.signIn` rather than `t('signIn')`.
  *
  * An object rather than a lookup function on purpose: both dictionaries are module-level
- * constants, so the returned reference is stable between language changes and a component that
+ * constants, so the returned reference is stable until the language changes and a component that
  * memoises on `t` is not invalidated on every render.
  */
 export function useT(): typeof mn {
