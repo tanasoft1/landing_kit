@@ -69,7 +69,6 @@ export const COPY_FILES = [
   'src/blocks/variant-registry.ts',
   'scripts/check-conventions.mjs',
   'scripts/verify-build.mjs',
-  'components.json',
 ]
 
 // Chosen by answers; the unchosen half is never copied. A generated project ships exactly one
