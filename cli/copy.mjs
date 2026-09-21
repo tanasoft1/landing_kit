@@ -501,8 +501,40 @@ function transformBiomeJson(text) {
   return out
 }
 
+// shadcn's aliases point at `src/admin`, because in this kit that is where the panel's primitives
+// live and pointing them anywhere else would scatter the panel across two trees. A project without
+// the panel has no `src/admin`, so shipping those aliases unchanged would hand it a config whose
+// every path is a directory it does not have: `pnpm dlx shadcn add button` there writes
+// `src/admin/ui/button.tsx` importing `@/admin/lib/utils`, and creates an admin-shaped tree in a
+// project that never asked for one.
+//
+// Reverted to shadcn's own defaults rather than dropped, so a non-admin project can still add a
+// component and have it land somewhere sensible.
+function transformComponentsJson(text, answers) {
+  if (answers.backend === 'admin') return text
+  return replaceExactText(
+    text,
+    'components.json (aliases)',
+    `  "aliases": {
+    "components": "@/admin",
+    "utils": "@/admin/lib/utils",
+    "ui": "@/admin/ui",
+    "lib": "@/admin/lib",
+    "hooks": "@/admin/hooks"
+  }`,
+    `  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  }`,
+  )
+}
+
 const TRANSFORMS = {
   'README.md': transformReadme,
+  'components.json': transformComponentsJson,
   'src/styles/theme.css': transformThemeCss,
   'src/components/docs/config-reference.tsx': transformConfigReference,
   'src/integrations/motion.animated.tsx': transformMotionAnimated,
