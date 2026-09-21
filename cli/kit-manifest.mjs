@@ -96,6 +96,7 @@ export const BOUNDARY_FILES = {
 // the kit's own wording about them is already true in a generated project.
 export const TRANSFORMED_FILES = [
   'README.md',
+  'components.json',
   'src/styles/theme.css',
   'src/components/docs/config-reference.tsx',
   'src/integrations/motion.animated.tsx',

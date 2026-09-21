@@ -74,7 +74,7 @@
   "api/makefile": "4ded41505e58668c441a0150ea7af7c5bc19dd6f18c151bd0f6680a6730b3340",
   "api/sqlc.yaml": "6d85aaa2a7e6569b3fa919c291da725cfd6b590a701a7a55228c3222196024bf",
   "biome.json": "8c9d7e9542ede8aa223f9e1ff65797bada0300c40cf019cb7169edae3d87a4ea",
-  "components.json": "b61382bf67ba7afa54900407cbdcf3d66fb23d34a042725bd1bd4094c932e16b",
+  "components.json": "84122977f34023fc4ed74a89c5a3b16f4ec4ea6ab1e07579c8a8088766435171",
   "docker-compose.yml": "3f8afb38aab28bedcff7615a861c8e0d6b8f5176d4206e661f0b88fcd813146d",
   "package.json": "56725e1e3f80f6981b90e79e0c258d7d39912c8b566c84462df30ea208852d0c",
   "pnpm-workspace.yaml": "595366adf04a45d7e1745ddea800aaad3288f54da96ddbedc6d31a2a8808ae36",
