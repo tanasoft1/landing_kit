@@ -3,7 +3,7 @@
   ".kit/scaffold.json": "67f70ad76991523f179f42c18bfec20d2640b52b825abaafc9463ba994d6de16",
   "README.md": "8f7662a52469b28eab2b867aafe66094967e5f2a18e6b8cd29ce8628bbbf2dfe",
   "biome.json": "8c9d7e9542ede8aa223f9e1ff65797bada0300c40cf019cb7169edae3d87a4ea",
-  "components.json": "84122977f34023fc4ed74a89c5a3b16f4ec4ea6ab1e07579c8a8088766435171",
+  "components.json": "b61382bf67ba7afa54900407cbdcf3d66fb23d34a042725bd1bd4094c932e16b",
   "package.json": "d5667c2b444afa8f0ede14793afe89336aece7db96f4b1c6d50b2bda3a9c0f67",
   "pnpm-workspace.yaml": "595366adf04a45d7e1745ddea800aaad3288f54da96ddbedc6d31a2a8808ae36",
   "public/hero.jpg": "d4fe6fd5f2d4619f0d57e68d8a853aced8fb40886384646d5a47e76b81c2190d",
@@ -62,7 +62,7 @@
   "src/routes/docs.tsx": "64e0b57006fa543baf30a382c4161c7295bd4264789113bce050bdad38e0856c",
   "src/routes/index.tsx": "94e0aa799f91f568dec4d2aee2b0d441db750c49fed5c4ad5a7d97ab8f787933",
   "src/styles/presets/editorial.css": "d778bcd25027577c226a22be249c6d4698dad13b442afcb65f7ed9752db50db8",
-  "src/styles/theme.css": "115b709ce25dc8a955e30672dec83ea0f645650d6d1522c89fe525399dfe67b4",
+  "src/styles/theme.css": "7c3424f49fefdb80f24998f20122a02d04637ec82767a222ad4f5d8eb683fc74",
   "tsconfig.json": "294a03058b48b6c5875233e9717ee38d646d0fbcfb835e2306d10a326ed0737a",
   "vite.config.ts": "5801862f4069053e58fe105557097ca10c7cf3b379fe0950a8b1e24f3cb29868"
 }

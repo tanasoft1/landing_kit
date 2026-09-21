@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
+  ADMIN_COPY_DIRS,
   API_COPY_DIRS,
   API_COPY_FILES,
   API_DEST,
@@ -580,6 +581,14 @@ function copyInto(kitRoot, outDir, answers) {
   // The filter above cannot tell "no such preset" from "filtered everything out" on its own.
   if (!written.includes(presetFile)) {
     throw new Error(`Kit has no preset '${answers.preset}' — ${presetFile} is missing`)
+  }
+
+  // The panel's own tree, and only for the answer that asked for it. A project on `api` or `none`
+  // gets no `src/admin` at all — not an empty one, and not one whose imports resolve to packages
+  // `cli/generate.mjs` deliberately left out of its `package.json`. The package gate and this one
+  // are halves of the same promise, and either alone would break the project it half-applied to.
+  if (answers.backend === 'admin') {
+    for (const dir of ADMIN_COPY_DIRS) copyTree(kitRoot, outDir, dir, written, keep)
   }
 
   // Every copy path is composed with `keep`, not just the tree walk. A transformed file reached

@@ -48,6 +48,11 @@ export const COPY_DIRS = [
   'public',
 ]
 
+// Copied recursively, and only when the answer is `backend=admin`. A separate list from COPY_DIRS
+// rather than a filter on it, because the difference is not which files inside a directory
+// survive (that is what PRESET_DIR does) but whether the directory is copied at all.
+export const ADMIN_COPY_DIRS = ['src/admin']
+
 // Copied verbatim, individually.
 export const COPY_FILES = [
   'src/app/client.tsx',
