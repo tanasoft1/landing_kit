@@ -106,6 +106,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     // every request fails.
     //
     // In practice this reaches the `retry = false` callers, which today are `login` and `logout`.
+    // The retry above passes `false` too, but it cannot arrive here: it carries a token minted
+    // seconds earlier, and `AuthMiddleware` validates that token and looks nothing up.
     // On the login screen the session is already empty, so nothing observable changes there. The
     // line is here so the rule holds for whatever calls with `retry = false` next.
     if (res.status === 401) clearSession()
