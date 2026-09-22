@@ -73,15 +73,20 @@ if (site === URL_PLACEHOLDER) {
 // the sitemap, and carries `noindex` instead (check-conventions.mjs enforces that half). Listing
 // the directory by name rather than its contents is on purpose — the routes inside it are an SPA
 // that grows, and a rule demanding a pages.config.ts entry per admin screen would be wrong for
-// every one of them. Both entries are simply absent in a project that declined the panel, and a
-// `readdirSync` loop needs nothing said about that.
+// every one of them.
+//
+// Both names are allowed only when the panel is really here. This script ships to every generated
+// project verbatim, so it cannot read the scaffold answers, but `src/admin/` is the panel's own
+// tree and its presence answers the same question. Without that test a project that declined the
+// panel would silently accept any hand-added route filed under `src/routes/admin/` — the exact
+// stray page this rule exists to catch.
+const HAS_PANEL = existsSync('src/admin')
 const ALLOWED_ROUTE_FILES = new Set([
   '__root.tsx',
   'index.tsx',
   '$.tsx',
   'docs.tsx',
-  'admin.tsx',
-  'admin',
+  ...(HAS_PANEL ? ['admin.tsx', 'admin'] : []),
 ])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {

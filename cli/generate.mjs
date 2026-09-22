@@ -78,8 +78,12 @@ const ADMIN_RUNTIME_DEPS = [
   // The `animate-in` / `zoom-in-95` / `slide-in-from-*` utilities `sheet.tsx` and
   // `dropdown-menu.tsx` are written against. Tailwind v4 dropped them and nothing else here
   // defines them, so without this the sheet and the dropdown appear and vanish with no
-  // transition and no error. Imported from `src/admin/admin.css`, never from
-  // `src/styles/theme.css`, so it stays inside the tree a non-admin project does not receive.
+  // transition and no error.
+  //
+  // Imported from `src/styles/theme.css`, which ships to EVERY project — so unlike the rest of
+  // this list, the gate is not "the file is never copied". `transformThemeCss` in cli/copy.mjs
+  // deletes that `@import` line for any answer but `admin`, and the two have to move together: a
+  // project that kept the import and lost the package fails its build on a missing module.
   'tw-animate-css',
 ]
 
@@ -657,8 +661,12 @@ function assertTsconfigMatchesKit(kitRoot, generated) {
 
 /** Every admin-only line of `routeTree.gen.ts`, present or absent as one block per site. */
 function routeTreeGen(answers) {
-  // Each chunk carries its OWN leading newline and no trailing one, so dropping it leaves the
-  // surrounding lines joined exactly as TanStack wrote them.
+  // A chunk carries whatever whitespace has to disappear WITH it, which is not one fixed shape.
+  // Twelve of the thirteen below continue a line that stays, so they open with a newline and end
+  // without one. The `AdminRouteChildren` block is the exception: it is a whole paragraph between
+  // two lines that both stay, so it opens AND closes with a newline, and writing it like the
+  // other twelve would leave a stray blank line behind. Match the shape to where the chunk sits,
+  // not to the twelve.
   const adm = (text) => (answers.backend === 'admin' ? text : '')
   const union = (...entries) => entries.filter(Boolean).join(' | ')
 

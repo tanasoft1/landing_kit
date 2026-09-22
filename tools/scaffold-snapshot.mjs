@@ -32,11 +32,18 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
 
 /**
- * Five answer sets, chosen to reach every branch the copy and generate layers have:
+ * Five answer sets, covering the theme, preset, block and backend axes:
  * `theme` pinned dark and pinned light as well as `both` (the answer picks a boundary file AND
  * edits biome.json and token-gallery, and only `dark` puts a class on <html>),
  * both presets (which filters `src/styles/presets`), a block subset, custom blocks
  * (which runs the add-block templates at scaffold time), and a backend.
+ *
+ * NOT every branch, and the gap is one answer wide: none of the five passes `--backend=admin`, so
+ * everything gated on the admin panel is unexercised here. That is `routeTreeGen`'s admin half,
+ * `isAdminPath`, `ADMIN_COPY_DIRS`, `ADMIN_RUNTIME_DEPS`, and the admin branches of
+ * `transformThemeCss` and `transformComponentsJson`. What these five DO prove about the panel is
+ * the other half of the contract, and it is the half a client repo depends on: that a project
+ * which declined it receives no trace of it. Adding an `admin` variant would close the rest.
  *
  * `--yes` is on every set, including the ones that pass explicit flags. Not redundant: this runs
  * non-interactively, so a question left unanswered exits with "Input ended before every question

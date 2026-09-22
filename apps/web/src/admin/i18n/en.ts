@@ -16,6 +16,9 @@ export const en = {
   password: 'Password',
   signingIn: 'Signing in…',
 
+  fieldEmailInvalid: 'Enter a valid email address',
+  fieldPasswordRequired: 'Enter your password',
+
   errInvalidCredentials: 'Email or password is incorrect',
   errRateLimited: 'Too many attempts. Wait a moment and try again.',
   errUnauthorized: 'Your session expired. Please sign in again.',

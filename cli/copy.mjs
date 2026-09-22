@@ -359,6 +359,36 @@ function transformThemeCss(text, answers) {
   // the shortened version says — but a reader should not have to work out what panel they are
   // being told about.
   if (answers.backend !== 'admin') {
+    // The panel's animation utilities, and the paragraph explaining them, removed together. Only
+    // `sheet.tsx` and `dropdown-menu.tsx` render these classes and both live in `src/admin/`, so
+    // a project without the panel would carry an `@import` of a package `cli/generate.mjs`
+    // deliberately leaves out of its `package.json` — a build that fails on a missing module.
+    //
+    // Taken out of the joined text rather than by line, because the comment above the import is
+    // as much a part of the removal as the import itself. `@import` has to precede every other
+    // at-rule, so the blank line that separated this from `@source` goes with it and the file's
+    // import block closes up exactly as it did before the panel existed.
+    //
+    // The kit's copy of this paragraph deliberately does NOT mention this function. It would be
+    // describing machinery a generated project does not have, which is the same rule the README
+    // and the shadcn block below follow. The coupling only needs saying on this side: change the
+    // wording in theme.css without changing it here and `replaceExactText` throws by name.
+    out = replaceExactText(
+      out,
+      `${file} (tw-animate-css)`,
+      `
+/* The \`animate-in\`, \`zoom-in-95\` and \`slide-in-from-*\` utilities the panel's sheet and dropdown
+   are written against. Tailwind v4 dropped them and nothing here defines them, so without this
+   both components appear and vanish with no transition and no error.
+
+   Imported HERE, inside Tailwind's own graph, rather than from a stylesheet of the panel's own.
+   A separate file outside the graph ships the library whole: 14,880 bytes, every utility,
+   used or not. From here Tailwind treats it like any other utility source and emits only what
+   the @source glob finds a file rendering — 4,187 bytes today. */
+@import "tw-animate-css";
+`,
+      '',
+    )
     out = replaceExactText(
       out,
       `${file} (shadcn token block)`,

@@ -15,6 +15,12 @@ export const mn = {
   password: 'Нууц үг',
   signingIn: 'Нэвтэрч байна…',
 
+  // Checked in the browser before anything is sent, so these describe the FORM rather than an
+  // answer from the API. Kept out of the `err*` group for that reason: those are keyed by the
+  // server's own error codes in lib/errors.ts.
+  fieldEmailInvalid: 'Имэйл хаяг буруу байна',
+  fieldPasswordRequired: 'Нууц үг оруулна уу',
+
   errInvalidCredentials: 'Имэйл эсвэл нууц үг буруу байна',
   errRateLimited: 'Хэт олон удаа оролдлоо. Хэсэг хүлээгээд дахин оролдоно уу.',
   errUnauthorized: 'Нэвтрэх хугацаа дууссан. Дахин нэвтэрнэ үү.',
