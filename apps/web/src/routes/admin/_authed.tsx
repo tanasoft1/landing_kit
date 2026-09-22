@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { AdminShell } from '@/admin/components/admin-shell'
+import { PanelSkeleton } from '@/admin/components/panel-skeleton'
 import { refreshSession } from '@/admin/lib/api'
 import { getSession } from '@/admin/lib/session'
 
@@ -24,6 +25,15 @@ export const Route = createFileRoute('/admin/_authed')({
   // so `beforeLoad` and the loader below it each run once, on the client, where the session and
   // the origin both exist.
   ssr: false,
+  // Without this the server emitted a body of `<!--$--><!--$--><!--/$-->` and nothing else, so
+  // `pnpm dev` and /admin/leads was a white page until the bundle booted. That reads as broken
+  // software on the first run of a freshly scaffolded project, which is the one impression this
+  // kit exists to get right.
+  //
+  // `PanelSkeleton`, not `AdminShell`. This frame is painted BEFORE the guard below has run, so
+  // whoever is looking at it may have no session and may be about to be sent to the login screen.
+  // The reasoning for keeping the shell out of it is on the component.
+  pendingComponent: PanelSkeleton,
   beforeLoad: async () => {
     if (getSession().accessToken !== null) return
     // A reload starts with an empty session by design, so this is the ordinary path, not the
