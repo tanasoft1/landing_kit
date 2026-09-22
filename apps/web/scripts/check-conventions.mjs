@@ -262,26 +262,49 @@ const LAYOUT_PRIMITIVES = new Set([
 ])
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
-// The admin panel, wherever it is written. `src/routes/admin.tsx` is the layout route and
-// `src/routes/admin/` everything under it; `src/admin/` is the panel's own tree and is already
-// outside every walk in this file.
+// Whether this project HAS an admin panel, which is the only thing that earns the exemptions
+// below. This script ships to every generated project verbatim (it is in COPY_FILES), so it
+// cannot read the scaffold answers — but it can read the disk, and `src/admin/` is the panel's
+// own tree: present in the kit and in an `--backend=admin` scaffold, absent everywhere else.
+//
+// Without this test the exemptions travel to projects that declined the panel and switch off five
+// real rules for any route a client happens to file under `src/routes/admin/` — a pricing page
+// for their admin product, say. The `<Link>` ban is among them, and it is the rule in this file
+// that prevents an actual runtime break.
+const HAS_PANEL = existsSync('src/admin')
+
+// The panel's routes. `src/routes/admin.tsx` is the layout route and `src/routes/admin/`
+// everything under it; `src/admin/` itself is outside every `walk` in this file already.
 //
 // Used by three rules below, all exempting the panel for reasons of their own, so it is defined
 // once here rather than three times.
 const isAdminRoute = (p) => {
+  if (!HAS_PANEL) return false
   const rel = p.split(sep).join('/')
   return rel === 'src/routes/admin.tsx' || rel.startsWith('src/routes/admin/')
 }
 
 walk('src/blocks', { headings: true })
-// The panel is exempt from the layout rules, and it is the only part of `src/routes` that is.
-// Those rules say `<Section>` and `<Container>` own spacing, width and viewport height, which is
-// a claim about the marketing site: one column, one rhythm down the page, every block sharing it.
-// The panel imports neither primitive and never will — it is a shadcn app with its own card,
-// sheet and table spacing — so applying the rules here would only ban `min-h-screen` on a
-// full-page login and `max-w-sm` on a card, with no alternative to offer. `src/admin/` is already
-// unwalked for exactly this reason; without this the same panel code would pass or fail depending
-// on which of the two directories it sits in.
+// The panel is exempt from EVERY rule `checkFile` applies, and it is the only part of
+// `src/routes` that is. `walk` skips the file wholesale rather than skipping a rule, so be clear
+// about what that costs — eight rules stop running here, and only three of them are the ones this
+// exemption is really about:
+//
+//   Given up on purpose. `py-section`, `px-gutter` and `max-w-*` say <Section> and <Container>
+//   own spacing and width, which is a claim about the marketing site: one column, one rhythm down
+//   the page, every block sharing it. The panel imports neither primitive and never will — it is
+//   a shadcn app with its own card, sheet and table spacing — so the rules would ban `min-h-screen`
+//   on a full-page login and `max-w-sm` on a card with nothing to offer instead. The `container`
+//   utility and the raw `<section>` ban follow from the same claim.
+//
+//   Given up as collateral. The arbitrary-bracket-value rule, the inline-`style` ban and the
+//   unresolvable-`className` check have nothing to do with layout primitives and would be right
+//   here. A leads table writing `style={{ width: sidebarWidth }}` goes unreported while identical
+//   code in `docs.tsx` fails. The fix is to make `checkFile` take a per-rule exemption instead of
+//   a per-file one; until someone needs it, this is the trade.
+//
+// `src/admin/` is unwalked for the same reason, so without this the same panel code would pass or
+// fail depending on which of the two directories it sat in.
 walk('src/routes', { headings: false }, isAdminRoute)
 walk('src/components', { headings: false }, isLayoutPrimitive)
 
@@ -452,7 +475,7 @@ function checkNoDangerousHtml(file) {
   ts.forEachChild(sf, visit)
 }
 
-if (existsSync('src/admin')) walkFiles('src/admin', checkNoDangerousHtml)
+if (HAS_PANEL) walkFiles('src/admin', checkNoDangerousHtml)
 walkFiles('src/routes', (file) => {
   if (isAdminRoute(file)) checkNoDangerousHtml(file)
 })

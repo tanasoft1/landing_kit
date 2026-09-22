@@ -19,6 +19,16 @@
 
 @import "./presets/editorial.css";
 
+/* The `animate-in`, `zoom-in-95` and `slide-in-from-*` utilities the panel's sheet and dropdown
+   are written against. Tailwind v4 dropped them and nothing here defines them, so without this
+   both components appear and vanish with no transition and no error.
+
+   Imported HERE, inside Tailwind's own graph, rather than from a stylesheet of the panel's own.
+   A separate file outside the graph ships the library whole: 14,880 bytes, every utility,
+   used or not. From here Tailwind treats it like any other utility source and emits only what
+   the @source glob finds a file rendering — 4,187 bytes today. */
+@import "tw-animate-css";
+
 /* After every `@import`, not between them: CSS requires `@import` to precede all other at-rules,
    and Biome's `noInvalidPositionAtImportRule` fails the build otherwise. Tailwind reads `@source`
    from anywhere in the file. */

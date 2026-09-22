@@ -59,7 +59,14 @@ export const ADMIN_COPY_DIRS = ['src/admin']
 // file, so a prefix test covers both.
 export const ADMIN_ROUTE_PATHS = ['src/routes/admin']
 
-/** Whether `rel` is part of the panel and must not reach a project that did not ask for one. */
+/**
+ * Whether `rel` is one of the panel's ROUTE files, which COPY_DIRS would otherwise sweep up.
+ *
+ * Not a general "is this the panel" test, and do not reach for it as one: `src/admin/lib/api.ts`
+ * is as much the panel as `src/routes/admin/login.tsx` is, and this returns false for it.
+ * `src/admin` is kept out of a non-admin project by never being walked (ADMIN_COPY_DIRS), which
+ * needs no predicate.
+ */
 export const isAdminPath = (rel) =>
   ADMIN_ROUTE_PATHS.some((p) => rel === `${p}.tsx` || rel.startsWith(`${p}/`))
 

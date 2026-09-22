@@ -1,7 +1,6 @@
 import { createFileRoute, Outlet } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { loadStoredLanguage } from '@/admin/lib/language'
-import '@/admin/admin.css'
 
 // Left out of pages.config.ts on purpose, exactly like /docs: `enumerateUrls` never yields it, so
 // it is absent from the sitemap and the nav.
