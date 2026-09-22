@@ -678,8 +678,18 @@ function routeTreeGen(answers) {
   // because that separator is the character the two shapes disagree about.
   const isAdmin = answers.backend === 'admin'
   const adm = (text) => (isAdmin ? text : '')
-  const union = (...entries) => ` ${entries.join(' | ')}`
-  const wrapped = (...entries) => entries.map((entry) => `\n    | ${entry}`).join('')
+  //
+  // Both filter, and neither call site needs it today: every entry below is a literal. It stays
+  // because the failure it prevents is silent and expensive. One `adm(…)` entry that evaluates
+  // to `''` would put ` |  | ` into a NON-admin scaffold, where the drift assertion never looks,
+  // since it only ever compares the admin output against the kit. The thing that would catch it
+  // is a snapshot diff someone has to sit down and read.
+  const union = (...entries) => ` ${entries.filter(Boolean).join(' | ')}`
+  const wrapped = (...entries) =>
+    entries
+      .filter(Boolean)
+      .map((entry) => `\n    | ${entry}`)
+      .join('')
 
   return `/* eslint-disable */
 
