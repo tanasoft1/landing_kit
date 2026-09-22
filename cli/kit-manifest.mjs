@@ -53,12 +53,25 @@ export const COPY_DIRS = [
 // survive (that is what PRESET_DIR does) but whether the directory is copied at all.
 export const ADMIN_COPY_DIRS = ['src/admin']
 
+// Admin paths that live INSIDE a directory COPY_DIRS already copies whole. Unlike ADMIN_COPY_DIRS
+// above, these cannot be added conditionally -- they are already coming, and have to be filtered
+// out. `src/routes/admin` matches the directory and `src/routes/admin.tsx` the sibling layout
+// file, so a prefix test covers both.
+export const ADMIN_ROUTE_PATHS = ['src/routes/admin']
+
+/** Whether `rel` is part of the panel and must not reach a project that did not ask for one. */
+export const isAdminPath = (rel) =>
+  ADMIN_ROUTE_PATHS.some((p) => rel === `${p}.tsx` || rel.startsWith(`${p}/`))
+
 // Copied verbatim, individually.
 export const COPY_FILES = [
   'src/app/client.tsx',
   'src/app/server.ts',
   'src/app/router.tsx',
-  'src/app/routeTree.gen.ts',
+  // `src/app/routeTree.gen.ts` is NOT here. TanStack names every route by import in that file, and
+  // `src/routes/admin` is filtered out of a project that declined the panel, so a verbatim copy
+  // would import three modules the project does not have. `routeTreeGen` in cli/generate.mjs
+  // writes it instead, with the admin lines emitted only for `--backend=admin`.
   'src/integrations/motion.types.ts',
   // Both halves, unlike `@/motion` and `@/submit` below. The generated `vite.config.ts`
   // reads `site.theme.mode`, so a project can switch between light, dark and both by

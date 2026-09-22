@@ -24,6 +24,7 @@ import {
   COPY_DIRS,
   COPY_FILES,
   IGNORED_NAMES,
+  isAdminPath,
   kitPath,
   NEVER_COPY,
   NEVER_COPY_ANYWHERE,
@@ -630,7 +631,15 @@ function copyInto(kitRoot, outDir, answers) {
   const presetFile = `${PRESET_DIR}/${answers.preset}.css`
   // A transformed file also lives inside a copied tree; taking it here would mean writing it twice
   // and depending on the order of the two writes for correctness.
-  const keep = (rel) => !TRANSFORMED_FILES.includes(rel)
+  //
+  // `isAdminPath` is the mirror of the ADMIN_COPY_DIRS gate below: `src/admin` is a directory of
+  // its own and is simply not walked, but the panel's routes sit inside `src/routes`, which
+  // COPY_DIRS copies whole — so they have to be filtered out on the way past rather than added on
+  // purpose. Folded into `keep` rather than passed as a second filter, because every copy path in
+  // this function already composes `keep` and a parallel filter would only be applied to the one
+  // that remembered it.
+  const wantsAdmin = answers.backend === 'admin'
+  const keep = (rel) => !TRANSFORMED_FILES.includes(rel) && (wantsAdmin || !isAdminPath(rel))
 
   mkdirSync(outDir, { recursive: true })
 
