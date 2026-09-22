@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 import { useT } from '@/admin/i18n/use-t'
 import { apiFetch } from '@/admin/lib/api'
+import { ApiError } from '@/admin/lib/errors'
 import { useLanguage } from '@/admin/lib/language'
 import { Badge } from '@/admin/ui/badge'
 import { Button } from '@/admin/ui/button'
@@ -66,8 +67,25 @@ export const Route = createFileRoute('/admin/_authed/leads')({
   // The loader owns this data, not a module or a store. It reloads when `page` changes and
   // invalidates with the route, which is exactly the behaviour a hand-written cache would have
   // to reimplement.
-  loader: ({ deps }) =>
-    apiFetch<LeadPage>(`/admin/leads?limit=${PAGE_SIZE}&offset=${(deps.page - 1) * PAGE_SIZE}`),
+  loader: async ({ deps }) => {
+    try {
+      return await apiFetch<LeadPage>(
+        `/admin/leads?limit=${PAGE_SIZE}&offset=${(deps.page - 1) * PAGE_SIZE}`,
+      )
+    } catch (err) {
+      // A 401 here means the session is really gone, not that it merely needed refreshing:
+      // `_authed.beforeLoad` has already put a token in place, and `apiFetch` has already spent
+      // its one retry through `refreshSession`. What is left is a revoked token family, a deleted
+      // admin, or a refresh token past its seven days. The answer to all three is the login
+      // screen. Without this the panel paints its error boundary and leaves the URL bar as the
+      // only way back.
+      if (err instanceof ApiError && err.status === 401) throw redirect({ to: '/admin/login' })
+      // Everything else goes to the boundary untouched. A 500 is not a reason to ask someone to
+      // sign in again, and sending them to the login screen would hide the failure behind a form
+      // that will work first time.
+      throw err
+    }
+  },
   component: LeadsPage,
 })
 
@@ -115,6 +133,12 @@ function LeadsPage() {
       columnHelper.columns([
         columnHelper.accessor('created_at', {
           header: t.colDate,
+          // Compared as instants, not as text. `created_at` is ISO 8601 carrying an offset, and
+          // lexical order agrees with chronological order only while every row carries the SAME
+          // offset. That is a property of one server's rows today, not of the format, and the
+          // default string comparison would quietly disagree with the header the day it stops
+          // holding.
+          sortFn: (a, b) => Date.parse(a.original.created_at) - Date.parse(b.original.created_at),
           cell: (info) => dateFormat.format(new Date(info.getValue())),
         }),
         columnHelper.accessor('name', { header: t.colName }),
@@ -156,8 +180,13 @@ function LeadsPage() {
   // Passing `manualPagination` or `pageCount` is a type error rather than a no-op. The page
   // arithmetic below is this component's own.
 
-  const first = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
-  const last = Math.min(page * PAGE_SIZE, total)
+  // Counted from the rows that came back, not from the page number. `?page=5` against ten leads
+  // asks for an offset past the end, the API answers with an empty `items` and the real `total`,
+  // and arithmetic done on `page` alone reads `201-10 / 10` over an empty table with Next still
+  // live. Deriving `last` from `items.length` also fixes a short final page, which the old
+  // `Math.min(page * PAGE_SIZE, total)` only got right by accident.
+  const first = items.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
+  const last = first === 0 ? 0 : first + items.length - 1
   const goTo = (next: number) => navigate({ to: '/admin/leads', search: { page: next } })
 
   return (
@@ -234,7 +263,15 @@ function LeadsPage() {
         <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goTo(page - 1)}>
           {t.previous}
         </Button>
-        <Button variant="outline" size="sm" disabled={last >= total} onClick={() => goTo(page + 1)}>
+        {/* `items.length === 0` as well as `last >= total`, because an empty page is past the end
+            whatever the totals say, and only the first test disables Next on an out-of-range
+            ?page= that a bookmark or a hand-edited URL can still reach. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={items.length === 0 || last >= total}
+          onClick={() => goTo(page + 1)}
+        >
           {t.next}
         </Button>
       </div>
