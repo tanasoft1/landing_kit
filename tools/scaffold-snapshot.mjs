@@ -39,11 +39,19 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
  * (which runs the add-block templates at scaffold time), and a backend.
  *
  * NOT every branch, and the gap is one answer wide: none of the five passes `--backend=admin`, so
- * everything gated on the admin panel is unexercised here. That is `routeTreeGen`'s admin half,
- * `isAdminPath`, `ADMIN_COPY_DIRS`, `ADMIN_RUNTIME_DEPS`, and the admin branches of
- * `transformThemeCss` and `transformComponentsJson`. What these five DO prove about the panel is
- * the other half of the contract, and it is the half a client repo depends on: that a project
- * which declined it receives no trace of it. Adding an `admin` variant would close the rest.
+ * no output these profiles hash was ever produced for a project WITH the panel. Five things are
+ * unexercised because of it: `ADMIN_COPY_DIRS`, `ADMIN_RUNTIME_DEPS`, `viteConfigTs`'s dev-proxy
+ * branch, and the admin branches of `transformThemeCss` and `transformComponentsJson`.
+ *
+ * Two pieces of the panel's machinery ARE covered here, from the other side, and should not be
+ * counted in that gap. `isAdminPath` runs on every file of every one of these scaffolds — it is
+ * the filter in `keep()` that produces the "no trace of the panel" result they hash.
+ * `routeTreeGen`'s admin half runs too: `generateFiles` calls `assertRouteTreeMatchesKit` on
+ * every scaffold, which builds the admin tree and compares it against the kit's own file, so
+ * drift there fails all five.
+ *
+ * What these five prove about the panel is the half a client repo depends on: a project that
+ * declined it receives no trace of it. Adding an `admin` variant would close the rest.
  *
  * `--yes` is on every set, including the ones that pass explicit flags. Not redundant: this runs
  * non-interactively, so a question left unanswered exits with "Input ended before every question
