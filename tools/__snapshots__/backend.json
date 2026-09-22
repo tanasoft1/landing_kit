@@ -81,7 +81,7 @@
   "public/hero.jpg": "d4fe6fd5f2d4619f0d57e68d8a853aced8fb40886384646d5a47e76b81c2190d",
   "public/logo.svg": "d17d6e1c0e99781d2f6b612b17fa90b49cc601082dd479b3a808c1eb11268001",
   "public/og-default.jpg": "83717587e6266f502ad4cf61b57826a2819fa619e83ad0337bcd60d857cee212",
-  "scripts/check-conventions.mjs": "48ac7ca11c700f6823938fb23d716d5ca2fd787d004d60dcef2161e1448481d5",
+  "scripts/check-conventions.mjs": "97275acab6b23908ea207aaca6a4d54b10385163ee653d6184dd0eed13b3e661",
   "scripts/verify-build.mjs": "698e21ba46b14786740928f9b2e5c508dd308866d08e9f5adc0d633409a6e8e4",
   "src/app/client.tsx": "20530deb26dbe3e6bc2d442c0e6d2c80909032452a1f75874b331f7672230396",
   "src/app/routeTree.gen.ts": "476cec5d222741baffd60fa7ded50a9bb6b4c6f92ddd6c59a9f31564b5a0a642",

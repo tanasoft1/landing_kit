@@ -267,10 +267,18 @@ const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 // cannot read the scaffold answers — but it can read the disk, and `src/admin/` is the panel's
 // own tree: present in the kit and in an `--backend=admin` scaffold, absent everywhere else.
 //
-// Without this test the exemptions travel to projects that declined the panel and switch off five
+// Without this test the exemptions travel to projects that declined the panel and switch off ten
 // real rules for any route a client happens to file under `src/routes/admin/` — a pricing page
-// for their admin product, say. The `<Link>` ban is among them, and it is the rule in this file
-// that prevents an actual runtime break.
+// for their admin product, say. Ten because the exemption skips `checkFile` wholesale, which is
+// nine rules for a route (see the note on the `src/routes` walk below), and skips the `<Link>`
+// ban on top. The `<Link>` ban is the one that prevents an actual runtime break.
+//
+// The gate cuts both ways, and the second direction is deliberate: with no panel, the
+// `dangerouslySetInnerHTML` rule at the bottom of this file stops running on `src/routes/admin/`
+// too. That is right. Its message is written about leads and an access token, which is nonsense
+// in a project that has neither, and this kit has never banned that API outside the panel —
+// `components/theme-script.tsx` uses it. Without a panel, `src/routes/admin/` is just another
+// route directory, checked exactly like `index.tsx` and `docs.tsx`.
 const HAS_PANEL = existsSync('src/admin')
 
 // The panel's routes. `src/routes/admin.tsx` is the layout route and `src/routes/admin/`
@@ -287,21 +295,25 @@ const isAdminRoute = (p) => {
 walk('src/blocks', { headings: true })
 // The panel is exempt from EVERY rule `checkFile` applies, and it is the only part of
 // `src/routes` that is. `walk` skips the file wholesale rather than skipping a rule, so be clear
-// about what that costs — eight rules stop running here, and only three of them are the ones this
+// about what that costs — nine rules stop running here, and only six of them are the ones this
 // exemption is really about:
 //
-//   Given up on purpose. `py-section`, `px-gutter` and `max-w-*` say <Section> and <Container>
-//   own spacing and width, which is a claim about the marketing site: one column, one rhythm down
-//   the page, every block sharing it. The panel imports neither primitive and never will — it is
-//   a shadcn app with its own card, sheet and table spacing — so the rules would ban `min-h-screen`
-//   on a full-page login and `max-w-sm` on a card with nothing to offer instead. The `container`
-//   utility and the raw `<section>` ban follow from the same claim.
+//   Given up on purpose, six. `py-section`, `px-gutter`, `max-w-*`, the `container` utility,
+//   `min-h-screen` and the raw `<section>` ban all say the same thing: <Section> and <Container>
+//   own spacing, width and viewport height. That is a claim about the marketing site — one
+//   column, one rhythm down the page, every block sharing it. The panel imports neither primitive
+//   and never will, being a shadcn app with its own card, sheet and table spacing, so those rules
+//   would ban `min-h-screen` on a full-page login and `max-w-sm` on a card with nothing to offer
+//   instead.
 //
-//   Given up as collateral. The arbitrary-bracket-value rule, the inline-`style` ban and the
-//   unresolvable-`className` check have nothing to do with layout primitives and would be right
-//   here. A leads table writing `style={{ width: sidebarWidth }}` goes unreported while identical
-//   code in `docs.tsx` fails. The fix is to make `checkFile` take a per-rule exemption instead of
-//   a per-file one; until someone needs it, this is the trade.
+//   Given up as collateral, three. The arbitrary-bracket-value rule, the inline-`style` ban and
+//   the unresolvable-`className` check have nothing to do with layout primitives and would be
+//   right here. A leads table writing `style={{ width: sidebarWidth }}` goes unreported while
+//   identical code in `docs.tsx` fails. The fix is to make `checkFile` take a per-rule exemption
+//   instead of a per-file one; until someone needs it, this is the trade.
+//
+// The literal-<h1>/<h2> rule is NOT in either list. `headings` is false for `src/routes`, so it
+// never ran here in the first place and the exemption costs nothing against it.
 //
 // `src/admin/` is unwalked for the same reason, so without this the same panel code would pass or
 // fail depending on which of the two directories it sat in.

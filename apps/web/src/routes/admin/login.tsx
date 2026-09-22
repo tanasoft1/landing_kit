@@ -45,7 +45,8 @@ function LoginPage() {
       // `messageFor` renders this panel's own string for every error code it knows, because the
       // server's `message` is Mongolian prose and the panel may be in English. An UNMAPPED code
       // falls back to that Mongolian text on purpose — a real description of what went wrong
-      // beats a generic one, and an unmapped code is a bug to go and map.
+      // beats a generic one, and an unmapped code is a bug to go and map — and an unmapped code
+      // that arrived with an empty `message` falls through again, to `t.errUnknown`.
       setFormError(err instanceof ApiError ? err.messageFor(t) : t.errUnknown)
     }
   }
