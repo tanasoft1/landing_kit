@@ -653,7 +653,7 @@ function assertTsconfigMatchesKit(kitRoot, generated) {
 // TanStack writes `src/app/routeTree.gen.ts` from whatever is in `src/routes/`, and it names every
 // route by import. That is why the file is templated here instead of copied: `src/routes/admin` is
 // filtered out of a scaffold that declined the panel (`isAdminPath` in cli/kit-manifest.mjs), so a
-// copied route tree would import three modules that are not there and `tsc` would stop on a
+// copied route tree would import five modules that are not there and `tsc` would stop on a
 // generated file nobody wrote.
 //
 // Reproduced by hand rather than by running TanStack, because the CLI has no bundler and a scaffold
@@ -669,11 +669,17 @@ function routeTreeGen(answers) {
   // the other thirteen would leave a stray blank line behind. Match the shape to where the chunk
   // sits, not to the thirteen.
   //
-  // The eight `adm(…)` calls inside the `union(…)` lists below are not chunks in this sense.
-  // Each contributes one bare entry that `union` joins with the survivors, so they carry no
-  // whitespace of their own and none of this applies to them.
-  const adm = (text) => (answers.backend === 'admin' ? text : '')
-  const union = (...entries) => entries.filter(Boolean).join(' | ')
+  // The three union types in `FileRouteTypes` are not chunks in this sense, and they are the one
+  // place a bare `adm(…)` entry will not do. TanStack formats its output with prettier, which
+  // breaks a union onto one member per line as soon as the single-line form passes 80 columns.
+  // With the panel's routes in, `fullPaths` and `id` cross that width and `to` does not, so two
+  // of the three change SHAPE and not only length. So each union is written as a ternary between
+  // two spellings, and both helpers emit their own leading separator, a space or a newline,
+  // because that separator is the character the two shapes disagree about.
+  const isAdmin = answers.backend === 'admin'
+  const adm = (text) => (isAdmin ? text : '')
+  const union = (...entries) => ` ${entries.join(' | ')}`
+  const wrapped = (...entries) => entries.map((entry) => `\n    | ${entry}`).join('')
 
   return `/* eslint-disable */
 
@@ -691,7 +697,9 @@ import { Route as SplatRouteImport } from './../routes/$'${adm(`
 import { Route as AdminRouteImport } from './../routes/admin'`)}
 import { Route as DocsRouteImport } from './../routes/docs'${adm(`
 import { Route as AdminIndexRouteImport } from './../routes/admin/index'
-import { Route as AdminLoginRouteImport } from './../routes/admin/login'`)}
+import { Route as AdminAuthedRouteImport } from './../routes/admin/_authed'
+import { Route as AdminLoginRouteImport } from './../routes/admin/login'
+import { Route as AdminAuthedLeadsRouteImport } from './../routes/admin/_authed/leads'`)}
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -718,10 +726,19 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAuthedRoute = AdminAuthedRouteImport.update({
+  id: '/_authed',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => AdminRoute,
+} as any)
+const AdminAuthedLeadsRoute = AdminAuthedLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => AdminAuthedRoute,
 } as any)`)}
 
 export interface FileRoutesByFullPath {
@@ -730,14 +747,16 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren`)}
   '/docs': typeof DocsRoute${adm(`
   '/admin/login': typeof AdminLoginRoute
-  '/admin/': typeof AdminIndexRoute`)}
+  '/admin/': typeof AdminIndexRoute
+  '/admin/leads': typeof AdminAuthedLeadsRoute`)}
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
   '/docs': typeof DocsRoute${adm(`
+  '/admin': typeof AdminIndexRoute
   '/admin/login': typeof AdminLoginRoute
-  '/admin': typeof AdminIndexRoute`)}
+  '/admin/leads': typeof AdminAuthedLeadsRoute`)}
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -745,15 +764,47 @@ export interface FileRoutesById {
   '/$': typeof SplatRoute${adm(`
   '/admin': typeof AdminRouteWithChildren`)}
   '/docs': typeof DocsRoute${adm(`
+  '/admin/_authed': typeof AdminAuthedRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
-  '/admin/': typeof AdminIndexRoute`)}
+  '/admin/': typeof AdminIndexRoute
+  '/admin/_authed/leads': typeof AdminAuthedLeadsRoute`)}
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: ${union("'/'", "'/$'", adm("'/admin'"), "'/docs'", adm("'/admin/login'"), adm("'/admin/'"))}
+  fullPaths:${
+    isAdmin
+      ? wrapped(
+          "'/'",
+          "'/$'",
+          "'/admin'",
+          "'/docs'",
+          "'/admin/login'",
+          "'/admin/'",
+          "'/admin/leads'",
+        )
+      : union("'/'", "'/$'", "'/docs'")
+  }
   fileRoutesByTo: FileRoutesByTo
-  to: ${union("'/'", "'/$'", "'/docs'", adm("'/admin/login'"), adm("'/admin'"))}
-  id: ${union("'__root__'", "'/'", "'/$'", adm("'/admin'"), "'/docs'", adm("'/admin/login'"), adm("'/admin/'"))}
+  to:${
+    isAdmin
+      ? union("'/'", "'/$'", "'/docs'", "'/admin'", "'/admin/login'", "'/admin/leads'")
+      : union("'/'", "'/$'", "'/docs'")
+  }
+  id:${
+    isAdmin
+      ? wrapped(
+          "'__root__'",
+          "'/'",
+          "'/$'",
+          "'/admin'",
+          "'/docs'",
+          "'/admin/_authed'",
+          "'/admin/login'",
+          "'/admin/'",
+          "'/admin/_authed/leads'",
+        )
+      : union("'__root__'", "'/'", "'/$'", "'/docs'")
+  }
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -800,22 +851,50 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/_authed': {
+      id: '/admin/_authed'
+      path: ''
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminAuthedRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/login'
       fullPath: '/admin/login'
       preLoaderRoute: typeof AdminLoginRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/admin/_authed/leads': {
+      id: '/admin/_authed/leads'
+      path: '/leads'
+      fullPath: '/admin/leads'
+      preLoaderRoute: typeof AdminAuthedLeadsRouteImport
+      parentRoute: typeof AdminAuthedRoute
     }`)}
   }
 }
 ${adm(`
+interface AdminAuthedRouteChildren {
+  AdminAuthedLeadsRoute: typeof AdminAuthedLeadsRoute
+}
+
+const AdminAuthedRouteChildren: AdminAuthedRouteChildren = {
+  AdminAuthedLeadsRoute: AdminAuthedLeadsRoute,
+}
+
+const AdminAuthedRouteWithChildren = AdminAuthedRoute._addFileChildren(
+  AdminAuthedRouteChildren,
+)
+
 interface AdminRouteChildren {
+  AdminAuthedRoute: typeof AdminAuthedRouteWithChildren
   AdminLoginRoute: typeof AdminLoginRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAuthedRoute: AdminAuthedRouteWithChildren,
   AdminLoginRoute: AdminLoginRoute,
   AdminIndexRoute: AdminIndexRoute,
 }

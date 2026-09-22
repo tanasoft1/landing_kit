@@ -14,7 +14,9 @@ import { Route as SplatRouteImport } from './../routes/$'
 import { Route as AdminRouteImport } from './../routes/admin'
 import { Route as DocsRouteImport } from './../routes/docs'
 import { Route as AdminIndexRouteImport } from './../routes/admin/index'
+import { Route as AdminAuthedRouteImport } from './../routes/admin/_authed'
 import { Route as AdminLoginRouteImport } from './../routes/admin/login'
+import { Route as AdminAuthedLeadsRouteImport } from './../routes/admin/_authed/leads'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -41,10 +43,19 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAuthedRoute = AdminAuthedRouteImport.update({
+  id: '/_authed',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => AdminRoute,
+} as any)
+const AdminAuthedLeadsRoute = AdminAuthedLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => AdminAuthedRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -54,13 +65,15 @@ export interface FileRoutesByFullPath {
   '/docs': typeof DocsRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/leads': typeof AdminAuthedLeadsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
   '/docs': typeof DocsRoute
-  '/admin/login': typeof AdminLoginRoute
   '/admin': typeof AdminIndexRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/leads': typeof AdminAuthedLeadsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -68,15 +81,33 @@ export interface FileRoutesById {
   '/$': typeof SplatRoute
   '/admin': typeof AdminRouteWithChildren
   '/docs': typeof DocsRoute
+  '/admin/_authed': typeof AdminAuthedRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/_authed/leads': typeof AdminAuthedLeadsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$' | '/admin' | '/docs' | '/admin/login' | '/admin/'
+  fullPaths:
+    | '/'
+    | '/$'
+    | '/admin'
+    | '/docs'
+    | '/admin/login'
+    | '/admin/'
+    | '/admin/leads'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$' | '/docs' | '/admin/login' | '/admin'
-  id: '__root__' | '/' | '/$' | '/admin' | '/docs' | '/admin/login' | '/admin/'
+  to: '/' | '/$' | '/docs' | '/admin' | '/admin/login' | '/admin/leads'
+  id:
+    | '__root__'
+    | '/'
+    | '/$'
+    | '/admin'
+    | '/docs'
+    | '/admin/_authed'
+    | '/admin/login'
+    | '/admin/'
+    | '/admin/_authed/leads'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -123,6 +154,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/_authed': {
+      id: '/admin/_authed'
+      path: ''
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminAuthedRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/login'
@@ -130,15 +168,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLoginRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/_authed/leads': {
+      id: '/admin/_authed/leads'
+      path: '/leads'
+      fullPath: '/admin/leads'
+      preLoaderRoute: typeof AdminAuthedLeadsRouteImport
+      parentRoute: typeof AdminAuthedRoute
+    }
   }
 }
 
+interface AdminAuthedRouteChildren {
+  AdminAuthedLeadsRoute: typeof AdminAuthedLeadsRoute
+}
+
+const AdminAuthedRouteChildren: AdminAuthedRouteChildren = {
+  AdminAuthedLeadsRoute: AdminAuthedLeadsRoute,
+}
+
+const AdminAuthedRouteWithChildren = AdminAuthedRoute._addFileChildren(
+  AdminAuthedRouteChildren,
+)
+
 interface AdminRouteChildren {
+  AdminAuthedRoute: typeof AdminAuthedRouteWithChildren
   AdminLoginRoute: typeof AdminLoginRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAuthedRoute: AdminAuthedRouteWithChildren,
   AdminLoginRoute: AdminLoginRoute,
   AdminIndexRoute: AdminIndexRoute,
 }

@@ -77,7 +77,7 @@ export const COPY_FILES = [
   'src/app/router.tsx',
   // `src/app/routeTree.gen.ts` is NOT here. TanStack names every route by import in that file, and
   // `src/routes/admin` is filtered out of a project that declined the panel, so a verbatim copy
-  // would import three modules the project does not have. `routeTreeGen` in cli/generate.mjs
+  // would import five modules the project does not have. `routeTreeGen` in cli/generate.mjs
   // writes it instead, with the admin lines emitted only for `--backend=admin`.
   'src/integrations/motion.types.ts',
   // Both halves, unlike `@/motion` and `@/submit` below. The generated `vite.config.ts`
