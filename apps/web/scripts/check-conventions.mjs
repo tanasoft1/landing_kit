@@ -262,8 +262,27 @@ const LAYOUT_PRIMITIVES = new Set([
 ])
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
+// The admin panel, wherever it is written. `src/routes/admin.tsx` is the layout route and
+// `src/routes/admin/` everything under it; `src/admin/` is the panel's own tree and is already
+// outside every walk in this file.
+//
+// Used by three rules below, all exempting the panel for reasons of their own, so it is defined
+// once here rather than three times.
+const isAdminRoute = (p) => {
+  const rel = p.split(sep).join('/')
+  return rel === 'src/routes/admin.tsx' || rel.startsWith('src/routes/admin/')
+}
+
 walk('src/blocks', { headings: true })
-walk('src/routes', { headings: false })
+// The panel is exempt from the layout rules, and it is the only part of `src/routes` that is.
+// Those rules say `<Section>` and `<Container>` own spacing, width and viewport height, which is
+// a claim about the marketing site: one column, one rhythm down the page, every block sharing it.
+// The panel imports neither primitive and never will — it is a shadcn app with its own card,
+// sheet and table spacing — so applying the rules here would only ban `min-h-screen` on a
+// full-page login and `max-w-sm` on a card, with no alternative to offer. `src/admin/` is already
+// unwalked for exactly this reason; without this the same panel code would pass or fail depending
+// on which of the two directories it sits in.
+walk('src/routes', { headings: false }, isAdminRoute)
 walk('src/components', { headings: false }, isLayoutPrimitive)
 
 // --- src/lib stays .tsx-free --------------------------------------------------------------------
@@ -336,22 +355,30 @@ function checkNoRouterLink(file) {
 
 walkFiles('src/blocks', checkNoRouterLink)
 walkFiles('src/components', checkNoRouterLink)
-walkFiles('src/routes', checkNoRouterLink)
+// src/routes/admin is exempt, and only that. The rule exists because block modules load once,
+// before hydration, for the first URL only (src/app/client.tsx), so a client-side transition can
+// land on a page whose blocks were never registered. The panel renders no blocks at all, so the
+// trap cannot reach it — and a panel navigating with <a href> would do a full page load on every
+// click, which is the wrong behaviour for the one part of this app that is a real SPA.
+walkFiles('src/routes', (file) => {
+  if (!isAdminRoute(file)) checkNoRouterLink(file)
+})
 
-// --- /docs must keep its `noindex` ------------------------------------------------------------
-// Checked in the source, because it CANNOT be checked from `dist/`: `/docs` is never
-// prerendered, so `scripts/verify-build.mjs` has no file to read.
+// --- /docs and /admin must keep their `noindex` -----------------------------------------------
+// Checked in the source, because it CANNOT be checked from `dist/`: neither route is prerendered
+// from `pages.config.ts`, so `scripts/verify-build.mjs` has no file to read.
 //
-// This meta tag is the ONLY thing keeping `/docs` out of the search index on an SSR deploy. On a
-// static deploy the route 404s and the sitemap never mentions it, but an SSR deploy serves
-// `/docs` at a real URL, and robots.txt deliberately does NOT `Disallow` it — a `Disallow` would
-// stop the crawler fetching the page, so it would never read this tag. See the header comment in
-// src/routes/docs.tsx. Delete the tag and `/docs` becomes indexable with nothing to stop it.
+// This meta tag is the ONLY thing keeping either route out of the search index on an SSR deploy.
+// On a static deploy the route 404s and the sitemap never mentions it, but an SSR deploy serves
+// both at real URLs, and robots.txt deliberately does NOT `Disallow` either — a `Disallow` would
+// stop the crawler fetching the page, so it would never read this tag. See the header comments in
+// src/routes/docs.tsx and src/routes/admin.tsx. Delete the tag and the route becomes indexable
+// with nothing to stop it.
 //
 // Read from the AST, not with a regex. The regex this replaced passed GREEN when the meta was
 // commented out, because a regex cannot tell code from a comment — a silent false pass in the
 // one thing protecting `/docs`. In the AST, a commented-out object literal does not exist.
-const DOCS_ROUTE = 'src/routes/docs.tsx'
+const NOINDEX_ROUTES = ['src/routes/docs.tsx', 'src/routes/admin.tsx']
 
 /** `{ name: 'robots', content: '… noindex …' }` as a real object literal anywhere in the module. */
 function hasNoindexRobotsMeta(sf) {
@@ -384,15 +411,51 @@ function hasNoindexRobotsMeta(sf) {
   return found
 }
 
-// Absence is fine: a scaffolded project may delete /docs (README: "Removing the /docs page").
-// Presence is not negotiable — if the route is here it must carry the noindex meta.
-if (existsSync(DOCS_ROUTE) && !hasNoindexRobotsMeta(parseTsx(DOCS_ROUTE))) {
-  failures.push(
-    `${DOCS_ROUTE}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
-      `this tag is the ONLY thing keeping /docs out of the index on an SSR deploy (robots.txt ` +
-      `deliberately does not Disallow /docs, precisely so crawlers can fetch the page and read it)`,
-  )
+for (const route of NOINDEX_ROUTES) {
+  // Absence is fine: a scaffolded project may delete /docs (README: "Removing the /docs page"),
+  // and a project without the admin panel has no admin.tsx. Presence is not negotiable — if the
+  // route is here it must carry the noindex meta.
+  if (existsSync(route) && !hasNoindexRobotsMeta(parseTsx(route))) {
+    failures.push(
+      `${route}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
+        `this tag is the ONLY thing keeping the route out of the index on an SSR deploy ` +
+        `(robots.txt deliberately does not Disallow it, precisely so crawlers can fetch the ` +
+        `page and read it)`,
+    )
+  }
 }
+
+// --- the panel never sets raw HTML -------------------------------------------------------------
+// Leads carry attacker-controlled text: name, email, message and user agent all arrive from a
+// public form. React escapes every one of them by default, so this rule is not about today's
+// code. It is about the next person reaching for a rich-text preview or a "render the message
+// with line breaks" shortcut, inside the one page that holds a valid access token.
+//
+// components/theme-script.tsx uses the same API on the public side and is untouched: it is a
+// fixed literal with no interpolation, and it has to run before first paint.
+function checkNoDangerousHtml(file) {
+  const sf = parseTsx(file)
+  const visit = (node) => {
+    if (
+      ts.isJsxAttribute(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'dangerouslySetInnerHTML'
+    ) {
+      failures.push(
+        `${file}:${lineOf(sf, node)}  dangerouslySetInnerHTML in the admin panel — lead ` +
+          `name, email, message and user agent are all attacker-controlled, and this page holds ` +
+          `a valid access token. Render the value as a child and let React escape it.`,
+      )
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+}
+
+if (existsSync('src/admin')) walkFiles('src/admin', checkNoDangerousHtml)
+walkFiles('src/routes', (file) => {
+  if (isAdminRoute(file)) checkNoDangerousHtml(file)
+})
 
 // --- every preset must define the complete token surface --------------------------------------
 // The kit's main claim is that a whole design swaps by changing one `@import` in `theme.css`,
@@ -661,6 +724,7 @@ if (failures.length) {
 }
 console.log(
   '✓ check-conventions: layout primitives in blocks/routes/components, no literal <h1>/<h2> in ' +
-    'blocks, no client-side <Link> anywhere, src/lib is .tsx-free, /docs noindex intact, ' +
-    '/docs RECIPES match README headings, README Contents matches headings',
+    'blocks, no client-side <Link> outside the panel, src/lib is .tsx-free, /docs and /admin ' +
+    'noindex intact, no dangerouslySetInnerHTML in the panel, /docs RECIPES match README ' +
+    'headings, README Contents matches headings',
 )

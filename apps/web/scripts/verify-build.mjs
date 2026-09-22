@@ -67,7 +67,22 @@ if (site === URL_PLACEHOLDER) {
 // never prerendered, never in the sitemap, and never checked by anything below.
 // `routeTree.gen.ts` is not listed here: it is generated into `src/app/`, not this directory,
 // so naming it would read as if it were expected here.
-const ALLOWED_ROUTE_FILES = new Set(['__root.tsx', 'index.tsx', '$.tsx', 'docs.tsx'])
+//
+// `admin.tsx` and `admin/` are the panel, and everything this rule protects is about pages. The
+// panel is not a page: it is deliberately absent from pages.config.ts, deliberately absent from
+// the sitemap, and carries `noindex` instead (check-conventions.mjs enforces that half). Listing
+// the directory by name rather than its contents is on purpose — the routes inside it are an SPA
+// that grows, and a rule demanding a pages.config.ts entry per admin screen would be wrong for
+// every one of them. Both entries are simply absent in a project that declined the panel, and a
+// `readdirSync` loop needs nothing said about that.
+const ALLOWED_ROUTE_FILES = new Set([
+  '__root.tsx',
+  'index.tsx',
+  '$.tsx',
+  'docs.tsx',
+  'admin.tsx',
+  'admin',
+])
 for (const entry of readdirSync('src/routes')) {
   if (!ALLOWED_ROUTE_FILES.has(entry)) {
     fail(
