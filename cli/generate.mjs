@@ -530,6 +530,11 @@ function viteConfigTs(answers) {
         // /admin in enumerateUrls, and from there into the sitemap, the nav and the SEO layer,
         // which is the opposite of what a noindex route wants.
         //
+        // It is here at all because the Go binary answers every /admin URL by falling back to one
+        // file (api/internal/static/static.go). Delete this line and the only file left to fall
+        // back to is the prerendered home page, so a hard load of /admin/leads paints the landing
+        // hero until hydration replaces it.
+        //
         // What lands in the file is the index route's \`pendingComponent\` (PanelSkeleton):
         // src/routes/admin/index.tsx is \`ssr: false\` with no \`component\` at all, so the
         // prerenderer emits the pending frame, which is the skeleton.

@@ -437,7 +437,13 @@ else {
     ...new Set(urls.map((u) => `/${u.locale}/docs`)),
     // The panel is prerendered, unlike /docs, so this is not merely belt and braces: there is a
     // real file, and a sitemap entry would be a direct invitation to index it.
-    '/admin',
+    //
+    // Gated on the panel actually being here, by the same `HAS_PANEL` as ALLOWED_ROUTE_FILES, and
+    // for the reason the paragraph above this set spends ten lines on. A project that declined the
+    // panel has no /admin route and every right to slug a public page `admin`: a team page, an
+    // office page. Ungated, this entry fails that project's build over a sitemap URL that is
+    // correct for it, in the only machine gate it has. Do not simplify the spread away.
+    ...(HAS_PANEL ? ['/admin'] : []),
   ])
   const locPaths = [...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => {
     const loc = decodeEntities(m[1] ?? '').trim()
@@ -530,7 +536,7 @@ if (existsSync(join(outDir, 'docs/index.html'))) {
 if (HAS_PANEL) {
   const shell = join(outDir, 'admin', 'index.html')
   if (!existsSync(shell)) {
-    fail('/admin', 'the panel is in src/routes but dist has no admin/index.html shell')
+    fail('/admin', 'src/admin is present but dist has no admin/index.html shell')
   }
 }
 
