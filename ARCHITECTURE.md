@@ -563,9 +563,10 @@ presence of one cannot be used to ask whether an account exists.
 `refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
 reads it to decide whether a presented token is still live. `admin_audit_log` is written by those
 two paths and by logout, through `internal/service/audit`, for four events: login success, login
-failure, logout and detected token reuse. `login_attempts` is read and written by `Login` alone: it reads the row before it looks
-the email up, records a failure on both credential-failure branches, deletes the row on a successful
-sign-in, and drops rows whose lock lapsed more than a day ago.
+failure, logout and detected token reuse. `login_attempts` is read and written by `Login` alone:
+it reads the row before it looks the email up, records a failure on both credential-failure
+branches, deletes the row on a successful sign-in, and drops rows whose lock lapsed more than a
+day ago.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The
