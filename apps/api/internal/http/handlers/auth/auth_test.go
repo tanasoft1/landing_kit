@@ -31,6 +31,10 @@ const (
 	testJWTSecret  = "auth-handler-test-secret-32-bytes!!"
 	testPassword   = "correct-horse-battery-staple"
 	testAdminEmail = "admin@example.mn"
+	// csrfHeader is what routes.requireNonSimpleRequest demands on /api/auth/refresh and
+	// /api/auth/logout. A request without it is refused before the handler runs, so every refresh
+	// below sends it, the way the panel's own fetch does.
+	csrfHeader = "X-Requested-With"
 )
 
 // newApp builds the real middleware chain (routes.Setup), so the login rate limiter, CORS and
@@ -185,6 +189,7 @@ func TestRefreshHappyPath(t *testing.T) {
 
 	refreshRes := testkit.NewClient(t, fiberkit.Doer(app)).
 		With("Cookie", refreshCookieHeader(refreshCookie(t, loginRes).Value)).
+		With(csrfHeader, "XMLHttpRequest").
 		PostJSON("/api/auth/refresh", nil).
 		Status(http.StatusOK)
 	var refreshBody authData
@@ -217,6 +222,7 @@ func TestRefreshRejectsAccessTokenAsRefreshToken(t *testing.T) {
 
 	testkit.NewClient(t, fiberkit.Doer(app)).
 		With("Cookie", refreshCookieHeader(access)).
+		With(csrfHeader, "XMLHttpRequest").
 		PostJSON("/api/auth/refresh", nil).
 		Status(http.StatusUnauthorized)
 }

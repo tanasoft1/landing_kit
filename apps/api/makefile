@@ -41,10 +41,16 @@ migrate-create:
 	        internal/db/migrations/$${ts}_$(name).down.sql; \
 	  echo "created internal/db/migrations/$${ts}_$(name).{up,down}.sql"
 
-# Wraps `./cmd seed-admin`, not a raw `go run` one-liner, so the usage message is the same
-# whether the missing argument is email or password rather than whatever go run's own failure
-# happens to print.
+# Prompts for the password and pipes it in. There is deliberately no password= variable any more:
+# one on the command line put the only credential guarding the admin panel into the shell's history
+# file, the terminal scrollback, and the process table, where any local user's `ps` could read it
+# while `go run` compiled. stty turns echo off around the read so it never reaches the scrollback
+# either, and printf sends it with no trailing newline, which is what the command reads.
 seed-admin:
-	@test -n "$(email)" || (echo "usage: make seed-admin email=admin@example.mn password=..." && exit 1)
-	@test -n "$(password)" || (echo "usage: make seed-admin email=admin@example.mn password=..." && exit 1)
-	@go run ./cmd seed-admin "$(email)" "$(password)"
+	@test -n "$(email)" || (echo "usage: make seed-admin email=admin@example.mn" && exit 1)
+	@printf 'Password: ' >&2; \
+	  stty -echo 2>/dev/null || true; \
+	  read -r pw; \
+	  stty echo 2>/dev/null || true; \
+	  printf '\n' >&2; \
+	  printf '%s' "$$pw" | go run ./cmd seed-admin "$(email)"

@@ -58,6 +58,26 @@ type ServerConfig struct {
 	TrustedProxies string
 }
 
+// TrustedProxyList splits TrustedProxies into the form fiber.Config wants. Entries are already
+// known to parse: Load rejects the whole configuration otherwise, because Fiber only logs a
+// warning and drops an unparseable entry, which silently narrows the trusted set instead of
+// failing.
+func (s ServerConfig) TrustedProxyList() []string {
+	return splitList(s.TrustedProxies)
+}
+
+// splitList turns a comma-separated setting into its entries, trimmed, with empties dropped, so a
+// trailing comma or a line wrapped for readability does not become an entry of its own.
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 type DatabaseConfig struct {
 	Host     string
 	Port     string
@@ -247,6 +267,22 @@ func Load() (*Config, error) {
 				"matching that pattern could call /api/auth/refresh with the admin's cookie and "+
 				"read the access token out of the reply. List each origin literally",
 			strings.TrimSpace(origin))
+	}
+
+	// Checked here because Fiber does not check it anywhere a deploy would notice: an entry it
+	// cannot parse gets a log.Warnf and is dropped from the trusted set. A typo'd CIDR would
+	// therefore boot cleanly and quietly stop trusting the proxy it names, which shows up as every
+	// caller sharing one rate-limit bucket and nothing else.
+	for _, proxy := range cfg.Server.TrustedProxyList() {
+		if strings.Contains(proxy, "/") {
+			if _, _, err := net.ParseCIDR(proxy); err != nil {
+				return nil, fmt.Errorf("TRUSTED_PROXIES entry %q is not a valid CIDR range: %w", proxy, err)
+			}
+			continue
+		}
+		if net.ParseIP(proxy) == nil {
+			return nil, fmt.Errorf("TRUSTED_PROXIES entry %q is not a valid IP address", proxy)
+		}
 	}
 
 	if cfg.Notify.Driver != notifyDriverLog && cfg.Notify.Driver != notifyDriverSES {

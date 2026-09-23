@@ -21,8 +21,11 @@ const refreshCookiePath = "/api/auth"
 // Secure cookie would simply never be stored. Everywhere else it is on, so the token cannot cross
 // an unencrypted hop.
 //
-// SameSite=Strict is what removes the need for CSRF tokens on these endpoints: a request that did
-// not originate from this site does not carry the cookie at all.
+// SameSite=Strict stops a genuinely cross-site request from carrying the cookie at all, which is
+// most of what a CSRF token would buy. Not all of it: SameSite is evaluated per site, not per
+// origin, so a sibling subdomain is the same site and its requests do arrive with this cookie
+// attached. That is why /api/auth/refresh and /api/auth/logout also require a header no
+// CORS-simple request can set -- see requireNonSimpleRequest in internal/http/routes/public.go.
 func setRefreshCookie(c *fiber.Ctx, token string, expiresAt time.Time, secure bool) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
