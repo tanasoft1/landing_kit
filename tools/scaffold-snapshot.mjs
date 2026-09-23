@@ -10,8 +10,11 @@
  * baseline; `check` fails on any drift. Not in `package.json`'s `files`: this is maintainer
  * tooling, like the rest of `tools/`.
  *
- * Usage:  node tools/scaffold-snapshot.mjs record [variant]
+ * Usage:  node tools/scaffold-snapshot.mjs record <variant>|--all-profiles
  *         node tools/scaffold-snapshot.mjs check  [variant]
+ *
+ * `record` takes a profile name, and a bare `record` is refused rather than merely discouraged —
+ * see the ALL constant at the bottom of this file. Every `record` prints what it just blessed.
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -48,8 +51,8 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
  * project that declined the panel receives no trace of it. So a change in those five after an
  * admin-side edit is not a snapshot needing a refresh, it is the regression this whole
  * arrangement exists to catch — panel content reaching a project that said no. Re-record the
- * `admin` profile by name (`record admin`); a bare `record` re-records all six and would bless
- * exactly that leak.
+ * `admin` profile by name (`record admin`). A bare `record` would re-record all six and bless
+ * exactly that leak, which is why it is now refused.
  *
  * `isAdminPath` runs on every file of every one of these scaffolds — it is the filter in `keep()`
  * that produces the "no trace of the panel" result the five non-admin profiles hash.
@@ -161,22 +164,83 @@ function scaffold(args) {
 }
 
 function diff(expected, actual) {
-  const problems = []
+  const missing = []
+  const changed = []
+  const added = []
   for (const [path, hash] of Object.entries(expected)) {
-    if (!(path in actual)) problems.push(`  missing   ${path}`)
-    else if (actual[path] !== hash) problems.push(`  changed   ${path}`)
+    if (!(path in actual)) missing.push(path)
+    else if (actual[path] !== hash) changed.push(path)
   }
   for (const path of Object.keys(actual)) {
-    if (!(path in expected)) problems.push(`  new       ${path}`)
+    if (!(path in expected)) added.push(path)
   }
-  return problems.sort()
+  const total = missing.length + changed.length + added.length
+  return { missing: missing.sort(), changed: changed.sort(), added: added.sort(), total }
 }
 
-const [, , mode, only] = process.argv
+/**
+ * Every path in a diff, one per line, labelled.
+ *
+ * Capped, because the cap is the point: a re-record must be READ, and a thousand-line wall is not
+ * read. Past the cap the counts still say what moved, and a caller who wants the rest has `check`.
+ */
+const SHOWN = 25
+
+function formatDiff(d, indent) {
+  const lines = []
+  for (const [label, paths] of [
+    ['new    ', d.added],
+    ['missing', d.missing],
+    ['changed', d.changed],
+  ]) {
+    for (const p of paths.slice(0, SHOWN)) lines.push(`${indent}${label}  ${p}`)
+  }
+  if (d.total > lines.length) lines.push(`${indent}… and ${d.total - lines.length} more`)
+  return lines
+}
+
+const counts = (d) => `+${d.added.length} -${d.missing.length} ~${d.changed.length}`
+
+// `--all-profiles`, spelled out and hyphenated, rather than `--all` or a bare `record`. This is
+// the one command that can bless a leak: re-recording the five non-admin profiles is how panel
+// content reaching a project that declined the panel stops being a failure and becomes the
+// baseline. It has to be harder to type than the thing it overwrites.
+const ALL = '--all-profiles'
+
+const [, , mode, ...rest] = process.argv
+const USAGE =
+  'Usage: node tools/scaffold-snapshot.mjs record <variant>|--all-profiles\n' +
+  '       node tools/scaffold-snapshot.mjs check  [variant]'
 if (mode !== 'record' && mode !== 'check') {
-  console.error('Usage: node tools/scaffold-snapshot.mjs record|check [variant]')
+  console.error(USAGE)
   process.exit(2)
 }
+
+const only = rest.find((a) => a !== ALL)
+const all = rest.includes(ALL)
+
+// A bare `record` used to re-record all six profiles. The rule "never a bare record, always by
+// name" lived in the controller's head and in the docstring above; a rule nobody enforces is not a
+// gate, and the shortest command was the one that ratifies a regression. Now it refuses.
+if (mode === 'record' && !only && !all) {
+  console.error(
+    `Refusing a bare 'record'. It would rewrite all ${Object.keys(VARIANTS).length} profiles:\n` +
+      Object.keys(VARIANTS)
+        .map((n) => `  ${n}`)
+        .join('\n') +
+      '\n\nFive of those prove the NEGATIVE — that a project which declined the admin panel ' +
+      'receives\nno trace of it. Re-recording them turns panel content leaking into every ' +
+      'scaffold from a\nfailure into the baseline, and prints nothing that says so.\n\n' +
+      `Name the one profile you meant:   node tools/scaffold-snapshot.mjs record ${Object.keys(VARIANTS)[0]}\n` +
+      `Or, if you really mean all of them:   node tools/scaffold-snapshot.mjs record ${ALL}`,
+  )
+  process.exit(2)
+}
+if (mode === 'check' && all) {
+  console.error(`${ALL} is a 'record' option; 'check' already checks every profile by default.`)
+  process.exit(2)
+}
+
 const names = only ? [only] : Object.keys(VARIANTS)
 for (const name of names) {
   if (!VARIANTS[name])
@@ -185,30 +249,47 @@ for (const name of names) {
 
 mkdirSync(SNAP_DIR, { recursive: true })
 let failed = false
+let recordedAnyChange = false
 for (const name of names) {
   const file = join(SNAP_DIR, `${name}.json`)
   const actual = scaffold(VARIANTS[name])
   if (mode === 'record') {
+    // The diff is computed BEFORE the write and printed after it, so a re-record says what it
+    // just blessed. Without this, `record` printed only a file count — a non-admin profile
+    // gaining two panel files looked exactly like a profile that had not moved at all.
+    const previous = existsSync(file) ? diff(JSON.parse(readFileSync(file, 'utf8')), actual) : null
     writeFileSync(file, `${JSON.stringify(actual, null, 2)}\n`)
-    console.log(`recorded  ${name}  (${Object.keys(actual).length} files)`)
+    const shape = previous === null ? 'new snapshot' : counts(previous)
+    console.log(`recorded  ${name}  (${Object.keys(actual).length} files, ${shape})`)
+    if (previous && previous.total > 0) {
+      recordedAnyChange = true
+      for (const line of formatDiff(previous, '  ')) console.log(line)
+    }
     continue
   }
   if (!existsSync(file))
     throw new Error(
       `No snapshot for '${name}'. Run: node tools/scaffold-snapshot.mjs record ${name}`,
     )
-  const problems = diff(JSON.parse(readFileSync(file, 'utf8')), actual)
-  if (problems.length === 0) {
+  const d = diff(JSON.parse(readFileSync(file, 'utf8')), actual)
+  if (d.total === 0) {
     console.log(`ok        ${name}  (${Object.keys(actual).length} files)`)
     continue
   }
   failed = true
-  console.error(`DRIFT     ${name}`)
-  for (const p of problems) console.error(p)
+  console.error(`DRIFT     ${name}  (${counts(d)})`)
+  for (const line of formatDiff(d, '  ')) console.error(line)
+}
+if (recordedAnyChange) {
+  console.log(
+    '\nRead the lines above before committing them. A path under src/admin, src/routes/admin,\n' +
+      'or any file appearing in a profile other than `admin`, is panel content reaching a ' +
+      'project\nthat declined the panel — the regression these snapshots exist to catch.',
+  )
 }
 if (failed) {
   console.error(
-    '\nScaffold output changed. If the change is intended, re-record and review the diff.',
+    '\nScaffold output changed. If the change is intended, re-record BY NAME and review the diff.',
   )
   process.exit(1)
 }
