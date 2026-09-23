@@ -32,26 +32,30 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
 
 /**
- * Five answer sets, covering the theme, preset, block and backend axes:
+ * Six answer sets, covering the theme, preset, block, backend and panel axes:
  * `theme` pinned dark and pinned light as well as `both` (the answer picks a boundary file AND
  * edits biome.json and token-gallery, and only `dark` puts a class on <html>),
  * both presets (which filters `src/styles/presets`), a block subset, custom blocks
- * (which runs the add-block templates at scaffold time), and a backend.
+ * (which runs the add-block templates at scaffold time), a backend, and the admin panel.
  *
- * NOT every branch, and the gap is one answer wide: none of the five passes `--backend=admin`, so
- * no output these profiles hash was ever produced for a project WITH the panel. Five things are
- * unexercised because of it: `ADMIN_COPY_DIRS`, `ADMIN_RUNTIME_DEPS`, `viteConfigTs`'s dev-proxy
- * branch, and the admin branches of `transformThemeCss` and `transformComponentsJson`.
+ * `admin` is the only variant that passes `--backend=admin`, so it is the one hashing output a
+ * project WITH the panel receives: the `src/admin` tree (`ADMIN_COPY_DIRS`), the fourteen
+ * packages in `ADMIN_RUNTIME_DEPS`, the admin branch of `routeTree.gen.ts`, the dev proxy and the
+ * `/admin` prerender entry in `vite.config.ts`, and the admin branches of `transformThemeCss`
+ * and `transformComponentsJson`.
  *
- * Two pieces of the panel's machinery ARE covered here, from the other side, and should not be
- * counted in that gap. `isAdminPath` runs on every file of every one of these scaffolds — it is
- * the filter in `keep()` that produces the "no trace of the panel" result they hash.
- * `routeTreeGen`'s admin half runs too: `generateFiles` calls `assertRouteTreeMatchesKit` on
- * every scaffold, which builds the admin tree and compares it against the kit's own file, so
- * drift there fails all five.
+ * The other five prove the negative, and `default` and `backend` are the clearest of them: a
+ * project that declined the panel receives no trace of it. So a change in those five after an
+ * admin-side edit is not a snapshot needing a refresh, it is the regression this whole
+ * arrangement exists to catch — panel content reaching a project that said no. Re-record the
+ * `admin` profile by name (`record admin`); a bare `record` re-records all six and would bless
+ * exactly that leak.
  *
- * What these five prove about the panel is the half a client repo depends on: a project that
- * declined it receives no trace of it. Adding an `admin` variant would close the rest.
+ * `isAdminPath` runs on every file of every one of these scaffolds — it is the filter in `keep()`
+ * that produces the "no trace of the panel" result the five non-admin profiles hash.
+ * `routeTreeGen`'s admin half runs on all six: `generateFiles` calls `assertRouteTreeMatchesKit`
+ * on every scaffold, which builds the admin tree and compares it against the kit's own file, so
+ * drift there fails every profile.
  *
  * `--yes` is on every set, including the ones that pass explicit flags. Not redundant: this runs
  * non-interactively, so a question left unanswered exits with "Input ended before every question
@@ -63,9 +67,11 @@ const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
  * a link unresolved is refused by the CLI before it writes anything. The two subsets below are
  * both legal combinations.
  *
- * `backend` is the only variant not covered by `default`, `onepage`, `custom` or `subset`: all
- * four of those take the default `--backend=none`, so this is the one exercising the API tree,
- * `docker-compose.yml` and the Go scripts in `package.json`.
+ * `backend` is the one variant taking `--backend=api`: `default`, `onepage`, `custom` and
+ * `subset` all take the default `--backend=none`, and `admin` takes the third branch. The API
+ * tree, `docker-compose.yml` and the Go scripts in `package.json` reach `admin` too, so what
+ * `backend` alone covers is the `api` answer's own shape — no dev proxy, no panel, an absolute
+ * `VITE_CONTACT_ENDPOINT` reaching Fiber through CORS.
  */
 const VARIANTS = {
   default: ['--yes'],
@@ -73,6 +79,7 @@ const VARIANTS = {
   custom: ['--yes', '--add-blocks=pricing,faq'],
   subset: ['--yes', '--blocks=features,contact', '--theme=light'],
   backend: ['--yes', '--backend=api'],
+  admin: ['--yes', '--backend=admin'],
 }
 
 /**

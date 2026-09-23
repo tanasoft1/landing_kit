@@ -64,12 +64,17 @@ invisible to every check in this repo. Leave the mismatch alone.
 
 ## Scaffold snapshots
 
-`tools/scaffold-snapshot.mjs` hashes the full output of five answer combinations and compares
+`tools/scaffold-snapshot.mjs` hashes the full output of six answer combinations and compares
 against `tools/__snapshots__/`. `pnpm verify` runs it.
 
 A failing snapshot means generated projects changed. That is often intended: re-record with
-`node tools/scaffold-snapshot.mjs record`, then **read the diff** before committing it. The
-snapshot's value is entirely in that read; re-recording without looking makes it decoration.
+`node tools/scaffold-snapshot.mjs record <variant>`, then **read the diff** before committing it.
+The snapshot's value is entirely in that read; re-recording without looking makes it decoration.
+
+Name the variant. A bare `record` re-records all six, and the five non-admin profiles are what
+prove the admin panel reaches no project that declined it, so a bare `record` after an admin-side
+change would bless a leak instead of catching it. Run `check` first, record the one profile you
+meant to move, then `check` again.
 
 The `.kit/scaffold.json` entry contains the kit version, so a version bump changes one hash in
 every variant. That is expected, and it is also the check that the version reached the file.
