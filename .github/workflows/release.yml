@@ -80,6 +80,7 @@ jobs:
           npm pack --pack-destination /tmp/pack
           tar xzf /tmp/pack/*.tgz -C /tmp/pack
           node /tmp/pack/package/cli/index.mjs /tmp/smoke --yes
+          node /tmp/pack/package/cli/index.mjs /tmp/smoke-admin --yes --backend=admin
 
       # A fresh scaffold ships a placeholder domain and fails its own `verify`
       # until that is replaced. That is deliberate, so substitute one here.
@@ -89,6 +90,34 @@ jobs:
           sed -i "s|https://your-domain.example|https://ci.example.com|" src/config/site.config.ts
           pnpm install
           pnpm verify
+
+      # `--yes` alone is `--backend=none`, so until this step nothing in CI ever
+      # generated or built an admin project. The kit's own `verify` job builds
+      # the panel's SOURCE, because apps/web contains it — what it does not build
+      # is the CLI-written vite.config.ts, package.json and route tree that a
+      # generated admin project gets instead of the kit's own. `pnpm snapshot`
+      # scaffolds all six profiles but only hashes them.
+      #
+      # The web half of the chain directly, not `pnpm verify`: that project's
+      # `verify` appends the Go steps, and this job deliberately has no Go
+      # toolchain. The panel's own build needs neither a database nor a running
+      # API — it is prerendered static output and a client bundle — so the split
+      # costs no coverage of the web side. The Go side is covered by the
+      # `verify` job against apps/api.
+      #
+      # This is the same five gates `package.json`'s `verify` builds for a
+      # backendless project, and it exercises HAS_PANEL, the `/admin` prerender
+      # entry and the shell assertion in verify-build.mjs in one pass.
+      - name: Build and verify a scaffolded admin project
+        working-directory: /tmp/smoke-admin
+        run: |
+          sed -i "s|https://your-domain.example|https://ci.example.com|" src/config/site.config.ts
+          pnpm install
+          pnpm exec biome ci .
+          pnpm exec tsc --noEmit
+          node scripts/check-conventions.mjs
+          pnpm exec vite build
+          node scripts/verify-build.mjs
 
   publish:
     needs: [verify, smoke]

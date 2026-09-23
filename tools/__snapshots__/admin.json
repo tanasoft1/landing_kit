@@ -85,7 +85,7 @@
   "public/hero.jpg": "d4fe6fd5f2d4619f0d57e68d8a853aced8fb40886384646d5a47e76b81c2190d",
   "public/logo.svg": "d17d6e1c0e99781d2f6b612b17fa90b49cc601082dd479b3a808c1eb11268001",
   "public/og-default.jpg": "83717587e6266f502ad4cf61b57826a2819fa619e83ad0337bcd60d857cee212",
-  "scripts/check-conventions.mjs": "4828a088cac3d7f3ea68ae13f2b0f612bfee7cb3f32f2c8e0573def75c38d7c6",
+  "scripts/check-conventions.mjs": "00490958215ddab2a4fdf81abf2fb43508112a0294c01e281fc9f7a2dfce48d7",
   "scripts/verify-build.mjs": "6335a31fc479a1ba1cea982f81e0444f46507068d985a9ba4b1f1d0449be33d9",
   "src/admin/components/admin-shell.tsx": "367ad9ff9d4de1dd52d86e90fc392d101b6f711f1510b07128d7902f3bc62fc3",
   "src/admin/components/language-toggle.tsx": "7d7b740ca2e0bf3bae506fdbb5a7679a479cb9d61a1740021b75a2c7c07bd102",
