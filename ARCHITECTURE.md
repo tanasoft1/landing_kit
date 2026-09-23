@@ -406,7 +406,8 @@ sequenceDiagram
     participant A as landing-api
     participant DB as Postgres
 
-    OP->>CMD: make seed-admin email=... password=at-least-12-chars
+    OP->>CMD: make seed-admin email=... , then the password on stdin with echo off
+    CMD->>CMD: at least 12 runes, not bytes
     CMD->>DB: INSERT INTO admin_users with a bcrypt hash
     CMD-->>OP: the created email, and nothing else, ever
     OP->>A: POST /api/auth/login
@@ -415,30 +416,31 @@ sequenceDiagram
     A->>A: bcrypt compare on every path, even for an unknown email
     A->>DB: ClearLoginAttempts on success, RecordLoginFailure on either failure
     A->>DB: ExtendLoginLock, from the count the increment returned, once past the threshold
-    A->>DB: CreateRefreshToken, a ledger row under a new family_id
+    A->>DB: CreateRefreshToken, a ledger row under a new family_id, stamped with family_expires_at
     A-->>OP: access_token and admin profile in the body, refresh token as a Set-Cookie
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
     A->>A: AuthMiddleware: HS256 asserted, token_type must be access
     A->>DB: ORDER BY created_at DESC, id DESC, LIMIT and OFFSET
     A-->>OP: success true, data is an RsLeadPage: items plus the whole table's total
-    OP->>A: POST /api/auth/refresh carrying the refresh cookie
-    A->>DB: GetRefreshToken by jti; already revoked means replay
+    OP->>A: POST /api/auth/refresh, refresh cookie plus X-Requested-With
+    A->>A: no X-Requested-With is a 403, before the limiter counts it
+    A->>DB: GetRefreshToken by jti; already revoked means replay, unless it is a lost rotation
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
     A->>DB: RevokeRefreshToken then CreateRefreshToken, one transaction under the family lock
     A-->>OP: a fresh access_token and a replacement cookie; the presented token is now dead
-    OP->>A: POST /api/auth/logout carrying the refresh cookie
+    OP->>A: POST /api/auth/logout, refresh cookie plus X-Requested-With
     A->>DB: revoke every unrevoked row in the family, under the family lock
     A-->>OP: 200 and an expired cookie, whatever the cookie was worth
 ```
 
 | Endpoint | Auth | Limits |
 |---|---|---|
-| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email: from the 5th failure, one minute doubling to a 15-minute cap |
-| `POST /api/auth/refresh` | the refresh cookie | 5 per 15 minutes per client |
-| `POST /api/auth/logout` | the refresh cookie | none; it reveals nothing and grants nothing |
+| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email: from the 5th failure, one minute doubling to a 15-minute cap, decaying after 30 minutes without a failure |
+| `POST /api/auth/refresh` | the refresh cookie, plus any `X-Requested-With` | 30 per 15 minutes per client |
+| `POST /api/auth/logout` | the refresh cookie, plus any `X-Requested-With` | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Eight properties of this path are deliberate and easy to undo by accident:
+Eleven properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
@@ -453,7 +455,10 @@ Eight properties of this path are deliberate and easy to undo by accident:
   rather than two. A row is written for every email tried, registered or not: if only real accounts
   were recorded, a lockout would prove an account exists, which is the leak the dummy hash above
   closes on the timing side. And the curve caps rather than latching, because a permanent lock lets
-  anyone who knows the admin's email deny them access for good.
+  anyone who knows the admin's email deny them access for good. The cap alone did not deliver that:
+  a count that only grew sat at the fifteen-minute maximum forever, so one request every quarter
+  hour was a permanent lockout by accumulation. A failure older than 30 minutes no longer counts,
+  which makes holding the lock cost a sustained rate the per-client limiter already bounds.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
   extends the session from fifteen minutes to seven days.
@@ -475,35 +480,71 @@ Eight properties of this path are deliberate and easy to undo by accident:
   a single `UPDATE ... WHERE revoked_at IS NULL` whose row count is read, so two requests racing on
   one live token cannot both proceed: the loser affects zero rows and is treated as replay. A
   `SELECT` followed by an `UPDATE` would let both through, because neither has written anything when
-  the check runs.
+  the check runs. One exception, because honest clients hit this with no attacker anywhere: a token
+  spent within the last 30 seconds whose successor is still live is a rotation whose response went
+  missing — a tab closed mid-flight, a proxy timeout, two tabs restored together — so the same
+  successor is re-sent, with no new row, no revocation and no audit entry. `replaced_by` on the
+  ledger row is what makes the two cases distinguishable at all.
+- **A family has an absolute deadline as well as an idle one.** `JWT_REFRESH_EXPIRE_DAYS` bounds how
+  long one token may sit unused and is recomputed on every rotation, so on its own it bounded
+  nothing: anyone who kept refreshing kept the login alive forever, a stolen cookie included.
+  `family_expires_at` is stamped at login from `JWT_SESSION_MAX_DAYS`, copied forward untouched by
+  every rotation, and clamps each successor's own expiry. A session ends at whichever bound comes
+  first.
 - **The refresh token never reaches JavaScript.** It leaves as `Set-Cookie: landing_refresh=...;
   Path=/api/auth; HttpOnly; Secure; SameSite=Strict` and is absent from every response body. The
   token lives seven days, so a copy anywhere a script can read is a week of access for one injected
   script. `Path=/api/auth` keeps it off `/api/admin/*`, where it does no work and could only end up
-  in a proxy log. `SameSite=Strict` is what removes the need for CSRF tokens on these endpoints: a
-  request that did not come from this site does not carry the cookie, and `/api/admin/*` needs an
-  `Authorization` header no cross-site form can set. `Secure` comes off only under
-  `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all over
-  plain HTTP.
+  in a proxy log. `SameSite=Strict` is most of what removes the need for CSRF tokens on these
+  endpoints: a request that did not come from this site does not carry the cookie, and
+  `/api/admin/*` needs an `Authorization` header no cross-site form can set. `Secure` comes off only
+  under `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all
+  over plain HTTP.
+- **Refresh and logout require a header a simple request cannot set.** SameSite is evaluated per
+  *site*, so a sibling subdomain is not cross-site and its requests do carry the cookie. Both routes
+  took no body and no custom header, which made them preflight-free, so any page on any subdomain
+  could sign the admin out or rotate the cookie underneath a live tab. It could not read either
+  answer, so nothing leaked. `requireNonSimpleRequest` demands `X-Requested-With` — presence only,
+  no value — which forces a cross-origin caller through a preflight the `CORS_ORIGINS` allowlist
+  governs. `Accept` cannot do this job: it is CORS-safelisted, so setting it leaves a request
+  simple. The check runs ahead of the rate limiter, so a forged request cannot spend the admin's own
+  refresh budget.
+- **Revocation does not reach an access token already issued.** `AuthMiddleware` validates the JWT
+  and looks nothing up, which is what keeps an admin request free of a database read. After a
+  logout, a family revocation, or the admin row being deleted, the token already in a tab's memory
+  keeps reading `/api/admin/leads` until its own expiry, up to `JWT_ACCESS_EXPIRE_MINUTES`. What is
+  immediate is that nothing new is issued. This is the stateless-JWT trade taken deliberately; the
+  window is written down in both READMEs where Sign out is described.
 - **A cross-origin panel would need `AllowCredentials`, and nothing the kit generates is one.**
   `cors.Config` sets `AllowCredentials: true`, without which a browser refuses to store a
   `Set-Cookie` from a cross-origin response and refuses to send it back. The panel never takes
   that path: it reaches the API through Vite's `/api` proxy in development
   (`apps/web/vite.config.ts`) and through the single binary in production, so it is same-origin in
   both, and a `--backend=api` project's contact form carries no cookies at all. The setting is
-  there for a deployment that serves the panel from a different origin than the API. The cost is
-  that `CORS_ORIGINS` can no longer be a wildcard, which `conf.Load` now refuses.
+  there for one deployment shape only: a panel on `admin.example.com` calling `api.example.com`,
+  which is cross-origin but same-*site*, so the Strict cookie does travel. A panel on a genuinely
+  different registrable domain never receives the cookie whatever CORS says. The cost is that
+  `CORS_ORIGINS` must be literal origins: `conf.Load` refuses a bare `*` and, as of this branch,
+  Fiber's `https://*.example.com` subdomain form too, because a credentialed response lets any host
+  matching the pattern refresh with the admin's cookie and read the access token out of the reply.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same
 asymmetry applies to `CORS_ORIGINS`, whose development default is refused outside development,
 because a deploy that forgets it boots cleanly, answers `/api/health` with 200, and drops every real
-submission at preflight with no server-side log line at all. A `*` entry in `CORS_ORIGINS` is
-refused everywhere instead, development included, because a wildcard origin on a credentialed
-response is both invalid per the spec and, for any deployment that did put a session cookie on
-credentialed CORS, a handout of that session to every site the browser visits. Nothing the kit
-generates is such a deployment today, which is why this reads as a consequence rather than a
-description of the panel.
+submission at preflight with no server-side log line at all. Any `*` in `CORS_ORIGINS` is refused
+everywhere instead, development included, because a wildcard origin on a credentialed response is
+both invalid per the spec and, for any deployment that did put a session cookie on credentialed
+CORS, a handout of that session to every site the browser visits. Nothing the kit generates is such
+a deployment today, which is why this reads as a consequence rather than a description of the panel.
+
+`PROXY_HEADER` is paired with `TRUSTED_PROXIES` for a related reason. Every rate limit above is
+keyed on the client address, and Fiber returns whatever a named proxy header contains unless it is
+told which peers may set it — so a header alone meant a fresh bucket per request and attacker-chosen
+text in `admin_audit_log.ip`. `TRUSTED_PROXIES` is the list of IPs or CIDR ranges the header is
+believed from; anything else falls back to the socket address. `conf.Load` parses every entry and
+refuses to start on one it cannot, because Fiber only warns and drops it, and a typo'd range boots
+cleanly while quietly trusting nobody.
 
 ## 7. Data model
 
@@ -530,12 +571,15 @@ erDiagram
         uuid jti PK "the token's own id, stored in the clear"
         uuid admin_id FK "ON DELETE CASCADE"
         uuid family_id "shared by every token descended from one login"
-        timestamptz expires_at
+        timestamptz expires_at "clamped to family_expires_at at issue time"
+        timestamptz family_expires_at "the login's deadline, copied forward on rotation"
         timestamptz revoked_at "nullable, NULL while the token is still good"
+        uuid replaced_by "nullable, the successor this token was rotated into"
     }
     login_attempts {
         text email PK "as submitted, registered or not"
         int failed_count "default 0"
+        timestamptz last_failure_at "default now, what the decay and the prune both read"
         timestamptz locked_until "nullable"
     }
     admin_audit_log {
