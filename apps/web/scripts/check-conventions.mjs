@@ -304,7 +304,7 @@ function scaffoldSaysPanel() {
     console.error(
       `\n✗ check-conventions: cannot read 'backend' from ${RECORD}.\n\n` +
         '  That file records the answers this project was scaffolded with, and it is what\n' +
-        '  decides whether the admin panel\'s rule exemptions apply here. Guessing would\n' +
+        "  decides whether the admin panel's rule exemptions apply here. Guessing would\n" +
         '  either fail a project over a panel it never asked for, or switch off the rules\n' +
         '  that keep a hand-added route out of `src/routes/admin/`.\n\n' +
         '  Restore it from git, or delete it entirely to fall back to the presence of\n' +
