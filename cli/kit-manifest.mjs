@@ -66,9 +66,28 @@ export const ADMIN_ROUTE_PATHS = ['src/routes/admin']
  * is as much the panel as `src/routes/admin/login.tsx` is, and this returns false for it.
  * `src/admin` is kept out of a non-admin project by never being walked (ADMIN_COPY_DIRS), which
  * needs no predicate.
+ *
+ * It is also silent on a miss, by construction — a prefix that matches nothing filters nothing.
+ * `assertAdminPathsExist` in cli/copy.mjs is what makes that loud: it proves every prefix here
+ * names something real in the kit, so renaming the directory fails the scaffold instead of
+ * shipping the panel to every project.
  */
 export const isAdminPath = (rel) =>
   ADMIN_ROUTE_PATHS.some((p) => rel === `${p}.tsx` || rel.startsWith(`${p}/`))
+
+// The only places in the kit where panel content may live. ADMIN_COPY_DIRS is the tree that is
+// never walked for a non-admin scaffold and ADMIN_ROUTE_PATHS the prefix that is filtered out of
+// one, so between them they are the whole of the panel's addressable surface.
+//
+// Declared as one list because `assertPanelStaysInItsRoots` in cli/copy.mjs needs the union: the
+// two mechanisms exclude the panel by different means, and neither of them notices a panel file
+// that landed somewhere else entirely. `COPY_DIRS` takes `src/components`, `src/lib`, `src/routes`
+// and `public` whole, and a panel file in any of those was filtered by nothing at all.
+export const ADMIN_ROOTS = [...ADMIN_COPY_DIRS, ...ADMIN_ROUTE_PATHS]
+
+/** Whether `rel` is inside the panel's declared roots — the directory, or its `.tsx` sibling. */
+export const isUnderAdminRoot = (rel) =>
+  ADMIN_ROOTS.some((p) => rel === p || rel === `${p}.tsx` || rel.startsWith(`${p}/`))
 
 // Copied verbatim, individually.
 export const COPY_FILES = [
