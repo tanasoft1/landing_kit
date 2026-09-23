@@ -72,7 +72,11 @@ export const Route = createFileRoute('/admin/_authed')({
  * thrown before anyone was known to be signed in, and the shell's nav and sign-out button are
  * chrome for someone who is.
  */
-function PanelError({ error }: { error: Error }) {
+// `unknown`, not `Error`: @tanstack/react-router widened ErrorComponentProps.error from Error to
+// unknown in a patch release. A generated project has no lockfile and resolves `^` to whatever is
+// current, so a narrower annotation here typechecks in the kit and fails in every project the kit
+// writes. `unknown` satisfies both, and the instanceof below already narrows it.
+function PanelError({ error }: { error: unknown }) {
   const t = useT()
   return (
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
