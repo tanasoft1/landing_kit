@@ -393,13 +393,12 @@ the server. Another tab does not fall out at that moment. It still holds its own
 memory and keeps working until that token expires, up to `JWT_ACCESS_EXPIRE_MINUTES`, 15 by default.
 Its next refresh is what fails, and that is when it lands on the login screen.
 
-> **The panel is same-origin, and keep it that way if you can.** In development it calls the API
-> through the `/api` proxy in `vite.config.ts`; in production the one Go binary serves both. So
-> nothing it sends is preflighted and `CORS_ORIGINS` does not govern it. Serve the panel from an
-> origin of its own and it does: the refresh token arrives as a cookie, and the browser discards it
-> unless the response carries `Access-Control-Allow-Credentials: true`, which the API sends only for
-> a listed origin. Miss that and login answers 200, every later call is unauthenticated, and nothing
-> says why.
+> **The panel is same-origin by design.** In development it calls the API through the `/api` proxy
+> in `vite.config.ts`; in production the one Go binary serves both. So nothing it sends is
+> preflighted and the API's `CORS_ORIGINS` does not govern it. Serving the panel from an origin of
+> its own is not a matter of listing that origin there: every fetch in `src/admin/lib/api.ts`
+> hard-codes `credentials: 'same-origin'`, so the browser would send no refresh cookie whatever the
+> API allows, and you would get a 200 login followed by a session that dies at its first refresh.
 
 ## Fonts and Mongolian Cyrillic
 

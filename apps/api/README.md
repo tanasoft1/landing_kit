@@ -35,11 +35,16 @@ VITE_CONTACT_ENDPOINT=http://localhost:3000/api/leads
 `api/.env.example`'s `CORS_ORIGINS` already defaults to `http://localhost:5173`, Vite's own
 default port, so the two dev servers talk to each other with no CORS changes on a fresh scaffold.
 
-The admin panel is not governed by that list, and it is worth knowing why before you go adding
-origins to fix it. The panel calls the API with relative paths. Vite's own `/api` proxy forwards
-those here in development and the one binary answers them directly in production, so the panel is
-same-origin on both sides and nothing it sends is preflighted. `CORS_ORIGINS` starts to govern it
-only if you deploy the panel on an origin of its own.
+`CORS_ORIGINS` also governs whatever admin client reads this API. For a project generated with
+`--backend=api` that client is one you write, most likely on an origin of its own, so list that
+origin here or its login fails at preflight.
+
+The admin panel a `--backend=admin` project receives is the exception, and it is worth knowing why
+before adding an origin to fix a problem it does not have. That panel calls the API with relative
+paths, which Vite's `/api` proxy forwards in development and the one binary answers directly in
+production, so it is same-origin at both ends and nothing it sends is preflighted. Moving it to an
+origin of its own is not an env-var change either: every fetch it makes hard-codes
+`credentials: 'same-origin'`, so it would send no refresh cookie whatever this list allows.
 
 `CORS_ORIGINS=*` is refused at startup. The admin session cookie only crosses origins because the
 API answers with `Access-Control-Allow-Credentials: true`, and a wildcard origin on a credentialed

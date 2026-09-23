@@ -102,8 +102,8 @@ rollback.
 
 | Kind | Examples | Why |
 |---|---|---|
-| Copied verbatim | `src/components`, `src/lib`, `src/routes`, `public`, `scripts` | nothing about them varies by answer |
-| Copied, filtered | `src/styles/presets` | only the chosen preset survives |
+| Copied verbatim | `src/components`, `src/lib`, `public`, `scripts` | nothing about them varies by answer |
+| Copied, filtered | `src/styles/presets`, `src/routes` | only the chosen preset survives; `src/routes/admin` only with `--backend=admin` |
 | Copied, one of two | `@/motion`, `@/theme`, `@/submit` implementations | see the boundary table below |
 | Copied, edited | `README.md`, `theme.css`, `biome.json`, `submit-schema.ts`, the docs components | the kit's own copy names things a generated project does not have |
 | Generated from answers | `package.json`, `tsconfig.json`, `vite.config.ts`, `registry.ts`, `block-modules.ts`, `variants.all.ts`, `pages.config.ts`, `site.config.ts`, `.gitignore`, `.kit/scaffold.json`, `pnpm-workspace.yaml`, and `docker-compose.yml` with a backend | these encode the answers, so copying them would only mean overwriting them a moment later |
@@ -201,7 +201,7 @@ flowchart TD
   REQ["incoming request"] --> MW["recover, logger, helmet, cors"]
   MW --> H{"path starts with /api?"}
   H -->|"yes"| G["/api/health"]
-  H -->|"yes"| P["public: POST /api/leads, /api/auth/login, /api/auth/refresh"]
+  H -->|"yes"| P["public: POST /api/leads, /api/auth/login, /api/auth/refresh, /api/auth/logout"]
   H -->|"yes"| AD["admin: GET /api/admin/leads, behind AuthMiddleware"]
   H -->|"no"| S{"HasSite?"}
   S -->|"yes"| FS["filesystem handler over the embedded tree<br/>NotFoundFile index.html"]
@@ -561,9 +561,9 @@ the email as submitted, so a lockout exists for addresses that were never regist
 presence of one cannot be used to ask whether an account exists.
 
 `refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
-reads it to decide whether a presented token is still live. `admin_audit_log` is written by the
-same two paths, through `internal/service/audit`, for login success, login failure and detected
-token reuse. `login_attempts` is read and written by `Login` alone: it reads the row before it looks
+reads it to decide whether a presented token is still live. `admin_audit_log` is written by those
+two paths and by logout, through `internal/service/audit`, for four events: login success, login
+failure, logout and detected token reuse. `login_attempts` is read and written by `Login` alone: it reads the row before it looks
 the email up, records a failure on both credential-failure branches, deletes the row on a successful
 sign-in, and drops rows whose lock lapsed more than a day ago.
 
