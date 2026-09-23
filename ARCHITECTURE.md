@@ -730,7 +730,9 @@ the third column is the part worth knowing.
 | Page SEO copy | `PAGE_SEO` in `cli/generate.mjs`, the kit's `pages.config.ts` | `assertSeoCopyMatchesKit` at generate time |
 | Compiler options | `apps/web/tsconfig.json`, `tsconfigJson` in the CLI | `assertTsconfigMatchesKit`, compared semantically |
 | The route tree | `apps/web/src/app/routeTree.gen.ts`, `routeTreeGen` in the CLI | `assertRouteTreeMatchesKit`, on every scaffold: it builds the admin branch and compares the whole file against the kit's |
-| The Vite config | `apps/web/vite.config.ts`, `viteConfigTs` in the CLI | **nothing.** The two are written by hand against each other, and the panel gave them two more things to agree on: the `/api` dev proxy and the `/admin` prerender entry |
+| The Vite config | `apps/web/vite.config.ts`, `viteConfigTs` in the CLI | `assertViteConfigMatchesKit`, on seven axes rather than by text: the `/admin` prerender entry, the `/api` dev proxy, `build.manifest`, the prerender options, the tanstackStart entries, the `@/theme` alias, the page list, plus the alias keys and the plugins in order. Not equality — the kit branches on `KIT_ANIMATION`, `KIT_SUBMIT` and `KIT_CONFIG` and a scaffold does not |
+| The panel's roots | `ADMIN_COPY_DIRS`, `ADMIN_ROUTE_PATHS`, the directories themselves | `assertAdminPathsExist` proves each name is real; `assertPanelStaysInItsRoots` fails a file outside them that is named for the panel or imports it. A panel file with a neutral name and no panel imports is caught only by the snapshot diff |
+| Admin-only packages | `ADMIN_RUNTIME_DEPS`, what the shipped source imports | `assertShippedImportsAreDeclared`, per answer set, over the finished target |
 | pnpm settings | `pnpm-workspace.yaml`, `pnpmWorkspaceYaml` in the CLI | byte comparison after stripping the `packages:` key |
 | Compose file | root `docker-compose.yml`, `dockerComposeYml` in the CLI | `assertDockerComposeMatchesKit`, only when the kit's copy is on disk |
 | Dependency versions | the kit's `package.json`, a generated project's | versions are read from the kit manifest; only the *grouping* is listed, and an unclassified package is an error |
@@ -740,9 +742,9 @@ the third column is the part worth knowing.
 | DB port 5433 | `conf.defaultDBPort`, the compose host port, `.env.example` | nothing automated; the comments cross-reference each other |
 | The `@/submit` surface | `submit.endpoint.ts`, `submit.rpc.ts` | the `SubmitModule` contract line at the bottom of each |
 
-Three of those checks compare against files that **do not exist under `pnpm dlx`** at all:
-`tsconfig.json`, `pnpm-workspace.yaml` and `docker-compose.yml` are none of them in
-`package.json`'s `files`. Each guards on `existsSync` and therefore runs only when the kit's own
+Four of those checks compare against files that **do not exist under `pnpm dlx`** at all:
+`tsconfig.json`, `pnpm-workspace.yaml`, `docker-compose.yml` and `vite.config.ts` are none of them
+in `package.json`'s `files`. Each guards on `existsSync` and therefore runs only when the kit's own
 working copy is present, which is exactly where someone would be editing them. The other checks
 read `apps/web/src`, which the tarball does carry, so they run on every scaffold.
 
