@@ -46,6 +46,16 @@ type ServerConfig struct {
 	// header: Fiber's c.IP() returns "" when the named header is absent, and a limiter keyed
 	// on that collapses every caller into one bucket.
 	ProxyHeader string
+	// TrustedProxies is the comma-separated list of IPs or CIDR ranges allowed to set
+	// ProxyHeader, and it is what makes ProxyHeader safe to honour at all.
+	//
+	// Fiber only consults ProxyHeader when EnableTrustedProxyCheck is on, and that flag defaults
+	// to false, which means IsProxyTrusted() answers true for every caller. Setting ProxyHeader
+	// without this list therefore hands the client the pen: c.IP() returns whatever the request
+	// wrote, so the login limiter is bypassed one bucket per request and attacker-chosen text is
+	// persisted into admin_audit_log.ip. cmd/main.go turns the check on unconditionally, so an
+	// empty list here means the header is ignored and every request is keyed on its socket peer.
+	TrustedProxies string
 }
 
 type DatabaseConfig struct {
@@ -90,6 +100,15 @@ type JWTConfig struct {
 	Secret              string
 	AccessExpireMinutes int
 	RefreshExpireDays   int
+	// SessionMaxDays is the absolute lifetime of one login's refresh-token family, stamped at
+	// login and copied forward unchanged by every rotation.
+	//
+	// RefreshExpireDays on its own is an idle timeout, not a session lifetime: each rotation
+	// recomputes the successor's expiry from the current time, so a family survives as long as
+	// somebody keeps refreshing it. That "somebody" is not always the admin. This is the bound
+	// that makes a quietly-rotated stolen refresh token eventually stop working without anyone
+	// having to notice it was stolen.
+	SessionMaxDays int
 }
 
 // DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
@@ -131,13 +150,18 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_REFRESH_EXPIRE_DAYS: %w", err)
 	}
+	sessionMaxDays, err := strconv.Atoi(getEnv("JWT_SESSION_MAX_DAYS", "30"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid JWT_SESSION_MAX_DAYS: %w", err)
+	}
 
 	cfg := &Config{
 		Server: ServerConfig{
-			Port:        getEnv("PORT", "3000"),
-			AppEnv:      AppEnv(),
-			CORSOrigins: getEnv("CORS_ORIGINS", devCORSOrigins),
-			ProxyHeader: getEnv("PROXY_HEADER", ""),
+			Port:           getEnv("PORT", "3000"),
+			AppEnv:         AppEnv(),
+			CORSOrigins:    getEnv("CORS_ORIGINS", devCORSOrigins),
+			ProxyHeader:    getEnv("PROXY_HEADER", ""),
+			TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
 		},
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -167,6 +191,7 @@ func Load() (*Config, error) {
 			Secret:              getEnv("JWT_SECRET", ""),
 			AccessExpireMinutes: accessExpireMinutes,
 			RefreshExpireDays:   refreshExpireDays,
+			SessionMaxDays:      sessionMaxDays,
 		},
 	}
 
@@ -193,9 +218,23 @@ func Load() (*Config, error) {
 	// Fiber enforces that itself by panicking inside cors.New, so all this check adds is a
 	// startup error that names the variable instead of a stack trace from middleware setup.
 	//
-	// Entries are compared whole, so Fiber's "https://*.example.com" subdomain form still works.
-	// That form answers with the caller's own origin, never with "*".
+	// Any "*" is refused, not only a bare one. Fiber also accepts a subdomain wildcard
+	// ("https://*.example.com") and reflects the caller's own origin back for a match, which
+	// looks safe next to a literal "*" and is not, because the response is credentialed. The
+	// refresh cookie rides on it, and the refresh response carries a fresh access token in its
+	// body, so any host that matches the pattern can call /api/auth/refresh with the admin's
+	// cookie and READ the answer. That turns a takeover of one forgotten subdomain into full
+	// panel access.
+	//
+	// The deployment this leaves working is the one that matters: admin.example.com calling
+	// api.example.com, listed literally. That is cross-origin but same-site, so the Strict cookie
+	// does travel and AllowCredentials in internal/http/routes is doing real work there. A panel
+	// on a genuinely different registrable domain never receives the cookie at all, whatever CORS
+	// says, so nothing is lost by refusing to guess at hostnames.
 	for _, origin := range strings.Split(cfg.Server.CORSOrigins, ",") {
+		if !strings.Contains(origin, "*") {
+			continue
+		}
 		if strings.TrimSpace(origin) == "*" {
 			return nil, fmt.Errorf(
 				"CORS_ORIGINS is %q, which allows every origin: the admin session cookie travels "+
@@ -203,6 +242,11 @@ func Load() (*Config, error) {
 					"logged-in admin session to every site a browser visits",
 				cfg.Server.CORSOrigins)
 		}
+		return nil, fmt.Errorf(
+			"CORS_ORIGINS entry %q is a wildcard: responses here are credentialed, so every host "+
+				"matching that pattern could call /api/auth/refresh with the admin's cookie and "+
+				"read the access token out of the reply. List each origin literally",
+			strings.TrimSpace(origin))
 	}
 
 	if cfg.Notify.Driver != notifyDriverLog && cfg.Notify.Driver != notifyDriverSES {
