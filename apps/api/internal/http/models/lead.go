@@ -7,8 +7,8 @@ import (
 )
 
 // CreateLeadRequest is the contact form's wire shape. It matches
-// apps/web/src/integrations/submit-schema.ts field for field, including the two anti-spam fields,
-// because the client can be bypassed and this is the only check that cannot be.
+// the web project's `src/integrations/submit-schema.ts` field for field, including the two
+// anti-spam fields, because the client can be bypassed and this is the only check that cannot be.
 type CreateLeadRequest struct {
 	Name    string `json:"name" validate:"required,min=2,max=120"`
 	Email   string `json:"email" validate:"required,email"`
@@ -39,10 +39,9 @@ type CreateLeadRequest struct {
 	ElapsedMs int `json:"elapsed_ms" validate:"-"`
 }
 
-// MinElapsedMS mirrors MIN_ELAPSED_MS in apps/web/src/integrations/submit-schema.ts. The two are
-// not generated from one source in 2a; packages/contract does that in a later phase. Until then,
-// changing one means changing the other, and the integration test in
-// internal/http/handlers/lead/lead_test.go is what fails if they drift.
+// MinElapsedMS mirrors MIN_ELAPSED_MS in the web project's `src/integrations/submit-schema.ts`.
+// The two are not generated from one source, so changing one means changing the other, and the
+// integration test in internal/http/handlers/lead/lead_test.go is what fails if they drift.
 const MinElapsedMS = 2000
 
 // RsLead is one row of GET /api/admin/leads. A separate type from sqlc.Lead, not that struct

@@ -8,9 +8,8 @@ import (
 )
 
 // Config loading reads process env, so these cases cannot use t.Parallel: t.Setenv panics in a
-// parallel test. Same documented exception as psyfint_v2_back's conf/config_test.go. A scratch
-// .env is deliberately not used either: conf.LoadEnvFile is sync.Once guarded, so only the first
-// read would ever take effect for the whole test binary.
+// parallel test. A scratch .env is deliberately not used either: conf.LoadEnvFile is sync.Once
+// guarded, so only the first read would ever take effect for the whole test binary.
 //
 //nolint:paralleltest // t.Setenv is incompatible with t.Parallel
 func TestLoadJWTSecretValidation(t *testing.T) {

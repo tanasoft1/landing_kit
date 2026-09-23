@@ -1,6 +1,5 @@
 // Package testsupport hands every integration test its own pristine, migrated Postgres
-// database. Mirrors ~/work/psyfint_v2_back/internal/testsupport/db.go, minus its OrgID seeding,
-// which is psyfint-specific: this service has no organizations table.
+// database. Nothing is seeded into it beyond the migrations: a test that needs a row writes it.
 package testsupport
 
 import (

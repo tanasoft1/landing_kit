@@ -31,9 +31,8 @@ import (
 // main does nothing but map run's error to an exit code.
 //
 // The work lives in run so that `defer` still executes on the failure path: os.Exit skips
-// deferred calls, so a `log.Fatalf` or a bare os.Exit inside the body would leak whatever later
-// tasks in this plan register a defer for, starting with the pgx pool in task 2. psyfint_v2_back
-// calls log.Fatalf inline and does not have this split.
+// deferred calls, so a `log.Fatalf` or a bare os.Exit inside the body would leak everything run
+// registers a defer for, starting with the pgx pool.
 func main() {
 	if err := run(); err != nil {
 		slog.Error("startup failed", slog.Any("err", err))
@@ -130,7 +129,7 @@ func run() error {
 
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",
-		// BodyLimit is 1 MB, not psyfint's 10 MB: the largest request this service accepts is
+		// BodyLimit is 1 MB, well under the framework default: the largest request this service accepts is
 		// a contact form whose message field is capped at 4000 characters. A high limit on a
 		// public unauthenticated endpoint is free memory pressure for an attacker.
 		BodyLimit:   1 * 1024 * 1024,
@@ -181,8 +180,8 @@ func run() error {
 	// an isolated reproduction of that shape.
 	//
 	// Blocking on both removes the race instead of narrowing it, and the goroutine no longer
-	// needs to cancel ctx at all. psyfint_v2_back waits only on ctx and hangs forever when the
-	// port is already bound.
+	// needs to cancel ctx at all. Waiting on ctx alone would hang forever when the port is
+	// already bound.
 	var failure error
 	select {
 	case <-ctx.Done():

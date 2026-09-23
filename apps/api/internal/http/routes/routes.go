@@ -68,8 +68,8 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 
 	api := app.Group("/api")
 	api.Get("/health", func(c *fiber.Ctx) error {
-		// Same payload as psyfint_v2_back's, so a monitoring check written against one service
-		// works unchanged against the other.
+		// A flat {status, message} payload, and a stable one: monitoring checks are written
+		// against this shape, so changing it breaks them silently.
 		return c.JSON(fiber.Map{"status": "ok", "message": "server is running"})
 	})
 
@@ -85,6 +85,6 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 	if static.HasSite() {
 		app.Use(static.Handler())
 	} else {
-		slog.Warn("no web build embedded, serving API only -- run `make build` in apps/api to embed the site")
+		slog.Warn("no web build embedded, serving API only -- run `make build` in the API directory to embed the site")
 	}
 }

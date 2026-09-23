@@ -12,9 +12,9 @@ import (
 // move up through NeedsRehash below, on their next successful login.
 const bcryptCost = 12
 
-// HashPassword hashes password at bcryptCost. Named and exported, unlike psyfint_v2_back which
-// hashes ad hoc wherever it seeds an account: seed-admin needs this directly, and a shared
-// function is what keeps that hash and the one CheckPasswordHash verifies from drifting apart.
+// HashPassword hashes password at bcryptCost. Named and exported rather than hashed ad hoc at
+// each call site: seed-admin needs this directly, and one shared function is what keeps the hash
+// it writes and the one CheckPasswordHash verifies from drifting apart.
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
@@ -23,8 +23,7 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// CheckPasswordHash reports whether password matches hash. Mirrors
-// psyfint_v2_back/internal/utils/hash.go.
+// CheckPasswordHash reports whether password matches hash.
 func CheckPasswordHash(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

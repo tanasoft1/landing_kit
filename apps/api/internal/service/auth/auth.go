@@ -1,10 +1,9 @@
-// Package auth implements admin login and token refresh. Mirrors
-// ~/work/psyfint_v2_back/internal/service/auth/auth.go, with two deliberate differences. Login
-// always runs bcrypt, even when the email does not exist (see the comment on dummyPasswordHash
-// below), where psyfint returns on pgx.ErrNoRows before ever calling bcrypt. And a refresh token
-// is not stateless here: every one has a row in refresh_tokens, is spent by the call that
-// exchanges it, and takes every token descended from the same login down with it if it is ever
-// presented twice (see Refresh).
+// Package auth implements admin login and token refresh. Two properties of it are deliberate.
+// Login always runs bcrypt, even when the email does not exist (see the comment on
+// dummyPasswordHash below), so response time cannot tell an unregistered email from a wrong
+// password. And a refresh token is not stateless here: every one has a row in refresh_tokens, is
+// spent by the call that exchanges it, and takes every token descended from the same login down
+// with it if it is ever presented twice (see Refresh).
 package auth
 
 import (
@@ -114,8 +113,8 @@ type LoginResult struct {
 // against. It exists so Login can run bcrypt.CompareHashAndPassword on every attempt, including
 // one against an email that is not registered.
 //
-// psyfint_v2_back returns on pgx.ErrNoRows before comparing anything, which is faster for that
-// one path -- and that speed difference is exactly what makes it an oracle: bcrypt is
+// Returning on pgx.ErrNoRows before comparing anything would be faster for that one path --
+// and that speed difference is exactly what would make it an oracle: bcrypt is
 // deliberately slow (that is its entire purpose), so a request that skips it returns measurably
 // sooner than one that runs it. An attacker timing responses can use that gap to enumerate valid
 // emails without ever seeing a different error message. Comparing against this fixed hash costs

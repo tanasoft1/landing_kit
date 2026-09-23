@@ -92,7 +92,7 @@ func NewSES(ctx context.Context, cfg conf.NotifyConfig) (Notifier, error) {
 // validators only check that Content.Data is non-nil, never its content, so whether SES's
 // server-side RFC 5322 composition would strip an embedded CRLF is an assumption this code does
 // not rely on, and one that cannot be tested without a live send. Email needs no equivalent
-// sanitiser here: task 5's handler validates it with the `email` struct tag before the lead
+// sanitiser here: the lead handler validates it with the `email` struct tag before the lead
 // service ever calls Notifier.Lead.
 func buildSubject(siteName, name string) string {
 	name = strings.ReplaceAll(name, "\r", "")
