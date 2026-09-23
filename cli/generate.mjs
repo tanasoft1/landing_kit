@@ -379,22 +379,37 @@ __unconfig*
 !.kit/scaffold.json
 `
 
-// Appended only when a backend was scaffolded (api/ does not otherwise exist), never spliced into
-// GITIGNORE unconditionally: the four --backend=none snapshot variants must see byte-identical
-// output to before, and an unconditional append would move every one of them for a rule that
-// names a path none of them have.
+// The git rules the generated \`api/\` tree needs, appended only when a backend was scaffolded
+// (api/ does not otherwise exist) and never spliced into GITIGNORE unconditionally: the four
+// --backend=none snapshot variants must see byte-identical output to before, and an unconditional
+// append would move every one of them for rules that name paths none of them have.
 //
-// Three lines, not the two this looks like it should need, for the identical reason as this kit's
-// own .gitignore (see there): the bare \`dist\` rule three lines up already excludes this directory
-// outright, and a directory excluded that way cannot be reopened by a file-level negation below
-// it. Skipping this fix here would mean a scaffolded project's OWN \`git init\` never tracks its
-// placeholder, so a fresh clone of THAT project hits the exact \`go:embed\` failure Task 1 exists
-// to prevent -- one level further out, in every project this kit generates rather than in the kit
-// itself.
-const API_STATIC_DIST_GITIGNORE = `
+// Both halves exist because the kit's own .gitignore needed the same rule and fixing it only there
+// pushes the failure one level out, into every project this kit generates. That distance is the
+// argument, not a detail of it. A maintainer of THIS repo knows why a stray binary appeared; the
+// client's team is whoever the kit was handed to, running \`make build\` on day one and \`git add -A\`
+// after it.
+//
+// The placeholder negation is three lines, not the two it looks like it should need, for the
+// identical reason as this kit's own .gitignore (see there): the bare \`dist\` rule three lines up
+// already excludes that directory outright, and a directory excluded that way cannot be reopened
+// by a file-level negation below it. Without it a scaffolded project's OWN \`git init\` never tracks
+// its placeholder, and a fresh clone of THAT project hits the \`go:embed\` failure Task 1 exists to
+// prevent.
+//
+// \`api/bin/\` and \`api/tmp/\` are the two binaries the makefile writes, and both \`makefile\` and
+// \`.air.toml\` ship (API_COPY_FILES in cli/kit-manifest.mjs). \`make build\` writes
+// api/bin/landing-api, 34 MB with the whole site embedded. \`make dev\` runs air, whose tmp_dir is
+// \`tmp\`, so every save rebuilds api/tmp/main. The bare \`dist\` rule covers neither.
+const API_GITIGNORE = `
 !api/internal/static/dist/
 api/internal/static/dist/*
 !api/internal/static/dist/.placeholder
+
+# Go build output. \`make build\` writes api/bin/landing-api with the whole site embedded, and
+# \`make dev\` runs air, which rebuilds api/tmp/main on every save.
+api/bin/
+api/tmp/
 `
 
 // --- docker-compose.yml ---------------------------------------------------------------------------
@@ -1579,7 +1594,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const files = [
     ['package.json', packageJson(outDir, answers, manifest)],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
-    ['.gitignore', hasBackend ? GITIGNORE + API_STATIC_DIST_GITIGNORE : GITIGNORE],
+    ['.gitignore', hasBackend ? GITIGNORE + API_GITIGNORE : GITIGNORE],
     ['vite.config.ts', viteConfigTs(answers)],
     ['tsconfig.json', tsconfig],
     ['src/app/routeTree.gen.ts', routeTreeGen(answers)],
