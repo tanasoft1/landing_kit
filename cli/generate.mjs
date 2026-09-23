@@ -756,6 +756,137 @@ ${devProxy}  resolve: {
 `
 }
 
+/**
+ * The span starting at `opener` and ending at its matching close bracket.
+ *
+ * `opener` must end in the bracket itself (`'alias: {'`, `'plugins: ['`), so depth starts at one
+ * and the first unmatched close ends the span.
+ */
+function matchedSpan(text, opener, file, label) {
+  const at = text.indexOf(opener)
+  if (at === -1) throw new Error(`${file}: expected to find '${opener}' — ${label}`)
+  const open = opener.at(-1)
+  const close = open === '{' ? '}' : ']'
+  let depth = 0
+  for (let i = at; i < text.length; i++) {
+    if (text[i] === open) depth++
+    else if (text[i] === close && --depth === 0) return text.slice(at, i + 1)
+  }
+  throw new Error(`${file}: '${opener}' is never closed — ${label}`)
+}
+
+/** From the line holding `from` through the line holding `to`, inclusive. */
+function lineSpan(text, from, to, file, label) {
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => l.includes(from))
+  if (start === -1) throw new Error(`${file}: no line contains '${from}' — ${label}`)
+  const end = lines.findIndex((l, i) => i >= start && l.includes(to))
+  if (end === -1) throw new Error(`${file}: no line contains '${to}' after '${from}' — ${label}`)
+  return lines.slice(start, end + 1).join('\n')
+}
+
+function oneLine(text, needle, file, label) {
+  const line = text.split('\n').find((l) => l.includes(needle))
+  if (line === undefined) throw new Error(`${file}: no line contains '${needle}' — ${label}`)
+  return line.trim()
+}
+
+// --- vite.config.ts, against the kit's own ------------------------------------------------------
+//
+// The last generated file with a hand-maintained twin and no drift assertion. Every other one has
+// a check — `assertTsconfigMatchesKit`, `pnpmWorkspaceYaml`'s byte comparison,
+// `assertDockerComposeMatchesKit`, `assertRouteTreeMatchesKit`, `assertSeoCopyMatchesKit` — and
+// this is the file that decides whether the panel shell is prerendered at all. Before this, the
+// `/admin` prerender entry and the `/api` dev proxy were proven by a re-recordable snapshot hash
+// and by a client's own build, and by nothing else.
+//
+// NOT text equality, deliberately. The two files legitimately differ: the kit branches on
+// `KIT_ANIMATION`, `KIT_SUBMIT` and `KIT_CONFIG` and a generated project has one answer baked in,
+// so `@/motion`, `@/submit`, `@/config` and the `pages`/`site` imports are different on purpose.
+// A check demanding equality there would fail on every scaffold and be switched off within a week.
+// What is asserted instead is the set of axes on which the two MUST agree — each extracted from
+// what the CLI emits, then required verbatim (whitespace-normalised) in the kit's file. An axis
+// whose anchor has moved fails on the extraction side, so the list cannot rot quietly either.
+const VITE_AXES = [
+  // The panel's prerendered shell. Drop this and the Go binary's /admin fallback serves the
+  // prerendered HOME page, so a hard load of an admin URL paints the marketing hero.
+  ['the /admin prerender entry', (t, f) => oneLine(t, "path: '/admin'", f, 'the panel shell')],
+  // The panel's dev-time same-origin. Without it `credentials: 'same-origin'` sends no refresh
+  // cookie and every panel request in development is cross-origin.
+  ['the /api dev proxy', (t, f) => matchedSpan(t, 'server: {', f, 'the panel dev proxy')],
+  // Read by block-preloads.ts at prerender time.
+  ['build.manifest', (t, f) => oneLine(t, 'build: { manifest: true }', f, 'the vite manifest')],
+  // `autoStaticPathsDiscovery` and `crawlLinks` both false is what keeps /docs out of dist, and
+  // `failOnError` is what makes a broken prerender entry a failed build rather than a warning.
+  ['the prerender options', (t, f) => matchedSpan(t, 'prerender: {', f, 'prerender settings')],
+  // src/app/, not directly under src/ — without these three the build looks for src/router.* .
+  ['the tanstackStart entries', (t, f) => oneLine(t, 'router: { entry:', f, 'the app entries')],
+  // The one alias a generated project keeps as a runtime branch, because `site.theme.mode` must
+  // stay editable after scaffolding.
+  ['the @/theme alias', (t, f) => lineSpan(t, "'@/theme':", 'theme.single.tsx', f, 'theme alias')],
+  ['the page list', (t, f) => matchedSpan(t, 'enumerateUrls(pages, site).map((u) => ({', f, 'x')],
+]
+
+const aliasKeys = (text, file) =>
+  [
+    ...matchedSpan(text, 'alias: {', file, 'the resolve.alias map').matchAll(/^\s*'([^']+)':/gm),
+  ].map((m) => m[1])
+
+const pluginNames = (text, file) =>
+  [...matchedSpan(text, 'plugins: [', file, 'the plugin list').matchAll(/^\s*(\w+)\(/gm)].map(
+    (m) => m[1],
+  )
+
+// Indentation differs between the two files in places, and comments differ wherever one of them
+// explains something the other does not have. Neither is an axis: this compares what the two
+// files DO. Comment LINES only, never a trailing `//`, because `'http://localhost:3000'` is one of
+// the values being compared.
+const flat = (s) => stripCommentLines(s).replace(/\s+/g, ' ').trim()
+
+/**
+ * What `viteConfigTs` emits for `--backend=admin` must agree with the kit's own vite.config.ts.
+ *
+ * Guarded on `existsSync` for the same reason as the tsconfig, workspace and compose checks:
+ * `apps/web/vite.config.ts` is not in `package.json`'s `files`, so under `pnpm dlx` it is not on
+ * disk at all. It IS on disk in every working copy, which is the only place anyone edits it.
+ */
+function assertViteConfigMatchesKit(kitRoot) {
+  const rel = 'vite.config.ts'
+  const kitCopy = kitPath(kitRoot, rel)
+  if (!existsSync(kitCopy)) return
+  const kitText = readFileSync(kitCopy, 'utf8')
+  const generated = viteConfigTs({ backend: 'admin' })
+  const divergences = []
+
+  for (const [label, extract] of VITE_AXES) {
+    const fragment = extract(generated, 'cli/generate.mjs viteConfigTs')
+    if (!flat(kitText).includes(flat(fragment))) {
+      divergences.push(`  ${label}\n    the CLI writes: ${flat(fragment)}`)
+    }
+  }
+  for (const [label, read] of [
+    ['resolve.alias keys, in order', aliasKeys],
+    ['plugins, in order', pluginNames],
+  ]) {
+    const mine = read(generated, 'cli/generate.mjs viteConfigTs')
+    const theirs = read(kitText, `apps/web/${rel}`)
+    if (mine.join(' ') !== theirs.join(' ')) {
+      divergences.push(
+        `  ${label}\n    the CLI writes: ${mine.join(', ')}\n    the kit has:    ${theirs.join(', ')}`,
+      )
+    }
+  }
+
+  if (divergences.length === 0) return
+  throw new Error(
+    `apps/web/${rel} and viteConfigTs in cli/generate.mjs have diverged on ${divergences.length} ` +
+      'axis/axes. These two are written by hand against each other and this is the only thing ' +
+      'that compares them. Exact text equality is NOT required — the kit branches on ' +
+      'KIT_ANIMATION, KIT_SUBMIT and KIT_CONFIG and a scaffold does not — but everything below ' +
+      `must agree.\n${divergences.join('\n')}`,
+  )
+}
+
 // --- tsconfig.json --------------------------------------------------------------------------------
 
 function tsconfigJson(answers) {
@@ -1720,6 +1851,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const tsconfig = tsconfigJson(answers)
   assertTsconfigMatchesKit(kitRoot, tsconfig)
   assertRouteTreeMatchesKit(kitRoot)
+  assertViteConfigMatchesKit(kitRoot)
 
   // `?? 'none'` for the same reason as `cli/copy.mjs`: belt-and-braces for a caller that builds
   // an `answers` object by hand rather than through `resolveAnswers`.
