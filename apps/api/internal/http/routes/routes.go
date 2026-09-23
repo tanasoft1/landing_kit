@@ -36,25 +36,33 @@ func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenServic
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins,
 		// Authorization is listed because every /api/admin/* route reads the access token from
-		// it. A browser refuses to send a header the preflight response did not name, so leaving
-		// it out fails the request before the handler sees it.
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		// it. X-Requested-With is listed because /api/auth/refresh and /api/auth/logout require
+		// it (see requireNonSimpleRequest in public.go). A browser refuses to send a header the
+		// preflight response did not name, so leaving either out fails the request before the
+		// handler sees it.
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods: "GET, POST, OPTIONS",
-		// What this buys: the admin refresh token lives in a cookie (see
-		// internal/http/handlers/auth/cookie.go), and a browser neither stores nor sends a cookie
-		// on a cross-origin request unless the response says
-		// Access-Control-Allow-Credentials: true. Nothing the kit itself generates is such a
-		// client any more: the panel reaches this API through Vite's /api proxy
-		// (apps/web/vite.config.ts) in development and through the one binary in production, so it
-		// is same-origin both times, and a --backend=api project's contact form posts no cookies
-		// at all. This is here for the deployment that serves the panel from a different origin
-		// than the API, which nothing in this repo does but nothing in this repo forbids either.
+		// What this buys, stated more narrowly than it used to be. The admin refresh token lives
+		// in a cookie (see internal/http/handlers/auth/cookie.go), and a browser neither stores
+		// nor sends a cookie on a cross-origin request unless the response says
+		// Access-Control-Allow-Credentials: true.
 		//
-		// What this forbids: the origin allowlist can never be "*". A credentialed request
-		// honoured from any origin would hand a logged-in admin session to every site a browser
-		// visits. Fiber panics inside cors.New on that combination, and conf.Load rejects a "*"
-		// entry in CORS_ORIGINS first, so the failure names the variable rather than printing a
-		// stack trace from middleware setup.
+		// The case that used to be claimed here -- "the panel served from a different origin than
+		// the API" -- is half impossible. The cookie is SameSite=Strict, and SameSite is evaluated
+		// per site, not per origin, so a panel on a different registrable domain never receives or
+		// sends that cookie whatever this header says. What does work, and what this is for, is
+		// the same-site split: admin.example.com calling api.example.com is cross-origin, so CORS
+		// applies, and same-site, so the Strict cookie travels. Nothing the kit generates is such
+		// a client -- the panel reaches this API through Vite's /api proxy in development and
+		// through the one binary in production, same-origin both times -- but people deploy that
+		// shape and silently breaking it is worse than the narrowed risk.
+		//
+		// What this forbids: the origin allowlist can never contain a wildcard, bare or
+		// subdomain-shaped. Fiber reflects a matching origin back, so with credentials on, any
+		// host under "https://*.example.com" could call /api/auth/refresh with the admin's cookie
+		// and read the fresh access token out of the response -- a subdomain takeover becoming
+		// full panel access. conf.Load rejects every "*" in CORS_ORIGINS, so the failure names the
+		// variable at startup rather than waiting for someone to find it.
 		AllowCredentials: true,
 	}))
 

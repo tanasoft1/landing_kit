@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"landing-api/conf"
 	"landing-api/internal/db/dbsetup"
@@ -131,6 +135,25 @@ func run() error {
 		// public unauthenticated endpoint is free memory pressure for an attacker.
 		BodyLimit:   1 * 1024 * 1024,
 		ProxyHeader: cfg.Server.ProxyHeader,
+		// ProxyHeader alone is not a setting, it is a hole. Fiber consults it only when
+		// EnableTrustedProxyCheck is on, and that flag defaults to false, which makes
+		// IsProxyTrusted() answer true for every caller: c.IP() then returns whatever the request
+		// wrote in that header. Any deployment that set PROXY_HEADER handed each caller a fresh
+		// rate-limit bucket per request -- bypassing the limiter in front of the login endpoint
+		// outright -- and let them write their own text into admin_audit_log.ip.
+		//
+		// Turned on unconditionally, including when TrustedProxies is empty. That combination is
+		// Fiber's "trust nobody": the header is ignored and every request keys on its socket peer.
+		// Losing per-caller keying behind an unconfigured proxy is a cost, and it is the smaller
+		// one, because the alternative is a limiter that anyone can step around by editing a
+		// header. conf.Load parses the list so a typo fails at startup rather than degrading to
+		// this quietly.
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          cfg.Server.TrustedProxyList(),
+		// Without this c.IP() returns the header's raw first field, whatever it contains. With it
+		// the value is parsed as an IP and only a valid one comes back, so a trusted proxy that
+		// forwards junk cannot put junk in the audit log.
+		EnableIPValidation: true,
 	})
 
 	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService, !cfg.IsDevelopment())
@@ -204,19 +227,34 @@ const minSeedAdminPasswordLen = 12
 // Prints nothing but the created email: not the password, not its hash, not the row's id. A
 // seeded password must never reach a terminal scrollback or a CI log, so nothing else is written
 // anywhere on the success path.
+//
+// And it never reaches the command line either. The password used to be args[1], which put the
+// only credential guarding the panel into the shell's history file, the terminal scrollback, and
+// the process table, where any local user's `ps` could read it for as long as `go run` took to
+// compile and run. Careful output on the success path bought nothing while the documented way to
+// invoke the command leaked the value before it started. Reading stdin means a pipe or a heredoc
+// carries it and nothing persists it.
 func runSeedAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: seed-admin <email> <password>")
+	if len(args) != 1 {
+		return errors.New("usage: seed-admin <email>, with the password on stdin")
 	}
-	email, password := args[0], args[1]
+	email := args[0]
 
-	if len(password) < minSeedAdminPasswordLen {
-		return fmt.Errorf("password is %d characters, want at least %d", len(password), minSeedAdminPasswordLen)
-	}
-
-	hash, err := utils.HashPassword(password)
+	password, err := readSeedPassword(os.Stdin)
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return err
+	}
+
+	// Runes, not bytes. len() counts bytes, and this kit defaults to Mongolian: six Cyrillic
+	// characters are twelve bytes, so a six-character password passed a twelve-character floor.
+	if utf8.RuneCountInString(password) < minSeedAdminPasswordLen {
+		return fmt.Errorf("password is %d characters, want at least %d",
+			utf8.RuneCountInString(password), minSeedAdminPasswordLen)
+	}
+
+	hash, hashErr := utils.HashPassword(password)
+	if hashErr != nil {
+		return fmt.Errorf("hash password: %w", hashErr)
 	}
 
 	// The unique constraint on admin_users.email, not a pre-check here, is what stops a second
@@ -233,4 +271,34 @@ func runSeedAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error 
 
 	fmt.Fprintln(os.Stdout, admin.Email) //nolint:errcheck // stdout write on a CLI's success path; nothing meaningful to do if it fails
 	return nil
+}
+
+// readSeedPassword takes one line off r and returns it with its line ending removed.
+//
+// One line, not everything r has: a password containing a newline is not a password an operator
+// can type back into the login form, and reading to EOF would quietly accept a whole file as one.
+// io.EOF without a line ending is success, because `printf '%s' "$pw" | ...` -- what the makefile
+// pipes -- sends no trailing newline.
+//
+// The prompt goes to stderr only when stdin is a terminal, so a piped invocation's output stays
+// exactly what it was: nothing but the created email on stdout. The characters still echo when
+// someone types here directly; `make seed-admin` turns echo off around the read, which is why that
+// is the documented way in.
+func readSeedPassword(r io.Reader) (string, error) {
+	if f, ok := r.(*os.File); ok {
+		if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+			fmt.Fprint(os.Stderr, "Password: ") //nolint:errcheck // a prompt; the read below is what matters
+		}
+	}
+
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+
+	password := strings.TrimRight(line, "\r\n")
+	if password == "" {
+		return "", errors.New("no password on stdin: pipe one in, or run `make seed-admin email=...`")
+	}
+	return password, nil
 }
