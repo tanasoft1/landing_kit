@@ -113,6 +113,12 @@ export const BOUNDARY_FILES = {
 // bans imports of files no scaffold contains. Same rule as the README: a generated project may
 // not describe machinery it does not have. `@/theme` is not among them: both its halves ship, so
 // the kit's own wording about them is already true in a generated project.
+//
+// `README.md`, `theme.css` and `components.json` edit on the ANSWERS as well as on that
+// kit/project difference: each says something about the admin panel that is true only of a
+// `--backend=admin` project — a whole README section, an `@import` and the paragraph above it, a
+// set of shadcn aliases. Every transform here is called with `answers`, so that is a condition
+// inside the transform rather than a second list here.
 export const TRANSFORMED_FILES = [
   'README.md',
   'components.json',

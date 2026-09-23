@@ -1,11 +1,11 @@
 {
   ".gitignore": "3de4dafdeacefd2363e10b40bdbb2e6a076ad5e4680b00103b89d16f915cbb7e",
   ".kit/scaffold.json": "ac212a98e5c7c85e48adac936260f41669c8706bd6819ef6f725c71d6b5741fb",
-  "README.md": "8f7662a52469b28eab2b867aafe66094967e5f2a18e6b8cd29ce8628bbbf2dfe",
+  "README.md": "29cc008d0a334e0b4c4d981cb7c76f329eb897971bdc13c86649eb03cc17d3a8",
   "api/.air.toml": "801bd5f1851a84ca179301c4a16eaf2e4dfe8440373c5206894f13a5f4ba0a5c",
   "api/.env.example": "e7495adc7f8f35903529263fa58e353331c25aae85d42c051c673f3dba1ec984",
   "api/.golangci.yml": "62b6e961a7cc573248d3e1f25237717d40895200ad35d0ffb187cb91f4b0dd82",
-  "api/README.md": "b8d5415907893f71831e61403d341b178da648c4fcc923edaa41be952cd657ee",
+  "api/README.md": "d648b6b831e7e813d008bf3a41f9a1d0889ca7fd6405cc5c04a2fa6aa0f8b43d",
   "api/cmd/main.go": "0a118d6f3afcbb48bedab2245f532710ae727f8498a80cfee7b281d17905be02",
   "api/conf/config.go": "c160bde4b459767115da03e740e2878d9c2242b6ec1f379656e6d2256451430c",
   "api/conf/config_test.go": "96982411ab347a33322a612c1f70c7150fbf24cf490a089cd65a3a04d6fa2978",
