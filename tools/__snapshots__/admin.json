@@ -168,7 +168,7 @@
   "src/routes/$.tsx": "c46027d7b6dc2603438f2383003cb3b9004c915b29bf6178d875e860e9f3d303",
   "src/routes/__root.tsx": "a7e1ad993a1944c116430a1e9549dbfe109a558c111b76646c6aaaf675f3ca1d",
   "src/routes/admin/_authed/leads.tsx": "b572e19d41e9e6425a6352916fdb7e8eeb291abecd31ddaef9e278f9305c7a45",
-  "src/routes/admin/_authed.tsx": "592974fbcd38a55587fb6791e30554b798a9cd6178d7b918daac37a6c137f966",
+  "src/routes/admin/_authed.tsx": "5f90fdd097755258deccda423a9d963fabe7504dd7b49fc088eba5eea18451cb",
   "src/routes/admin/index.tsx": "818ea5f24786b91736c48d9d3436526a16c9809f7c019a1dfde80cfd8dfee413",
   "src/routes/admin/login.tsx": "e4de05ee745c30e6f5bd6ce8d48fc7b8e05dd256dfc4464e592309bd506d2f3e",
   "src/routes/admin.tsx": "7f7cbc26a93b92f3c132736cf4f89efdb5ded959a720429136a0190b3527617f",
