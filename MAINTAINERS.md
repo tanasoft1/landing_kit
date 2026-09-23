@@ -289,15 +289,41 @@ refused for any environment that is not `development`, because a wrong origin is
 everywhere. `NOTIFY_DRIVER=log` is refused only in `production`, because a staging site emailing a
 real client is worse than a staging site not emailing.
 
-`CORS_ORIGINS` carries a second check with no environment condition at all: a `*` entry is refused
-in `development` too. `internal/http/routes` sets `AllowCredentials: true` so the admin refresh
-cookie survives a cross-origin login, and the CORS spec forbids pairing credentials with a wildcard
-origin. Fiber v2.52.8 enforces that itself, by panicking inside `cors.New` on a bare `"*"` and
-panicking on `"Invalid origin format in configuration: *"` when `*` is one entry in a longer list.
-Both are fatal, so the config check is not what makes this safe. What it adds is a startup error
-naming `CORS_ORIGINS` and the consequence, instead of a stack trace out of middleware setup. Entries
-are compared whole, so Fiber's `https://*.example.com` subdomain form still works: it answers with
-the caller's own origin and never with `*`.
+`CORS_ORIGINS` carries a second check with no environment condition at all: any entry containing
+`*` is refused, in `development` too. `internal/http/routes` sets `AllowCredentials: true` so the
+admin refresh cookie survives a cross-origin login, and the CORS spec forbids pairing credentials
+with a wildcard origin. Fiber v2.52.8 enforces the bare `"*"` itself, by panicking inside `cors.New`
+and panicking on `"Invalid origin format in configuration: *"` when `*` is one entry in a longer
+list. Both are fatal, so the config check is not what makes that case safe; what it adds is a
+startup error naming `CORS_ORIGINS` and the consequence, instead of a stack trace out of middleware
+setup.
+
+**Fiber's `https://*.example.com` subdomain form is now refused too, and that is a breaking change**
+for anyone who had one. It used to work, because entries are compared whole and Fiber answers with
+the caller's own origin rather than with `*`. What it means with credentials allowed is that every
+host matching the pattern can call `/api/auth/refresh` with the admin's cookie attached and *read*
+the reply, which carries a fresh access token. One forgotten subdomain, or one subdomain takeover,
+is then the whole panel rather than a nuisance. Without `AllowCredentials` such a host could send
+the request but not read the answer; with it, the wildcard converts a takeover into a session. List
+each origin literally. `admin.example.com` calling `api.example.com` is the deployment shape worth
+supporting here — cross-origin but same-*site*, so the `SameSite=Strict` cookie does travel and the
+CORS header is doing real work. A panel on a genuinely different registrable domain never receives
+that cookie whatever CORS says, so nothing is lost by refusing to guess at hostnames.
+
+`PROXY_HEADER` has a companion, `TRUSTED_PROXIES`, and the pair is what makes either safe.
+`fiber.New` used to set `ProxyHeader` without `EnableTrustedProxyCheck`, which defaults to false, so
+`IsProxyTrusted()` answered true for every request and `c.IP()` returned whatever the caller wrote
+in that header. Every limiter here is keyed on `c.IP()`, so a fresh header value per request meant a
+fresh bucket per request and no limit at all, and `admin_audit_log.ip` is a `text` column fed from
+the same place, so attacker-chosen text was being persisted into the audit log. Leaving
+`PROXY_HEADER` empty is not the fix either: then every caller behind the proxy shares the proxy's
+address and one bucket, which is the failure `clientKeyGenerator`'s comment describes
+`psyfint_v2_back` hitting. `EnableTrustedProxyCheck` and `EnableIPValidation` are now both on,
+with `TrustedProxies` from the new comma-separated `TRUSTED_PROXIES` — IPs or CIDR ranges — so the
+header is read only when the socket peer is on the list, and the socket address is used otherwise.
+`conf.Load` parses every entry and refuses to start on one it cannot, because Fiber only
+`log.Warnf`s an unparseable entry and drops it: a typo'd CIDR would otherwise boot cleanly, quietly
+stop trusting the proxy it names, and show up as every caller sharing one bucket and nothing else.
 
 ### Admin authentication
 
@@ -337,11 +363,44 @@ entry: `Refresh` looks the row up and refuses a token that has none. Spending a 
 row and writes a replacement under the same `family_id`, so one login produces one chain of tokens
 that can be killed together.
 
+That chain also has an end, which it did not used to. `JWT_REFRESH_EXPIRE_DAYS` is an **idle**
+timeout and nothing more: every rotation calls `GenerateRefreshToken`, which computed the expiry
+from the current time, so anyone who refreshed once a week kept the family alive forever. For an
+honest admin that meant never signing in again; for a thief rotating a stolen cookie quietly it
+meant permanent access, bounded only by a replay detection that fires only if the real admin happens
+to present a spent token — and if the admin stops using the panel, the thief's chain is the only
+live one and nothing ever detects anything. `JWT_SESSION_MAX_DAYS`, default 30, is the **absolute**
+ceiling. `Login` stamps `now() + sessionMaxDays` into `refresh_tokens.family_expires_at`, every
+rotation copies that value forward untouched, and `GenerateRefreshToken` clamps each successor's own
+expiry to it. A session ends at whichever bound arrives first. Set them equal to make the idle and
+absolute windows the same, which is strictly safer and less comfortable.
+
+`Refresh` checks `family_expires_at` explicitly as well as relying on the clamp, with the same
+`errInvalidToken` and the same 401 as any other refusal. The clamp means the row's own `expires_at`
+check almost always fires first — almost, because a row written before the clamp existed carries no
+such guarantee, and a bound that only holds for rows this version wrote is not a bound.
+
 Presenting an already-revoked token is what replay looks like from the server: two parties hold a
 token only one of them came by honestly, and there is no way to tell which one is asking. So the
 whole family is revoked, `audit.Record` writes `token_reuse_detected`, and both parties are sent
 back to the login screen. That is disruptive on purpose. The alternative is a thief rotating
-quietly for the full `JWT_REFRESH_EXPIRE_DAYS` with nothing able to stop them.
+quietly for the whole session with nothing able to stop them.
+
+One exception, and only one: `resumeLostRotation`. A spent row whose `revoked_at` is inside
+`rotationGrace`, thirty seconds, and whose `replaced_by` successor is still live and unexpired is
+not a replay — it is a rotation whose response went missing. The server spent the cookie and
+committed, then the reply never landed: a tab closed mid-flight, a dropped connection, a proxy
+timeout, or a second tab that sent the same cookie before the first `Set-Cookie` arrived. The
+browser still holds the old value and presents it next time. That was costing honest admins their
+whole family and writing a `token_reuse_detected` row about an attack that never happened, which is
+how a real one gets ignored. Inside the window the server re-signs a refresh JWT carrying the same
+successor `jti` and mints a fresh access token: no new ledger row, no new `jti`, no revocation, no
+audit row. Outside it, nothing changes. A thief replaying within thirty seconds of an honest
+rotation escapes detection once and gets a session the honest client also has, which is a far
+smaller cost than the old behaviour's.
+
+`replaced_by` is the column that makes it decidable. Without it a spent row says only that it was
+spent, and a lost response and a replay are indistinguishable.
 
 Spending a token and issuing its successor are one transaction, taken under an advisory lock on the
 `family_id` (`LockTokenFamily`). Neither half of that is decoration. The transaction removes the
@@ -386,10 +445,16 @@ other replay. The `row.RevokedAt != nil` check earlier in `Refresh` is not redun
 one catches a token spent long ago and is where the common case is diagnosed; the row count catches
 the few milliseconds the check cannot cover.
 
-One consequence worth knowing before someone reports it as a bug: a client that fires two refreshes
-concurrently on one token logs itself out. That is not a false positive. The server cannot tell it
-apart from a thief racing the owner, and a design that could would have to trust something the
-attacker also controls.
+A client that fires two refreshes concurrently on one token used to log itself out here, and that
+was the single most likely false positive in the design: the panel calls `refreshSession` on every
+fresh tab and every reload, by design, because the access token is memory-only, and
+`refreshInFlight` in `admin/lib/api.ts` is module-scoped, so it collapses callers within a tab and
+nothing across tabs. Two tabs restored together both send the same cookie, one wins, the loser
+matches zero rows and killed the family. The grace window above is what absorbs it: the loser
+arrives seconds after the winner committed, finds a live successor, and is resumed. Serialising
+tabs with `navigator.locks` was the other candidate fix and is deliberately not here — it would
+have needed a feature detection and a fallback path to cover the browsers without it, and all it
+saves now is one wasted round trip.
 
 Every failure inside `Refresh` returns the same `errInvalidToken` and the same 401. "Already
 spent", "never existed" and "admin was deleted" told apart would tell a thief exactly when the real
@@ -404,6 +469,18 @@ public and deliberately **not** limited. It authenticates with the refresh cooki
 access token, so it still works once the access token has expired, which is when someone is most
 likely to click Sign out, and a throttle there would strand them in a session they are trying to
 end. There is nothing to guess at either: it reveals nothing and grants nothing.
+
+They are limited separately, though, by two functions and not one. `loginLimiter` stays at five per
+fifteen minutes; `refreshLimiter` allows thirty in the same window. Refresh used to share the five,
+counting successes, and the panel refreshes once per fresh tab and once per reload by design because
+the access token is memory-only — so six reloads in a morning, which is ordinary, spent the budget
+and finding 6's cleared session put the admin on the login form. Behind office NAT several admins
+share one bucket and reach it sooner, and a stranger on that NAT could spend all five on garbage and
+lock every admin behind that address out for the quarter hour. Being generous here is cheap: a
+refresh presented without a valid cookie grants nothing at all, so there is no secret to guess at
+this endpoint the way there is at login. (Calling `loginLimiter()` twice would not have shared a
+bucket either — each call builds its own `limiter.New` with its own storage — but two names say what
+one name used twice did not.)
 
 Per client is not the whole of it: spread across a thousand addresses, that allowance is five
 thousand guesses at one account. `login_attempts` adds backoff per email on top, in
@@ -422,6 +499,18 @@ against five times, so it tells them only about their own attempts, and adding a
 "match timing" there would be cargo cult. And the curve caps instead of latching, because a
 permanent lock hands anyone who knows the admin's email an indefinite denial of service — an
 authentication problem traded for an availability one.
+
+The cap alone did not deliver that last property, and the fourth load-bearing piece is what does.
+`failed_count` only ever grew, so an email past nine failures sat at the fifteen-minute cap
+permanently and every later failure re-locked it for the full window: one request every fifteen
+minutes held a known admin address shut forever, which is a hard lock reached by accumulation
+rather than by design. `RecordLoginFailure` now resets the count to one when the previous failure is
+older than `loginFailureDecay`, thirty minutes, instead of incrementing it. Thirty is deliberately
+longer than the longest lock the curve can set, so nobody waits out a lock and resumes at the same
+count, and holding a lock now costs a sustained rate that the per-IP limiter bounds rather than four
+requests an hour. The window is a timestamp computed in Go and passed as `decay_before`, not an
+interval literal in the SQL, for the same reason the curve is in Go: it is policy, and storage only
+compares.
 
 The count the window is computed from comes from the row `RecordLoginFailure` returns, not from the
 row `Login` read on the way in, and that is the difference between a working backoff and a
@@ -453,17 +542,19 @@ arbitrary precision and the result overflows `int64`. The shift count here is a 
 variable shift of 60 yields exactly `0s`. That is the value the guard has to catch.
 
 `ClearLoginAttempts` empties the row on a successful sign-in, and `PruneLoginAttempts`, also on the
-login path, drops rows whose lock lapsed more than a day ago. Neither one reaches the rows a spray
-actually leaves behind. The prune's predicate is `locked_until IS NOT NULL`, so a row that never
-reached a fifth failure is excluded from it permanently, no matter how often anyone signs in. The
-cheapest spray there is, one guess per address, writes exactly those rows. A million addresses
-guessed once each leave a million rows that nothing ever collects.
+login path, drops rows whose last failure is older than `loginAttemptStale`, a day, and that are not
+inside a live lock window. It prunes on staleness, not on the lock, and that ordering is the point.
+The predicate used to be `locked_until IS NOT NULL`, and a row only gets `locked_until` at the fifth
+failure, so an attacker who stopped at four per address left one permanent row per address tried —
+written by unauthenticated requests, and exactly the "spray across a million addresses" the prune
+existed to bound. `last_failure_at` is the column it now scans, with an index on it, and the
+`locked_until` half stays only as a guard: a row still inside its lock window is evidence of
+something current however old its last failure looks. A day is well past `loginFailureDecay`, so the
+prune can never delete a row a live decision would still have read.
 
-Collecting them needs an `updated_at` column on `login_attempts` to age rows out by, which is a
-migration, so it is not done here. It is a known limit rather than a surprise: harmless at this
-scale, worth fixing before the table meets a determined sprayer. Whoever does it should move the
-prune onto a timer at the same time, since a prune that only runs on a successful login cannot
-collect rows on a site nobody signs in to.
+One limit remains, and it is a known one rather than a surprise. The prune runs only on a successful
+login, so a site nobody signs in to never collects anything. Whoever next touches this should move
+it onto a timer.
 
 The refresh token never appears in a response body. `Login` and `Refresh` both write it with
 `setRefreshCookie` (`internal/http/handlers/auth/cookie.go`) as `HttpOnly; Secure; SameSite=Strict;
@@ -479,11 +570,33 @@ one from a cross-origin response only when that response carries
 `Access-Control-Allow-Credentials: true`, which is why `internal/http/routes` sets
 `AllowCredentials` and why `CORS_ORIGINS` must name the panel's origin. `Authorization` is in
 `AllowHeaders` for the same reason on the `/api/admin/*` side: a browser will not send a header the
-preflight response did not list.
+preflight response did not list. `X-Requested-With` is in that list for the same reason again, on
+the two auth routes that now require it.
 
-`SameSite=Strict` is why there are no CSRF tokens on these endpoints. A request that did not
+`SameSite=Strict` is most of why there are no CSRF tokens on these endpoints. A request that did not
 originate from this site does not carry the cookie, and `/api/admin/*` wants an `Authorization`
-header that no cross-site form can set. `Secure` is the one attribute that varies, and it varies on
+header that no cross-site form can set.
+
+It is not all of it, because SameSite is evaluated per *site*, not per origin. A sibling subdomain —
+a customer's blog on `blog.example.com` — is the same site as the panel, so the Strict cookie does
+travel on its requests, and `/api/auth/refresh` and `/api/auth/logout` took no body and no custom
+header, which made them CORS-simple and preflight-free. Such a page could not read either answer, so
+nothing leaked, but it could sign the admin out whenever it liked and rotate the refresh cookie
+underneath a live tab. `requireNonSimpleRequest` in `internal/http/routes/public.go` closes that by
+demanding `X-Requested-With` on both routes. Only its presence is checked; the value is the old
+XMLHttpRequest convention because that is the name a reader recognises. What does the work is that a
+browser will not let a page set a non-safelisted header cross-origin without first passing a
+preflight, which the `CORS_ORIGINS` allowlist governs. `Accept` would not have served: it is
+CORS-safelisted, so setting it leaves a request simple. The panel sets the header in
+`apps/web/src/admin/lib/api.ts`, on `apiFetch` and on `performRefresh`'s own `fetch`, and pays no
+preflight for it because it is same-origin with the API in both development and production.
+
+The middleware runs **before** the refresh limiter on that route, not after. The forged requests it
+refuses come from the admin's own browser and so arrive on the admin's own IP; counting them would
+let a page on a sibling subdomain spend the admin's refresh budget and land them on the login form
+anyway, which is most of what the check exists to prevent.
+
+`Secure` is the one attribute that varies, and it varies on
 exactly one input: `handlers.New` passes `!cfg.IsDevelopment()`. Development speaks plain HTTP to
 localhost, where a browser refuses to store a Secure cookie at all, so the flag has to come off
 there and nowhere else. `conf.(*Config).IsDevelopment` exists so that decision reads the same string
@@ -502,14 +615,41 @@ The handler answers 200 for a missing cookie, a malformed one and a valid one al
 them would answer a question the caller has not authenticated to ask, and no client would act
 differently on the answer.
 
-`./cmd seed-admin <email> <password>` creates an admin account, following `habido-back`'s
-`./cmd cron` pattern of dispatching on `os.Args[1]` in the same binary rather than shipping a
-second one. It reuses `conf.Load` and the already-migrated pool, so it can never disagree with the
-server about which database it writes to, and it refuses a password under 12 characters. It prints
-nothing but the created email on success: not the password, not the hash, not the row's id, so a
-seeded password never reaches a terminal scrollback or a CI log. `make seed-admin email=... password=...`
-wraps it. A second seed of the same email fails on `admin_users`'s unique constraint on `email`
-rather than silently creating a duplicate.
+**Signing out is not instant, and this is the design rather than an oversight.** `AuthMiddleware`
+validates the access token's signature and claims and looks nothing up, so the token already in a
+tab's memory keeps reading `GET /api/admin/leads` until its own `exp` passes — up to
+`JWT_ACCESS_EXPIRE_MINUTES`, fifteen minutes by default. That is true after a logout, after a family
+revocation, and after the admin row is deleted. What *is* immediate is that the family is dead, so
+no new token is ever issued: the refresh cookie is spent, `Refresh` re-reads the admin row, and the
+next renewal fails. The stateless-JWT bargain is what buys an admin request with no database read on
+it, and the price is that window. Closing it means a revocation check on every admin request, which
+is a deliberate trade to revisit if the panel ever holds something worth fifteen minutes. Operators
+signing out on a borrowed machine should know the number, which is why `apps/web/README.md` states
+it where the Sign out button is described.
+
+`./cmd seed-admin <email>` creates an admin account, following `habido-back`'s `./cmd cron` pattern
+of dispatching on `os.Args[1]` in the same binary rather than shipping a second one. It reuses
+`conf.Load` and the already-migrated pool, so it can never disagree with the server about which
+database it writes to. It refuses a password under 12 characters, counted with
+`utf8.RuneCountInString` rather than `len`: `len` counts bytes, six Cyrillic characters are twelve
+bytes, and a kit whose default locale is Mongolian would have waved a six-character admin password
+through. It prints nothing but the created email on success — not the password, not the hash, not
+the row's id — so a seeded password never reaches a terminal scrollback or a CI log.
+
+That promise depends on the password not being an argument, which it was and no longer is. As
+`args[1]` it went into the shell's history file, the terminal scrollback, and the process table
+where any local user's `ps` could read it for as long as `go run` took to compile and run — so a
+careful success path bought nothing while the documented way to invoke the command leaked the value
+before it started. `readSeedPassword` takes one line off stdin and trims the line ending. One line,
+not everything stdin has: reading to EOF would quietly accept a whole file as a password. `io.EOF`
+with no line ending is success, because that is what a `printf '%s'` pipe sends. It prompts on
+stderr only when stdin is a terminal, so a piped invocation's stdout stays exactly the created email
+and nothing else.
+
+`make seed-admin email=...` wraps it, and there is deliberately no `password=` variable any more.
+The target prompts, turns terminal echo off with `stty` around the read, and pipes the value in, so
+the password reaches neither the argument list nor the scrollback. A second seed of the same email
+fails on `admin_users`'s unique constraint on `email` rather than silently creating a duplicate.
 
 ### Go tests
 
