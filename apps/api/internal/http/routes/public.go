@@ -120,7 +120,11 @@ func requireNonSimpleRequest(c *fiber.Ctx) error {
 func setupPublicRoutes(api fiber.Router, h *handlers.Handlers) {
 	api.Post("/leads", leadLimiter(), h.Lead.Create)
 	api.Post("/auth/login", loginLimiter(), h.Auth.Login)
-	api.Post("/auth/refresh", refreshLimiter(), requireNonSimpleRequest, h.Auth.Refresh)
+	// requireNonSimpleRequest runs BEFORE the limiter, not after. The forged requests it refuses
+	// come from the admin's own browser, so they arrive on the admin's own IP: counting them would
+	// let a page on a sibling subdomain spend the admin's refresh budget and land them on the
+	// login form anyway, which is most of what the header check exists to prevent.
+	api.Post("/auth/refresh", requireNonSimpleRequest, refreshLimiter(), h.Auth.Refresh)
 
 	// Not behind AuthMiddleware, and not behind a limiter. It authenticates with the refresh
 	// cookie rather than an access token, so it still works once the access token has expired --
