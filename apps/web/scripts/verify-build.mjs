@@ -75,12 +75,66 @@ if (site === URL_PLACEHOLDER) {
 // that grows, and a rule demanding a pages.config.ts entry per admin screen would be wrong for
 // every one of them.
 //
-// Both names are allowed only when the panel is really here. This script ships to every generated
-// project verbatim, so it cannot read the scaffold answers, but `src/admin/` is the panel's own
-// tree and its presence answers the same question. Without that test a project that declined the
-// panel would silently accept any hand-added route filed under `src/routes/admin/` — the exact
-// stray page this rule exists to catch.
-const HAS_PANEL = existsSync('src/admin')
+// Both names are allowed only when the panel is really here. Without that test a project that
+// declined the panel would silently accept any hand-added route filed under `src/routes/admin/` —
+// the exact stray page this rule exists to catch.
+//
+// `.kit/scaffold.json` is the CLI's own record of the answers, written at scaffold time
+// (cli/generate.mjs) and explicitly un-ignored by the generated `.gitignore`, so it is present,
+// committed and stable in every project this kit generates. `answers.backend === 'admin'` is the
+// question, asked directly.
+//
+// This used to be `existsSync('src/admin')` alone, which asked a client's repo "did this team
+// ever create a directory called `src/admin`" and answered a question about the kit's panel with
+// it. Reproduced in a real `--backend=none` scaffold that had already passed cleanly: creating
+// `src/admin/` with one unrelated `.ts` file in it failed this script with "/admin: src/admin is
+// present but dist has no admin/index.html shell" — a machine build gate failing over a panel
+// they never asked for, with no way to satisfy it but deleting their directory.
+//
+// Three cases, decided deliberately:
+//
+//  1. The record is there and readable — it decides, full stop.
+//  2. The record is there and unreadable, or has no `answers.backend` — FAIL. This file decides
+//     which checks run; a build gate that cannot read its own input and guesses is the failure
+//     mode this whole script exists to remove. The message names the file and the fix.
+//  3. The record is absent — fall back to the directory test. This covers exactly two
+//     populations, and no project this kit generates today is in either: the kit's own
+//     `apps/web`, which has no scaffold record and must still check the panel it contains, and a
+//     project scaffolded before the record existed. Deleting the record by hand puts a project
+//     back in this case, and back to the old behaviour, which is the honest consequence of
+//     removing the only evidence of what was asked for.
+//
+// `&&` with the directory test, not instead of it: a project that answered `admin` and then
+// deleted the panel by hand has no panel, and the shell assertion below should not demand one.
+//
+// The same logic is in `scripts/check-conventions.mjs`, deliberately duplicated: both ship
+// verbatim into a flat generated project (COPY_FILES), and a third shared file would be a new
+// entry in cli/kit-manifest.mjs for fifteen lines. Change one, change the other.
+function scaffoldSaysPanel() {
+  const RECORD = '.kit/scaffold.json'
+  if (!existsSync(RECORD)) return true
+  let backend
+  try {
+    backend = JSON.parse(readFileSync(RECORD, 'utf8')).answers?.backend
+  } catch (err) {
+    backend = { unreadable: err.message }
+  }
+  if (typeof backend !== 'string') {
+    console.error(
+      `\n✗ verify-build: cannot read 'backend' from ${RECORD}.\n\n` +
+        '  That file records the answers this project was scaffolded with, and it is what\n' +
+        '  decides whether this script expects an admin panel shell in dist/ and allows\n' +
+        '  `src/routes/admin/`. Guessing would either fail the build over a panel that was\n' +
+        '  never asked for, or quietly accept a route nothing else verifies.\n\n' +
+        '  Restore it from git, or delete it entirely to fall back to the presence of\n' +
+        '  `src/admin/`.\n',
+    )
+    process.exit(1)
+  }
+  return backend === 'admin'
+}
+
+const HAS_PANEL = scaffoldSaysPanel() && existsSync('src/admin')
 const ALLOWED_ROUTE_FILES = new Set([
   '__root.tsx',
   'index.tsx',
@@ -536,7 +590,11 @@ if (existsSync(join(outDir, 'docs/index.html'))) {
 if (HAS_PANEL) {
   const shell = join(outDir, 'admin', 'index.html')
   if (!existsSync(shell)) {
-    fail('/admin', 'src/admin is present but dist has no admin/index.html shell')
+    fail(
+      '/admin',
+      'this project was scaffolded with --backend=admin and src/admin is present, but dist ' +
+        'has no admin/index.html shell — check the /admin prerender entry in vite.config.ts',
+    )
   }
 }
 
