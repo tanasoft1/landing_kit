@@ -46,9 +46,16 @@ production, so it is same-origin at both ends and nothing it sends is preflighte
 origin of its own is not an env-var change either: every fetch it makes hard-codes
 `credentials: 'same-origin'`, so it would send no refresh cookie whatever this list allows.
 
-`CORS_ORIGINS=*` is refused at startup. The admin session cookie only crosses origins because the
-API answers with `Access-Control-Allow-Credentials: true`, and a wildcard origin on a credentialed
-response would hand a logged-in admin session to any site a browser visits. List the origins.
+**Every entry in `CORS_ORIGINS` must be a literal origin. Any `*` is refused at startup**, and that
+includes Fiber's `https://*.example.com` subdomain form, which this service used to accept. If you
+have one, the service will not start until you replace it with the origins you actually mean.
+
+The reason is the same for both spellings. The admin session cookie only crosses origins because
+the API answers with `Access-Control-Allow-Credentials: true`, which also lets the caller *read* the
+reply. A bare `*` would hand a logged-in admin session to any site a browser visits. A subdomain
+wildcard is narrower and still enough: any host matching the pattern can call `/api/auth/refresh`
+with the admin's cookie attached and read the fresh access token out of the response. One forgotten
+subdomain, or one subdomain someone else takes over, is the whole panel. List the origins.
 
 ## Prerequisites
 
@@ -70,19 +77,34 @@ every lead and tells nobody.
 Create an admin account, then log in:
 
 ```bash
-cd api && make seed-admin email=owner@example.mn password=at-least-12-characters
+cd api && make seed-admin email=owner@example.mn
 ```
 
-`seed-admin` refuses a password under 12 characters and prints nothing but the created email —
-never the password, never its hash. A second seed of the same email fails rather than creating a
-duplicate.
+It prompts for the password with the terminal's echo turned off. **The password is never an
+argument**, so it stays out of your shell history, out of the scrollback, and out of the process
+table, where any other user on the machine could have read it with `ps`. To script it, pipe the
+password in with no trailing newline and pass only the email:
+
+```bash
+printf '%s' "$PASSWORD" | go run ./cmd seed-admin owner@example.mn
+```
+
+`seed-admin` refuses a password under 12 **characters** — characters, not bytes, so six Cyrillic
+letters do not pass — and prints nothing but the created email, never the password and never its
+hash. A second seed of the same email fails rather than creating a duplicate.
 
 ```
-POST /api/auth/login    {"email": "...", "password": "..."}  -> access_token, and a refresh cookie
-POST /api/auth/refresh  sends the refresh cookie             -> a fresh access_token, and a new cookie
-POST /api/auth/logout   sends the refresh cookie             -> 200, and the session is revoked
+POST /api/auth/login    {"email": "...", "password": "..."}   -> access_token, and a refresh cookie
+POST /api/auth/refresh  refresh cookie + X-Requested-With     -> a fresh access_token, a new cookie
+POST /api/auth/logout   refresh cookie + X-Requested-With     -> 200, and the session is revoked
 GET  /api/admin/leads   Authorization: Bearer <access_token>
 ```
+
+**Refresh and logout require an `X-Requested-With` header.** Any value; only its presence is
+checked. Without it both answer 403, so a client that does not send it cannot renew a session or
+sign out. `Accept` does not satisfy this and cannot: it is a header a cross-site form is allowed to
+set, and the point is to require one that is not. The paragraph on `SameSite` below explains what
+that buys.
 
 The refresh token is never in a response body. It leaves as a cookie:
 
@@ -93,9 +115,17 @@ Set-Cookie: landing_refresh=...; Path=/api/auth; HttpOnly; Secure; SameSite=Stri
 `HttpOnly` is why: no script can read the cookie, so an injected one cannot lift a credential that
 lasts `JWT_REFRESH_EXPIRE_DAYS`. `Path=/api/auth` keeps it off every `/api/admin/*` request, where
 it has no job and could only be logged by a proxy or read out of an access log. `SameSite=Strict`
-is also what replaces CSRF tokens here: a request from another site does not carry the cookie at
+is most of what replaces CSRF tokens here: a request from another site does not carry the cookie at
 all. `Secure` is dropped only when `APP_ENV=development`, where the dev server speaks plain HTTP
 and the browser would refuse to store a Secure cookie.
+
+`X-Requested-With` is the rest of it. `SameSite` is evaluated per *site*, not per origin, so a page
+on a sibling subdomain — a blog on `blog.example.com`, say — is the same site as your panel and its
+requests do carry the cookie. Refresh and logout take no body and no custom header, which made them
+the kind of request a browser sends with no preflight, so such a page could sign your admin out
+whenever it liked and rotate the refresh cookie underneath a live tab. It could never read either
+answer, so nothing leaked. Requiring a header a plain form cannot set means a cross-origin caller
+has to pass a preflight that `CORS_ORIGINS` governs first.
 
 So a browser client does nothing to hold the refresh token, and must send `credentials: 'include'`
 on the three `/api/auth` calls so the browser attaches it. Keep the access token in memory, not in
@@ -111,6 +141,15 @@ refresh token, and `POST /api/auth/refresh` rejects an access token. Use the acc
 everywhere else, and call `/api/auth/refresh` once it expires (`JWT_ACCESS_EXPIRE_MINUTES`,
 default 15 minutes; the refresh token lasts `JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
 
+Two settings bound a session, not one, and reading only the first will tell you a week is the
+maximum. `JWT_REFRESH_EXPIRE_DAYS` is an **idle** timeout: it is how long one refresh token may sit
+unused, and every refresh issues a new one with a fresh seven days on it. `JWT_SESSION_MAX_DAYS`,
+default 30, is the **absolute** ceiling on the whole login. It is stamped once when you sign in,
+carried forward unchanged by every refresh, and no token can be issued past it. A session ends at
+whichever comes first, so signing in again is the only way to get a later deadline. Without the
+ceiling, anyone who kept refreshing kept the session alive forever — which is as true of a stolen
+cookie being rotated quietly as it is of you.
+
 Each refresh token works exactly once. `/api/auth/refresh` sets a replacement cookie along with the
 new access token, and the one you sent is dead from that moment. A browser replaces it for you.
 
@@ -120,6 +159,15 @@ real session" apart from "that was nothing" would answer a question the caller n
 to ask. It takes no access token, so it still works after the access token has expired, which is
 exactly when someone reaches for Sign out.
 
+**Signing out is not instantaneous, and it matters on a shared machine.** What is immediate is that
+the login's whole token family is dead, so nothing new is ever issued: the next refresh fails and
+there is no way back in without the password. What is not immediate is the access token already in
+that tab's memory. `/api/admin/leads` checks the token's signature and expiry and looks nothing up,
+so a token minted just before the logout keeps reading leads until its own clock runs out — up to
+`JWT_ACCESS_EXPIRE_MINUTES`, fifteen minutes by default. That is the deliberate price of not making
+a database read on every admin request. On a borrowed machine, close the browser, and if the tab
+itself was left with someone you do not trust, treat those fifteen minutes as exposure.
+
 Sending a refresh token that was already spent is treated as theft, because two parties holding the
 same token is what that looks like from here. The server revokes every token descended from the
 same login, including the replacement the honest client is holding, and writes a
@@ -128,10 +176,16 @@ have to log in again. A client that keeps a copy of an old refresh token and ret
 log itself out this way. A browser cannot: the `Set-Cookie` overwrites the old value and there is
 nowhere for a copy to survive. A command-line client using one jar per session gets the same.
 
-The same applies to two refreshes fired at once with the same token: exactly one wins and the other
-gets a 401 that takes the session with it. From the server there is no difference between that and a
-thief racing the real client. If several requests can discover an expired access token at the same
-time, funnel them through one refresh and let the rest wait for its result.
+One case is forgiven, because it happens to honest clients with no attacker anywhere. A token spent
+within the last 30 seconds whose replacement is still live is treated as a rotation whose response
+went missing, not as theft: you get the same replacement re-sent, with no revocation and no audit
+row. That covers a tab closed mid-refresh, a dropped connection, a proxy timeout, and two tabs
+restored together that both send the same cookie before either reply lands. Past 30 seconds, or if
+the replacement has itself been spent, it is theft again.
+
+That forgiveness is a window, not a licence. If several requests in your client can discover an
+expired access token at once, still funnel them through one refresh and let the rest wait for its
+result — it is one round trip cheaper, and it keeps the audit signal clean.
 
 **A `token_reuse_detected` row is worth opening, not scrolling past.** It is the only signal this
 service can raise that a refresh token was used from somewhere it was not issued to. Nothing else in
@@ -149,21 +203,42 @@ anything but `development` when the secret is empty or shorter than 32 character
 or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example
 `openssl rand -base64 32`.
 
-`POST /api/auth/login` and `POST /api/auth/refresh` are rate limited per client, same as the contact
-form, so repeated wrong guesses get throttled rather than retried without limit. Login also backs
-off per email, which per-client limiting alone cannot do: from the fifth failure that address is
-refused for a minute, doubling with each further failure up to fifteen. An attacker who spreads
-guesses across many client addresses walks past the per-client limit untouched, because every
-address is a fresh bucket to it; what holds them back is that lock on the account they are guessing
-at, which counts failures however many addresses they arrived from. It is a bound rather than a
-wall: guesses already in flight when the lock lands still get an answer, so a burst of twenty
-costs twenty guesses before the address goes quiet for the window. Both limits answer with the same
-429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would
-leave someone stuck in a session they are trying to end.
+`POST /api/auth/login` and `POST /api/auth/refresh` are rate limited per client, so repeated wrong
+guesses get throttled rather than retried without limit. The two allowances differ: login gets five
+requests per fifteen minutes, refresh gets thirty in the same window. Refresh is looser on purpose,
+because a refresh presented without a valid cookie grants nothing, so there is no secret to guess
+there — and a panel that keeps its access token in memory refreshes once per tab and once per
+reload, which a five-request budget turned into a trip back to the login form after an ordinary
+morning's work.
 
-A successful login clears that account's counter, so the doubling starts from nothing next time. An
-admin who mistyped their password five times should wait out the window and log in again rather than
-go editing `login_attempts` by hand. The row clears itself the moment they get in.
+Login also backs off per email, which per-client limiting alone cannot do: from the fifth failure
+that address is refused for a minute, doubling with each further failure up to fifteen. An attacker
+who spreads guesses across many client addresses walks past the per-client limit untouched, because
+every address is a fresh bucket to it; what holds them back is that lock on the account they are
+guessing at, which counts failures however many addresses they arrived from. It is a bound rather
+than a wall: guesses already in flight when the lock lands still get an answer, so a burst of
+twenty costs twenty guesses before the address goes quiet for the window. Both limits answer with
+the same 429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it
+would leave someone stuck in a session they are trying to end.
+
+A successful login clears that account's counter, so the doubling starts from nothing next time. So
+does half an hour of quiet: a failure older than 30 minutes no longer counts towards the curve, and
+the next one starts the count again at one. Both halves matter. Without the decay the count only
+ever grew, so an address past nine failures sat at the fifteen-minute cap forever and one request
+every quarter hour was enough to keep a known admin email locked out permanently — an availability
+problem handed to anyone who knows the address. An admin who mistyped their password five times
+should wait out the window and log in again rather than go editing `login_attempts` by hand. The row
+clears itself the moment they get in.
+
+**Set `TRUSTED_PROXIES` if you deploy behind a load balancer**, together with `PROXY_HEADER`. Every
+limit above is keyed on the client address, and `PROXY_HEADER` alone used to mean the service
+believed whatever the caller wrote in that header: a fresh value per request is a fresh bucket per
+request, which is no limit at all, and the same value lands in `admin_audit_log.ip`.
+`TRUSTED_PROXIES` is a comma-separated list of IPs or CIDR ranges — `10.0.0.0/8,172.16.0.0/12` —
+and the header is read only when the connection actually came from one of them. Leaving it empty
+while `PROXY_HEADER` is set means the header is ignored entirely and every request behind the proxy
+shares one bucket, which is a real cost and still the safer default. An entry that will not parse
+stops startup rather than being silently dropped.
 
 `GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has

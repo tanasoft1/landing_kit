@@ -358,10 +358,15 @@ there is nothing extra to run.
 There is no sign-up screen, deliberately. The first account is created from the API:
 
 ```bash
-cd api && make seed-admin email=owner@example.mn password=at-least-12-characters
+cd api && make seed-admin email=owner@example.mn
 ```
 
-The password must be at least 12 characters, and `seed-admin` refuses anything shorter. Then open
+It asks for the password and hides what you type. There is no `password=` to pass, on purpose: a
+password on the command line goes into your shell history and your terminal scrollback, and anyone
+else with an account on that machine can read it out of the process list while the command runs.
+
+The password must be at least 12 characters — characters, not bytes, so six Cyrillic letters are
+too few even though they take twelve bytes — and `seed-admin` refuses anything shorter. Then open
 `/admin` and sign in with it. `api/README.md` covers the rest of that side.
 
 ### Where it lives
@@ -385,13 +390,23 @@ Two tokens, and you can inspect neither:
 
 So a reload, a restart, or a second tab starts with no access token and spends one round trip
 turning the cookie back into one. The brief skeleton before the table appears is that round trip.
-You are asked to sign in again only once the refresh token itself expires, after
-`JWT_REFRESH_EXPIRE_DAYS`, 7 by default, or sooner if the browser was told to clear cookies on exit.
 
-**Sign out revokes the whole token family**, so every session descended from that login is dead on
-the server. Another tab does not fall out at that moment. It still holds its own access token in
-memory and keeps working until that token expires, up to `JWT_ACCESS_EXPIRE_MINUTES`, 15 by default.
-Its next refresh is what fails, and that is when it lands on the login screen.
+Two settings decide when you are asked to sign in again, and a session ends at whichever arrives
+first. `JWT_REFRESH_EXPIRE_DAYS`, 7 by default, is how long the panel can go **unused**: each visit
+renews it, so it is an idle timeout rather than a deadline. `JWT_SESSION_MAX_DAYS`, 30 by default,
+is the deadline — it is set when you sign in, never extended, and when it passes no amount of
+recent activity keeps the session alive. Clearing cookies on browser exit ends it sooner than
+either.
+
+**Sign out revokes the whole token family**, so no new token is ever issued for that login again:
+the refresh cookie is dead, and every tab lands on the login screen at its next refresh.
+
+**It is not instant for a tab that is already open, including another browser on the same machine.**
+The API checks an access token's signature and expiry and looks nothing up, which is what keeps an
+admin request free of a database read. So a token minted just before you signed out keeps reading
+leads until its own clock runs out — up to `JWT_ACCESS_EXPIRE_MINUTES`, 15 by default. Signing out
+on a borrowed or shared machine, close the browser as well; if you cannot, treat those fifteen
+minutes as the window in which that tab can still read your leads.
 
 > **The panel is same-origin by design.** In development it calls the API through the `/api` proxy
 > in `vite.config.ts`; in production the one Go binary serves both. So nothing it sends is
