@@ -10,9 +10,11 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import {
   ADMIN_COPY_DIRS,
+  ADMIN_ROOTS,
+  ADMIN_ROUTE_PATHS,
   API_COPY_DIRS,
   API_COPY_FILES,
   API_DEST,
@@ -25,6 +27,7 @@ import {
   COPY_FILES,
   IGNORED_NAMES,
   isAdminPath,
+  isUnderAdminRoot,
   kitPath,
   NEVER_COPY,
   NEVER_COPY_ANYWHERE,
@@ -130,6 +133,150 @@ function assertCopyable(rel) {
       throw new Error(`Refusing to copy '${rel}': '${segment}' is in NEVER_COPY_ANYWHERE`)
     }
   }
+}
+
+// --- the panel's boundary, asserted rather than assumed -----------------------------------------
+//
+// Every other exclusion mechanism on this branch throws when its target is absent: `dropSection`,
+// `dropContentsEntry`, `replaceExactText` (on a miss AND on an ambiguity), `copyTree`'s missing
+// directory, `assertRouteTreeMatchesKit`. `isAdminPath` was the one that did not. It is a prefix
+// test over `src/routes/admin`, nothing proved the prefix matched anything on disk, and nothing
+// bounded panel content to that prefix at all — so a panel file under `src/components` or
+// `public` reached every non-admin scaffold past no gate whatsoever. Verified: a
+// `src/components/panel-badge.tsx` and a `public/admin/logo.svg` shipped to all five non-admin
+// profiles with no error and no warning.
+//
+// Two assertions, in the order the problem has: does the prefix name anything, and does anything
+// panel-shaped live outside it.
+
+/**
+ * Every declared admin path names something real in the kit.
+ *
+ * Without this, renaming `src/admin` to `src/panel` costs nothing at scaffold time: ADMIN_COPY_DIRS
+ * stops copying a directory that is no longer there (for an `admin` project, `copyTree` does throw
+ * — but only for that one answer), and `isAdminPath`'s prefix stops matching, so the routes it was
+ * filtering out ship to every project instead. The quiet direction is the dangerous one.
+ */
+function assertAdminPathsExist(kitRoot) {
+  for (const rel of ADMIN_COPY_DIRS) {
+    if (!existsSync(kitPath(kitRoot, rel))) {
+      throw new Error(
+        `ADMIN_COPY_DIRS names '${rel}', which is not in the kit. That list is what keeps the ` +
+          'panel out of a project that declined it; a name that matches nothing excludes ' +
+          "nothing — update cli/kit-manifest.mjs to the directory's real name.",
+      )
+    }
+  }
+  for (const rel of ADMIN_ROUTE_PATHS) {
+    if (existsSync(kitPath(kitRoot, rel)) || existsSync(kitPath(kitRoot, `${rel}.tsx`))) continue
+    throw new Error(
+      `ADMIN_ROUTE_PATHS names '${rel}', and neither '${rel}/' nor '${rel}.tsx' is in the kit. ` +
+        'That prefix is the only thing filtering the panel out of `src/routes`, which COPY_DIRS ' +
+        'copies whole, so a prefix that matches nothing ships every panel route to every ' +
+        'project — silently. Update cli/kit-manifest.mjs to the real path.',
+    )
+  }
+}
+
+// What "looks like panel content" means here, chosen deliberately and stated so the next reader
+// knows what it does NOT mean.
+//
+// Two signals, both cheap and both about evidence rather than a guess at intent:
+//
+//  1. NAME. A path segment `admin`, or a basename starting with `admin`, outside the roots.
+//     `public/admin/logo.svg` and `src/components/admin-nav.tsx` are caught by this and by
+//     nothing else, because neither has imports to read.
+//  2. IMPORT. The file imports out of `src/admin`, whether through the `@/admin` alias or through
+//     a relative path that lands there. A file importing the panel's own components or API client
+//     is panel content wherever it is filed, and it is also the case that BREAKS a non-admin
+//     project rather than merely bloating it — the import resolves to nothing.
+//
+// What it does not catch: a panel file with a neutral name and no panel imports. The reviewer's
+// own `src/components/panel-badge.tsx` is exactly that, and it is still caught only by the
+// snapshot diff that `record` now prints. That is the honest division of labour — this assertion
+// catches panel content that says what it is, and the snapshot catches the rest by making a file
+// appearing in five profiles at once something a human reads.
+const ADMIN_NAMED = (rel) =>
+  rel
+    .split('/')
+    .some((seg) => seg === 'admin' || seg.startsWith('admin.') || seg.startsWith('admin-'))
+
+const PANEL_IMPORT_ALIAS = '@/admin'
+
+// Same shape as `assertShippedImportsAreDeclared`'s scan in cli/generate.mjs, and the same reason
+// for being a regex rather than a parser: no new dependency. Comment-only lines go first, because
+// this kit's prose quotes import statements often enough that a scan which believes them is a
+// scan that cries wolf.
+const IMPORT_FROM =
+  /^[ \t]*(?:import|export)[ \t][^'"\n]*(?:\n[^'"\n]*)*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm
+const BARE_IMPORT = /^[ \t]*import[ \t]*['"]([^'"\n]+)['"]/gm
+const READ_FOR_IMPORTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
+
+const withoutCommentLines = (text) =>
+  text
+    .split('\n')
+    .filter((l) => !/^[ \t]*(?:\/\/|\/?\*)/.test(l))
+    .join('\n')
+
+/** Which admin root, if any, `spec` imported from `rel` reaches into. */
+function panelImport(rel, spec) {
+  if (spec === PANEL_IMPORT_ALIAS || spec.startsWith(`${PANEL_IMPORT_ALIAS}/`)) return spec
+  if (!spec.startsWith('.')) return null
+  const resolved = posix.normalize(posix.join(posix.dirname(rel), spec))
+  return isUnderAdminRoot(resolved) ? resolved : null
+}
+
+/**
+ * Nothing outside the panel's declared roots looks like panel content.
+ *
+ * Walks only the trees COPY_DIRS and the block folders take WHOLE, because those are the ones a
+ * stray file can hide in. COPY_FILES, BOUNDARY_FILES and TRANSFORMED_FILES are named one by one,
+ * so a file that is not on the list is simply never copied and needs no predicate.
+ */
+function assertPanelStaysInItsRoots(kitRoot) {
+  const problems = []
+  const walk = (rel) => {
+    const src = kitPath(kitRoot, rel)
+    if (!existsSync(src)) return
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      if (IGNORED_NAMES.includes(entry.name)) continue
+      const childRel = `${rel}/${entry.name}`
+      if (isUnderAdminRoot(childRel)) continue
+      const named = ADMIN_NAMED(childRel)
+      if (entry.isDirectory()) {
+        if (named) problems.push(`  ${childRel}/  is named for the panel`)
+        else walk(childRel)
+        continue
+      }
+      if (named) {
+        problems.push(`  ${childRel}  is named for the panel`)
+        continue
+      }
+      if (!READ_FOR_IMPORTS.some((e) => entry.name.endsWith(e))) continue
+      const text = withoutCommentLines(readFileSync(join(src, entry.name), 'utf8'))
+      for (const pattern of [IMPORT_FROM, BARE_IMPORT]) {
+        pattern.lastIndex = 0
+        for (const m of text.matchAll(pattern)) {
+          if (panelImport(childRel, m[1])) {
+            problems.push(`  ${childRel}  imports the panel ('${m[1]}')`)
+          }
+        }
+      }
+    }
+  }
+
+  for (const dir of COPY_DIRS) walk(dir)
+  walk('src/blocks')
+  if (problems.length === 0) return
+  throw new Error(
+    'Panel content is outside the roots the panel is allowed to live in ' +
+      `(${ADMIN_ROOTS.join(', ')}). Everything below is copied WHOLE by COPY_DIRS, so it ` +
+      'reaches every project including the ones that answered `none` and `api` — the exclusion ' +
+      'mechanisms only know how to skip the two roots.\n' +
+      `${[...new Set(problems)].sort().join('\n')}\n` +
+      'Move it under src/admin (or src/routes/admin), or if it is not panel content, rename it ' +
+      'so it does not claim to be.',
+  )
 }
 
 // --- primitives -------------------------------------------------------------------------------
@@ -674,6 +821,12 @@ export function rollbackTarget(outDir, preexisting, cause) {
 }
 
 function copyInto(kitRoot, outDir, answers) {
+  // Before `mkdirSync` below, so a kit whose panel has moved fails with nothing created. Both run
+  // on every answer, not only on `admin`: the failure these catch is panel content reaching a
+  // project that said NO, so the non-admin scaffolds are the ones that need them most.
+  assertAdminPathsExist(kitRoot)
+  assertPanelStaysInItsRoots(kitRoot)
+
   const written = []
   const presetFile = `${PRESET_DIR}/${answers.preset}.css`
   // A transformed file also lives inside a copied tree; taking it here would mean writing it twice
