@@ -262,10 +262,61 @@ const LAYOUT_PRIMITIVES = new Set([
 ])
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
+// --- did this project ask for the panel? -------------------------------------------------------
+//
+// `.kit/scaffold.json` is the CLI's own record of the answers, written at scaffold time
+// (cli/generate.mjs) and explicitly un-ignored by the generated `.gitignore`, so it is present,
+// committed and stable in every project this kit generates. `answers.backend === 'admin'` is the
+// question, asked directly.
+//
+// This used to be `existsSync('src/admin')` alone, which asked a client's repo "did this team
+// ever create a directory called `src/admin`" and answered a question about the kit's panel with
+// it. `src/admin` is an ordinary name for a team building an admin area of their own product, and
+// both directions of that mistake were reproduced in a real `--backend=none` scaffold: creating
+// the directory failed verify-build over a panel they never asked for, and adding
+// `src/routes/admin/` beside it silently switched off the `<Link>` ban and three layout rules.
+//
+// Three cases, decided deliberately:
+//
+//  1. The record is there and readable — it decides, full stop.
+//  2. The record is there and unreadable, or has no `answers.backend` — FAIL. This file decides
+//     which rules run; a build gate that cannot read its own input and guesses is the failure
+//     mode this whole check exists to remove. The message names the file and the fix.
+//  3. The record is absent — fall back to the directory test. This covers exactly two
+//     populations, and no project this kit generates today is in either: the kit's own
+//     `apps/web`, which has no scaffold record and must still check the panel it contains, and a
+//     project scaffolded before the record existed. Deleting the record by hand puts a project
+//     back in this case, and back to the old behaviour, which is the honest consequence of
+//     removing the only evidence of what was asked for.
+//
+// `&&` with the directory test, not instead of it: a project that answered `admin` and then
+// deleted the panel by hand should have the panel rules switched off, because there is no panel.
+function scaffoldSaysPanel() {
+  const RECORD = '.kit/scaffold.json'
+  if (!existsSync(RECORD)) return true
+  let backend
+  try {
+    backend = JSON.parse(readFileSync(RECORD, 'utf8')).answers?.backend
+  } catch (err) {
+    backend = { unreadable: err.message }
+  }
+  if (typeof backend !== 'string') {
+    console.error(
+      `\n✗ check-conventions: cannot read 'backend' from ${RECORD}.\n\n` +
+        '  That file records the answers this project was scaffolded with, and it is what\n' +
+        '  decides whether the admin panel\'s rule exemptions apply here. Guessing would\n' +
+        '  either fail a project over a panel it never asked for, or switch off the rules\n' +
+        '  that keep a hand-added route out of `src/routes/admin/`.\n\n' +
+        '  Restore it from git, or delete it entirely to fall back to the presence of\n' +
+        '  `src/admin/`.\n',
+    )
+    process.exit(1)
+  }
+  return backend === 'admin'
+}
+
 // Whether this project HAS an admin panel, which is the only thing that earns the exemptions
-// below. This script ships to every generated project verbatim (it is in COPY_FILES), so it
-// cannot read the scaffold answers — but it can read the disk, and `src/admin/` is the panel's
-// own tree: present in the kit and in an `--backend=admin` scaffold, absent everywhere else.
+// below.
 //
 // Without this test the exemptions travel to projects that declined the panel and switch off ten
 // real rules for any route a client happens to file under `src/routes/admin/` — a pricing page
@@ -279,7 +330,11 @@ const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 // in a project that has neither, and this kit has never banned that API outside the panel —
 // `components/theme-script.tsx` uses it. Without a panel, `src/routes/admin/` is just another
 // route directory, checked exactly like `index.tsx` and `docs.tsx`.
-const HAS_PANEL = existsSync('src/admin')
+//
+// The same logic is in `scripts/verify-build.mjs`, deliberately duplicated: both ship verbatim
+// into a flat generated project (COPY_FILES), and a third shared file would be a new entry in
+// cli/kit-manifest.mjs for fifteen lines. Change one, change the other.
+const HAS_PANEL = scaffoldSaysPanel() && existsSync('src/admin')
 
 // The panel's routes. `src/routes/admin.tsx` is the layout route and `src/routes/admin/`
 // everything under it; `src/admin/` itself is outside every `walk` in this file already.
