@@ -82,7 +82,7 @@
   "public/logo.svg": "d17d6e1c0e99781d2f6b612b17fa90b49cc601082dd479b3a808c1eb11268001",
   "public/og-default.jpg": "83717587e6266f502ad4cf61b57826a2819fa619e83ad0337bcd60d857cee212",
   "scripts/check-conventions.mjs": "97275acab6b23908ea207aaca6a4d54b10385163ee653d6184dd0eed13b3e661",
-  "scripts/verify-build.mjs": "912a729c75816410a3ecbf94b7e5bbbf8311695176c62da309b55119ae6cd8fe",
+  "scripts/verify-build.mjs": "8b458ce21b7a08f4e7c9494251265d624f99f2ce5afe6f294661a8ea09d665d1",
   "src/admin/components/admin-shell.tsx": "367ad9ff9d4de1dd52d86e90fc392d101b6f711f1510b07128d7902f3bc62fc3",
   "src/admin/components/language-toggle.tsx": "7d7b740ca2e0bf3bae506fdbb5a7679a479cb9d61a1740021b75a2c7c07bd102",
   "src/admin/components/panel-skeleton.tsx": "3e43f1aadc3c52a325524d97eaa803b066a1959f179320ef2cb39502b18760d6",
@@ -173,5 +173,5 @@
   "src/styles/presets/editorial.css": "d778bcd25027577c226a22be249c6d4698dad13b442afcb65f7ed9752db50db8",
   "src/styles/theme.css": "104e0e34b651a362126b709bfb81169bdcf7ba724f3fe1bd112a346ee5da39a7",
   "tsconfig.json": "b6fd400d5a9f977b4a4feebf9709fe63dad4f51054ff40425d7a3a073e8d3735",
-  "vite.config.ts": "6006cbc068666b099271876117648d993e2662979c21bdce596a45c9b08e35dd"
+  "vite.config.ts": "787ea76534f640cf83fd980e679cb1176033b88067e0854d71bb4cc94963849f"
 }

@@ -45,3 +45,12 @@ todos.json
 !apps/api/internal/static/dist/
 apps/api/internal/static/dist/*
 !apps/api/internal/static/dist/.placeholder
+
+# The two Go binaries apps/api/makefile produces. `make build` writes bin/landing-api, 34 MB with
+# the whole site embedded; `make dev` runs air, which rebuilds tmp/main on every save (.air.toml
+# line 3). Neither is covered by the bare `dist` rule at the top, so before these lines a
+# `git add -A` after any local build committed a binary. Nothing else the makefile writes lands
+# outside these two and internal/static/dist/ above: `sqlc generate` and `migrate-create` write
+# files that belong in the repo.
+apps/api/bin/
+apps/api/tmp/
