@@ -22,6 +22,11 @@ const BY_CODE: Record<string, MessageKey> = {
   'validation error': 'errUnknown',
   'internal error': 'errUnknown',
   network: 'errNetwork',
+  // Not a code the API sends. `apiFetch` raises it when a refresh could not be completed because
+  // the API did not answer usefully, and it maps to the network string on purpose: from the
+  // admin's side a gateway that swallowed the refresh and a connection that dropped are the same
+  // event, and neither is a reason to ask them for their password.
+  unavailable: 'errNetwork',
 }
 
 export class ApiError extends Error {

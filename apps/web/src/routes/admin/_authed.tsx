@@ -1,7 +1,9 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { AdminShell } from '@/admin/components/admin-shell'
 import { PanelSkeleton } from '@/admin/components/panel-skeleton'
+import { useT } from '@/admin/i18n/use-t'
 import { refreshSession } from '@/admin/lib/api'
+import { ApiError } from '@/admin/lib/errors'
 import { getSession } from '@/admin/lib/session'
 
 /**
@@ -39,7 +41,16 @@ export const Route = createFileRoute('/admin/_authed')({
     // A reload starts with an empty session by design, so this is the ordinary path, not the
     // exceptional one: the refresh cookie is the only thing that survived, and one round trip
     // turns it back into an access token.
-    if (await refreshSession()) return
+    const outcome = await refreshSession()
+    if (outcome === 'refreshed') return
+
+    // A refresh the API could not answer is not a session ending, so it does not get the login
+    // screen. The cookie is untouched and very probably still good; what failed is the server, or
+    // something in front of it. Throwing sends this to the boundary below, which says so. A
+    // password prompt here would tell an admin their session expired when it did not, and teach
+    // them to retype the admin password whenever the panel misbehaves — the one habit worth not
+    // teaching the person who holds the only credential.
+    if (outcome === 'unavailable') throw new ApiError(503, 'unavailable', '')
 
     // No `next` parameter. Carrying a redirect target through the login screen is an
     // open-redirect waiting to be built wrong, and the panel has one destination worth landing
@@ -47,7 +58,30 @@ export const Route = createFileRoute('/admin/_authed')({
     throw redirect({ to: '/admin/login' })
   },
   component: AuthedLayout,
+  errorComponent: PanelError,
 })
+
+/**
+ * What the panel shows when the guard above, or anything below it, throws.
+ *
+ * Without one, the router's built-in component renders `error.message` — "503 unavailable" — over
+ * a stack trace toggle, which tells an operator nothing they can act on. This renders the panel's
+ * own translated string instead, in whichever language they have set.
+ *
+ * Not wrapped in `AdminShell`, for the same reason `PanelSkeleton` is not: the guard may have
+ * thrown before anyone was known to be signed in, and the shell's nav and sign-out button are
+ * chrome for someone who is.
+ */
+function PanelError({ error }: { error: Error }) {
+  const t = useT()
+  return (
+    <main className="bg-background flex min-h-screen items-center justify-center p-6">
+      <p className="text-muted-foreground max-w-sm text-center text-sm">
+        {error instanceof ApiError ? error.messageFor(t) : t.errUnknown}
+      </p>
+    </main>
+  )
+}
 
 function AuthedLayout() {
   return (
