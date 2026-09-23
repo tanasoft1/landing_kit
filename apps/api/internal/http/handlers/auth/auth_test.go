@@ -39,7 +39,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	t.Helper()
 
 	db := testsupport.Fresh(t)
-	tokenService := secure.NewTokenService(testJWTSecret, 15, 7)
+	tokenService := secure.NewTokenService(testJWTSecret, 15, 7, 30)
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(lead.New(db.Queries, notify.NewLogger())),
 		// cookieSecure is false here for the same reason it is false in development: these

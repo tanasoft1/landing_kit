@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tanasoft1/testkit"
@@ -94,7 +95,7 @@ func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 
 	app, _, tokenService := newApp(t)
 
-	refresh, _, err := tokenService.GenerateRefreshToken(uuid.New(), uuid.New())
+	refresh, _, err := tokenService.GenerateRefreshToken(uuid.New(), uuid.New(), time.Now().Add(30*24*time.Hour))
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}

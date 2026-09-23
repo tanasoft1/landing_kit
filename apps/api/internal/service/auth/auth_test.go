@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -26,7 +27,7 @@ func setupAuth(t *testing.T) (*testsupport.DB, *auth.Service, *secure.TokenServi
 	t.Helper()
 
 	tdb := testsupport.Fresh(t)
-	tokenSvc := secure.NewTokenService(testSecret, 15, 7)
+	tokenSvc := secure.NewTokenService(testSecret, 15, 7, 30)
 	svc := auth.New(tdb.Pool, tdb.Queries, tokenSvc, audit.New(tdb.Queries))
 
 	return tdb, svc, tokenSvc
@@ -168,7 +169,7 @@ func TestRefresh(t *testing.T) {
 	t.Run("refresh token with no ledger row returns invalid token", func(t *testing.T) {
 		t.Parallel()
 
-		refresh, _, err := tokenSvc.GenerateRefreshToken(uuid.New(), uuid.New())
+		refresh, _, err := tokenSvc.GenerateRefreshToken(uuid.New(), uuid.New(), time.Now().Add(30*24*time.Hour))
 		if err != nil {
 			t.Fatalf("GenerateRefreshToken: %v", err)
 		}

@@ -21,9 +21,13 @@ const auditWriteTimeout = 5 * time.Second
 // The events the admin auth path records. token_reuse_detected is the important one: it is the
 // only signal that a refresh token was stolen, and without it a family revocation looks to the
 // admin like a random logout.
+// login_locked is separate from login_failed on purpose. A failed login is one person mistyping;
+// a run of login_locked rows is somebody feeding an address failures fast enough to keep the
+// backoff standing, which is an attack in progress and reads as one in the table.
 const (
 	EventLoginSuccess = "login_success"
 	EventLoginFailed  = "login_failed"
+	EventLoginLocked  = "login_locked"
 	EventLogout       = "logout"
 	EventTokenReuse   = "token_reuse_detected" //nolint:gosec // an event name written into the audit log, not a credential
 )
