@@ -25,7 +25,7 @@ type ServerConfig struct {
 	AppEnv string
 	// CORSOrigins is a comma-separated allowlist. In endpoint mode the browser posts the contact
 	// form cross-origin, so a wrong value fails at preflight and surfaces as the same generic
-	// error a real code bug would. See "check CORS first" under Gotchas in apps/web/README.md.
+	// error a real code bug would. See "check CORS first" under Gotchas in the web project's README.
 	//
 	// The default is the Vite dev origin, which is right for development and catastrophic in
 	// production: a deploy that forgets this boots cleanly, answers /api/health with 200, and
@@ -36,7 +36,7 @@ type ServerConfig struct {
 	// credentialed CORS so the browser will carry the refresh cookie, which means the panel's
 	// origin has to be listed here or login, refresh and logout all fail cross-origin.
 	//
-	// psyfint_v2_back defaults to "*" instead, which fails open. Do not copy that here: Load
+	// A "*" default would fail open, so there deliberately is not one: Load
 	// refuses a "*" entry outright, in every environment. A wildcard origin on a credentialed
 	// response would hand a logged-in admin session to any site a browser visits, and even
 	// without the cookie "*" lets any site on the internet post leads here.
@@ -133,14 +133,11 @@ type JWTConfig struct {
 
 // DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
 //
-// psyfint_v2_back has two methods here: DSN() returning a URL for golang-migrate, which accepts
-// only a URL, and ConnectionString() returning key=value for pgx. One is enough because this URL
-// is built with net/url rather than fmt.Sprintf, so every component is escaped and pgx parses it
-// as happily as migrate does. psyfint's key=value form interpolates the password unquoted, which
-// breaks on a password containing a space; there is no reason to reproduce that.
-//
-// The name follows psyfint's URL-returning method, not its key=value one, so a developer moving
-// between the two repos reads the same name for the same shape.
+// One method, not two. The common split is a DSN() returning a URL for golang-migrate, which
+// accepts only a URL, alongside a ConnectionString() returning key=value for pgx. One is enough
+// because this URL is built with net/url rather than fmt.Sprintf, so every component is escaped
+// and pgx parses it as happily as migrate does. A hand-built key=value form interpolates the
+// password unquoted, which breaks on a password containing a space.
 func (d DatabaseConfig) DSN() string {
 	u := url.URL{
 		Scheme: "postgres",
@@ -220,8 +217,8 @@ func Load() (*Config, error) {
 	}
 
 	// Validated here, at the config boundary, so service wiring can never see a value that
-	// half-works. This is the same rule psyfint_v2_back applies to its JWT, webhook and face
-	// config, and the same shape as the NOTIFY_DRIVER check added later in this plan.
+	// half-works. Every other setting that can half-work is checked the same way, in the same
+	// shape as the NOTIFY_DRIVER checks below.
 	// Any environment that is not development, not just the literal "production". A staging or
 	// UAT deploy has a real origin and the same silent-drop failure mode, and guarding only the
 	// one spelling leaves every other spelling unprotected.

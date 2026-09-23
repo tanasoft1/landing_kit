@@ -87,10 +87,9 @@ func TestBuildSubject(t *testing.T) {
 			want:     "New lead from   Bat  ",
 		},
 		{
-			// task 5's handler does not exist yet, so an empty Name is a reachable path today,
-			// not just a hypothetical one. buildSubject degrades to a subject with a trailing
-			// space rather than doing anything more elaborate; it takes no position on whether
-			// that is validated away upstream.
+			// buildSubject takes no position on whether an empty Name is validated away
+			// upstream. It degrades to a subject with a trailing space rather than doing
+			// anything more elaborate, and this pins that.
 			name:     "empty visitor",
 			siteName: "Landing Kit",
 			leadName: "",

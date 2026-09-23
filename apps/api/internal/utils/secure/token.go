@@ -1,7 +1,6 @@
 // Package secure issues and validates the HS256 JWTs that carry admin identity between the login
-// endpoint and every route behind AuthMiddleware. Mirrors
-// ~/work/psyfint_v2_back/internal/utils/secure/token.go: same shape, same two checks that keep a
-// stolen or mistyped token from doing more than the caller intended.
+// endpoint and every route behind AuthMiddleware. Two checks below keep a stolen or mistyped
+// token from doing more than the caller intended.
 package secure
 
 import (
@@ -46,8 +45,7 @@ type Claims struct {
 }
 
 // TokenService signs and parses tokens with one shared secret. HS256, not RSA: this service's
-// only client is its own admin UI, so one secret to manage beats a keypair (see the plan's
-// "Decisions taken before writing this").
+// only client is its own admin UI, so one secret to manage beats a keypair.
 type TokenService struct {
 	secret              string
 	accessExpireMinutes int

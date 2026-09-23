@@ -18,9 +18,8 @@ const (
 )
 
 // AuthMiddleware requires "Authorization: Bearer <access token>" and rejects anything else.
-// Mirrors ~/work/psyfint_v2_back/internal/http/handlers/middleware.go: the same three failure
-// shapes (missing header, malformed header, invalid token) and the same Mongolian messages, so
-// an operator who has seen one service's 401 recognizes the other's.
+// Three failure shapes (missing header, malformed header, invalid token), each with its own
+// Mongolian message, so an operator reading a 401 can tell which one tripped.
 func AuthMiddleware(tokenService *secure.TokenService) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")

@@ -36,9 +36,8 @@ type Input struct {
 // rather than returned: the row is already committed, and failing the request would tell a real
 // visitor their message did not arrive when it did. A mail outage must not look like a broken form.
 func (s *Service) Create(ctx context.Context, in Input) error {
-	// *netip.Addr because that is what SQLC generated for the `inet` column: psyfint's overrides
-	// do not cover `inet`, so SQLC picked it, and it is the better type here anyway since a client
-	// address has no mask.
+	// *netip.Addr because that is what SQLC generates for the `inet` column with no type override
+	// configured, and it is the better type here anyway since a client address has no mask.
 	//
 	// The nil check is load-bearing, not defensive habit. Postgres rejects an empty string bound
 	// to an inet column with SQLSTATE 22P02, `invalid input syntax for type inet: ""`, verified

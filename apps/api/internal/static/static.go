@@ -1,5 +1,5 @@
 // Package static embeds the web build's output so one binary can serve both the API and the
-// prerendered site. Precedent: ~/work/psyfint_v2_back/internal/spa/spa.go.
+// prerendered site.
 package static
 
 import (
@@ -14,10 +14,11 @@ import (
 
 // distFS holds the web build's output, or just dist/.placeholder on a fresh clone.
 //
-// `//go:embed` is a build error when its pattern matches nothing (hit in phase 2a: the migrations
-// package would not compile until a `.sql` file existed). The web build output is a build artifact
-// and must never be committed, so without the committed placeholder this pattern would match
-// nothing on a fresh clone and `go build ./...` would fail before anyone had run a web build.
+// `//go:embed` is a build error when its pattern matches nothing (the migrations package hit
+// exactly this: it would not compile until a `.sql` file existed). The web build output is a
+// build artifact and must never be committed, so without the committed placeholder this pattern
+// would match nothing on a fresh clone and `go build ./...` would fail before anyone had run a
+// web build.
 //
 // `all:dist`, not a bare `dist`: the `all:` prefix is what includes names starting with a dot, and
 // dist/.placeholder is exactly such a name. A bare `dist` pattern silently excludes it, which would
@@ -58,8 +59,8 @@ func HasAdmin() bool {
 // Mount this last, after every API route (see internal/http/routes.Setup): mounted earlier, the
 // site's own catch-all would answer for every unmatched path before an API route ever saw it.
 //
-// Precedent: ~/work/psyfint_v2_back/internal/spa/spa.go's Handler, minus its psyfint-specific
-// /web/session and /web/face exclusions -- this service has only one reserved prefix.
+// /api is the only reserved prefix. A service that owns more paths server-side would need each
+// one excluded here the same way.
 func Handler() fiber.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {

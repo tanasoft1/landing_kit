@@ -14,8 +14,8 @@ import (
 // clientKeyGenerator is shared by every rate limiter below. It never collapses every caller into
 // one bucket.
 //
-// psyfint_v2_back removed its per-IP limiter after finding that Fiber's c.IP() returns "" whenever
-// ProxyHeader is configured and that header does not arrive, which put every caller in ONE bucket.
+// Fiber's c.IP() returns "" whenever ProxyHeader is configured and that header does not arrive,
+// and a limiter that keys on the raw result puts every such caller in ONE bucket.
 // On a public contact form that means a single spammer locks out every real visitor; on a login
 // endpoint it means one attacker's guesses lock out every admin trying to sign in.
 //
