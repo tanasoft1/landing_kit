@@ -11,6 +11,7 @@
 // that runs only when the kit's own copy IS present — a working copy, which is exactly where
 // someone would edit them — so changing one and not the other stops the CLI here.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { builtinModules } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { blockFiles } from './add.mjs'
 import { kitPath } from './kit-manifest.mjs'
@@ -316,6 +317,141 @@ function packageJson(outDir, answers, { deps }) {
     dependencies: pickDeps(runtime, deps),
     devDependencies: pickDeps(BUILD_DEPS, deps),
   })
+}
+
+// --- what ships must be installable ----------------------------------------------------------
+//
+// The CLASSIFIED loops above prove every package is FILED somewhere. They do not prove a filing is
+// TRUE. `lucide-react` is filed admin-only; nothing stopped `src/components/header.tsx` from
+// importing it, and a `--backend=none` scaffold then shipped source importing a package its own
+// `package.json` does not list — no CLI error, and a snapshot line reading `changed
+// src/components/header.tsx` like any ordinary edit.
+//
+// So: read what actually shipped. Walk the finished target, collect every bare module specifier,
+// and reconcile against the `package.json` this run just wrote. It runs per answer set, which is
+// the only level at which the question has an answer — `lucide-react` in `src/admin` is correct
+// and `lucide-react` in `src/components` is a broken `none` project, and the difference is which
+// files the answer put on disk.
+//
+// This subsumes the admin-only case rather than special-casing it. An undeclared package is an
+// undeclared package whichever list it came from, so BLOCK_RUNTIME_DEPS is covered by the same
+// walk with no extra code.
+
+// Names Node resolves without a `package.json` entry. `node:`-prefixed specifiers are handled
+// separately; these are the bare spellings (`fs`, `path`) that `scripts/*.mjs` could still use.
+const BUILTIN_MODULES = new Set(builtinModules)
+
+// Comment-only lines, dropped before the patterns below run. A JSDoc line quoting an import is
+// not an import, and this kit's prose quotes them often — `src/admin/lib/utils.ts` explains that
+// shadcn now writes `import { cn } from 'cn'`, and a scan that believed it failed every admin
+// scaffold on a package nobody depends on. Line-shaped rather than a real comment parser: no
+// import statement ever starts with any of these three, so nothing real is lost.
+const COMMENT_LINE = /^[ \t]*(?:\/\/|\/?\*)/
+const stripCommentLines = (text) =>
+  text
+    .split('\n')
+    .filter((l) => !COMMENT_LINE.test(l))
+    .join('\n')
+
+// Static `from '…'`, bare `import '…'`, dynamic `import('…')` and `require('…')`. Deliberately
+// regex and not a parser: no new dependency, and a false POSITIVE here is a loud failure someone
+// reads, while the alternative — shipping nothing — is the silence this exists to end.
+//
+// The first is anchored at the start of a line and forbids a quote before `from`, so it spans a
+// multi-line import clause (`import {\n  a,\n} from 'x'`) and cannot run past the end of one
+// statement into the next one's specifier.
+const JS_SPECIFIERS = [
+  /^[ \t]*(?:import|export)[ \t][^'"\n]*(?:\n[^'"\n]*)*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm,
+  /^[ \t]*import[ \t]*['"]([^'"\n]+)['"]/gm,
+  /\bimport[ \t]*\([ \t]*['"]([^'"\n]+)['"]/g,
+  /\brequire[ \t]*\([ \t]*['"]([^'"\n]+)['"]/g,
+]
+
+// `@import "tw-animate-css";` is a real dependency edge and the exact one the panel added to a
+// file that ships to EVERY project (`transformThemeCss` is what removes it for `none` and `api`).
+// A CSS-only check would have caught that coupling breaking in the direction the JS scan cannot
+// see, so the two run together.
+const CSS_SPECIFIERS = [/@import\s+['"]([^'"\n]+)['"]/g]
+
+const SCANNED = { js: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'], css: ['.css'] }
+
+/**
+ * The npm package a specifier names, or null when it names no package at all.
+ *
+ * `@/…` is this project's own source alias and is NOT a scope, which is the one case worth
+ * spelling out: `@/admin/lib/api` and `@radix-ui/react-dialog` are the same shape and only one is
+ * a package. Subpaths collapse to their package, so `lucide-react/icons/x` is `lucide-react` and
+ * `@fontsource-variable/inter/wght.css` is `@fontsource-variable/inter`.
+ */
+function packageOfSpecifier(spec) {
+  if (spec === '' || spec.startsWith('.') || spec.startsWith('/')) return null
+  if (spec.startsWith('@/')) return null
+  if (spec.startsWith('node:') || BUILTIN_MODULES.has(spec)) return null
+  // `virtual:…`, `data:…` and Vite's other scheme-prefixed specifiers resolve to no package.
+  if (/^[a-z][a-z0-9+.-]*:/.test(spec)) return null
+  const parts = spec.split('/')
+  return spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
+}
+
+function collectSpecifiers(text, patterns) {
+  const out = []
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0
+    for (const m of text.matchAll(pattern)) out.push(m[1])
+  }
+  return out
+}
+
+/**
+ * Every package the shipped source imports must be in the shipped `package.json`.
+ *
+ * Runs on the finished target rather than on the kit, because the question is about one answer
+ * set: the kit's own tree always contains the panel and always declares its packages, which is
+ * precisely why the kit's `pnpm verify` stayed green while a `none` scaffold was broken.
+ *
+ * The `api/` tree is walked too and costs nothing — Go files match no extension here — so a `.ts`
+ * or `.css` ever added under it is covered without this function learning about the backend.
+ */
+function assertShippedImportsAreDeclared(outDir, packageJsonText) {
+  const pkg = JSON.parse(packageJsonText)
+  const declared = new Set([
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+  ])
+  const problems = []
+  const walk = (rel) => {
+    for (const entry of readdirSync(join(outDir, rel || '.'), { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        walk(childRel)
+        continue
+      }
+      const patterns = SCANNED.js.some((e) => entry.name.endsWith(e))
+        ? JS_SPECIFIERS
+        : SCANNED.css.some((e) => entry.name.endsWith(e))
+          ? CSS_SPECIFIERS
+          : null
+      if (!patterns) continue
+      const text = stripCommentLines(readFileSync(join(outDir, childRel), 'utf8'))
+      for (const spec of collectSpecifiers(text, patterns)) {
+        const name = packageOfSpecifier(spec)
+        if (name && !declared.has(name)) problems.push(`  ${childRel}  imports '${spec}'`)
+      }
+    }
+  }
+  walk('')
+  if (problems.length === 0) return
+  // Sorted and de-duplicated: one package imported by six files is one mistake, and a list that
+  // repeats it six times reads like six.
+  const unique = [...new Set(problems)].sort()
+  throw new Error(
+    'The scaffold imports packages its own package.json does not declare, so it cannot ' +
+      'install and build. Usually this means a package classified admin-only in ' +
+      'cli/generate.mjs (ADMIN_RUNTIME_DEPS) is now imported by code that ships to every ' +
+      'project, or a block-only one (BLOCK_RUNTIME_DEPS) is imported outside its block. ' +
+      'Either move the import back inside the panel or the block, or reclassify the package ' +
+      `as RUNTIME_DEPS.\n${unique.join('\n')}`,
+  )
 }
 
 // --- pnpm-workspace.yaml --------------------------------------------------------------------------
@@ -1591,8 +1727,9 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const dockerCompose = hasBackend ? dockerComposeYml() : null
   if (hasBackend) assertDockerComposeMatchesKit(kitRoot, dockerCompose)
 
+  const packageJsonText = packageJson(outDir, answers, manifest)
   const files = [
-    ['package.json', packageJson(outDir, answers, manifest)],
+    ['package.json', packageJsonText],
     ['pnpm-workspace.yaml', pnpmWorkspaceYaml(kitRoot, manifest.deps)],
     ['.gitignore', hasBackend ? GITIGNORE + API_GITIGNORE : GITIGNORE],
     ['vite.config.ts', viteConfigTs(answers)],
@@ -1621,5 +1758,12 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
 
   const written = []
   for (const [rel, text] of files) writeOut(outDir, rel, text, written)
+
+  // Last, and the only check here that runs AFTER a write rather than before one. It has to: the
+  // question is what the finished project imports, and neither layer alone knows that — the copy
+  // layer put `src/` there and this one wrote the `package.json` being reconciled against. A
+  // failure still leaves nothing behind, because `cli/index.mjs` wraps this whole call in the
+  // same rollback the copy layer uses.
+  assertShippedImportsAreDeclared(outDir, packageJsonText)
   return written
 }
