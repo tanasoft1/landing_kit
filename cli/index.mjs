@@ -157,6 +157,84 @@ function runSubcommand(cmd, argv) {
 `)
 }
 
+/**
+ * The last thing a developer reads, and for two of the three answers it used to be wrong.
+ *
+ * Every scaffold got the same four lines: `cd`, `pnpm install`, `pnpm dev`, set `url`. An `admin`
+ * project needs Postgres running, an `.env`, the API process up and an account seeded before
+ * `/admin` does anything, so the first screen its developer saw was a login form with no
+ * credentials that work. All of it is in the generated READMEs; this contradicted them by omission.
+ *
+ * Read off the generated tree as it stands, not from memory:
+ *
+ *  - migrations are NOT a command. `api/README.md` says they run at startup, and `api/makefile`
+ *    has no `migrate-up` target — only `migrate-create`, which writes a new pair of files.
+ *  - `make seed-admin` takes `email=` and NOTHING ELSE. There is no `password=` any more: one on
+ *    the command line put the only credential guarding the panel into the shell history, the
+ *    scrollback and the process table. It prompts with echo off instead.
+ *  - `make run` rather than `make dev`: `dev` is `air`, which the developer may not have
+ *    installed, and `api/README.md` lists it as optional.
+ */
+function nextSteps(answers) {
+  const backend = answers.backend ?? 'none'
+  const lines = [`  cd ${answers.dir}`, '  pnpm install']
+
+  if (backend === 'none') {
+    lines.push('  pnpm dev')
+  } else {
+    lines.push(
+      '  cp api/.env.example api/.env',
+      '  docker compose up -d db          # Postgres, on host port 5433',
+      '  (cd api && make run)             # the API on :3000 — migrations run at startup',
+      '  pnpm dev                         # the site on :5173',
+    )
+  }
+
+  const notes = []
+  if (backend === 'admin') {
+    notes.push(
+      '',
+      '  Create the first admin account — there is no sign-up screen:',
+      '',
+      '    cd api && make seed-admin email=you@example.mn',
+      '',
+      '  It prompts for the password with echo off; there is no `password=` to pass, on',
+      '  purpose. Minimum 12 characters. Then open /admin and sign in.',
+    )
+  }
+  if (backend !== 'none') {
+    // Absolute for `api`, relative for `admin`, and the difference is the dev proxy. An `admin`
+    // project's vite.config.ts proxies `/api` to :3000 and its production binary serves the site
+    // and the API together, so a relative value is same-origin at both ends. An `api` project has
+    // neither and reaches Fiber through CORS, which needs the origin spelled out.
+    const admin = backend === 'admin'
+    notes.push(
+      '',
+      '  The contact form posts nowhere until you point it at the service. In a .env at',
+      '  the project root:',
+      '',
+      `    VITE_CONTACT_ENDPOINT=${admin ? '/api/leads' : 'http://localhost:3000/api/leads'}`,
+      '',
+      admin
+        ? '  Relative, because your vite.config.ts proxies /api to :3000 in development and'
+        : '  Absolute, because the site and the API are separate origins and the form reaches',
+      admin
+        ? '  the Go binary serves the site and the API together in production.'
+        : '  the service through CORS. api/README.md covers that side.',
+    )
+  }
+
+  return [
+    '',
+    ...lines,
+    ...notes,
+    '',
+    '  Then set `url` in src/config/site.config.ts to your real domain.',
+    '  `pnpm verify` fails until you do.',
+    '',
+  ].join('\n')
+}
+
 async function main() {
   const cmd = process.argv[2]
   if (cmd === 'add-block' || cmd === 'add-page') {
@@ -206,14 +284,7 @@ async function main() {
 
   console.log(`\n✓ Created ${answers.dir}/ — ${written.length} files`)
   if (workspace.message) console.log(workspace.message)
-  console.log(`
-  cd ${answers.dir}
-  pnpm install
-  pnpm dev
-
-  Then set \`url\` in src/config/site.config.ts to your real domain.
-  \`pnpm verify\` fails until you do.
-`)
+  console.log(nextSteps(answers))
   // Named one per line, because these are the only files in the whole scaffold that hold text
   // nobody wrote. Left unsaid, the placeholder headings ship.
   if (answers.custom.length > 0) {
