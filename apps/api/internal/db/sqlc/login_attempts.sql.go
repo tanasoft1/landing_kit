@@ -39,24 +39,36 @@ func (q *Queries) ExtendLoginLock(ctx context.Context, arg ExtendLoginLockParams
 }
 
 const getLoginAttempt = `-- name: GetLoginAttempt :one
-SELECT email, failed_count, locked_until FROM login_attempts WHERE email = $1
+SELECT email, failed_count, locked_until, last_failure_at FROM login_attempts WHERE email = $1
 `
 
 func (q *Queries) GetLoginAttempt(ctx context.Context, email string) (LoginAttempt, error) {
 	row := q.db.QueryRow(ctx, getLoginAttempt, email)
 	var i LoginAttempt
-	err := row.Scan(&i.Email, &i.FailedCount, &i.LockedUntil)
+	err := row.Scan(
+		&i.Email,
+		&i.FailedCount,
+		&i.LockedUntil,
+		&i.LastFailureAt,
+	)
 	return i, err
 }
 
 const pruneLoginAttempts = `-- name: PruneLoginAttempts :exec
-DELETE FROM login_attempts WHERE locked_until IS NOT NULL AND locked_until < now() - interval '1 day'
+DELETE FROM login_attempts
+WHERE last_failure_at < $1
+  AND (locked_until IS NULL OR locked_until < now())
 `
 
-// Rows whose lock lapsed more than a day ago cannot affect any future decision: the backoff curve
-// reads failed_count, and a count that old is not evidence of anything current.
-func (q *Queries) PruneLoginAttempts(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, pruneLoginAttempts)
+// Prunes on staleness, not on the lock. The previous version required locked_until IS NOT NULL,
+// and a row only gets that at five failures, so an attacker who stopped at four per address left
+// one permanent row per address tried -- exactly the "spray across a million addresses" the prune
+// was written to bound, and exactly the rows it did not touch.
+//
+// The locked_until half stays as a guard, not as the selector: a row still inside its lock window
+// is evidence of something current no matter how old its last failure looks.
+func (q *Queries) PruneLoginAttempts(ctx context.Context, staleBefore time.Time) error {
+	_, err := q.db.Exec(ctx, pruneLoginAttempts, staleBefore)
 	return err
 }
 
@@ -64,17 +76,40 @@ const recordLoginFailure = `-- name: RecordLoginFailure :one
 INSERT INTO login_attempts (email, failed_count)
 VALUES ($1, 1)
 ON CONFLICT (email) DO UPDATE
-    SET failed_count = login_attempts.failed_count + 1
-RETURNING email, failed_count, locked_until
+    SET failed_count = CASE
+            WHEN login_attempts.last_failure_at < $2 THEN 1
+            ELSE login_attempts.failed_count + 1
+        END,
+        last_failure_at = now()
+RETURNING email, failed_count, locked_until, last_failure_at
 `
 
-// One statement so two concurrent failures cannot both read 2 and both write 3. It touches only
-// the count: the returned row carries the post-increment value, which is the number the caller
-// feeds to the backoff curve, and the lock itself is written by ExtendLoginLock afterwards. The
-// curve stays in Go because it is policy, not storage.
-func (q *Queries) RecordLoginFailure(ctx context.Context, email string) (LoginAttempt, error) {
-	row := q.db.QueryRow(ctx, recordLoginFailure, email)
+type RecordLoginFailureParams struct {
+	Email       string    `json:"email"`
+	DecayBefore time.Time `json:"decay_before"`
+}
+
+// One statement so two concurrent failures cannot both read 2 and both write 3. The returned row
+// carries the post-increment value, which is the number the caller feeds to the backoff curve, and
+// the lock itself is written by ExtendLoginLock afterwards. The curve stays in Go because it is
+// policy, not storage.
+//
+// The count decays. A failure older than decay_before resets it to one instead of adding to it,
+// which is what stops the backoff from becoming a permanent lockout: without it the curve pinned
+// at its cap after nine failures and stayed there, so one request every fifteen minutes held a
+// known admin email shut forever. An attacker now has to sustain more than one failure per decay
+// window to keep the lock on, and the per-IP limiter bounds how fast a single host can do that.
+//
+// decay_before is a timestamp computed in Go rather than an interval literal here, for the same
+// reason the curve is in Go: the window is policy. Storage only compares.
+func (q *Queries) RecordLoginFailure(ctx context.Context, arg RecordLoginFailureParams) (LoginAttempt, error) {
+	row := q.db.QueryRow(ctx, recordLoginFailure, arg.Email, arg.DecayBefore)
 	var i LoginAttempt
-	err := row.Scan(&i.Email, &i.FailedCount, &i.LockedUntil)
+	err := row.Scan(
+		&i.Email,
+		&i.FailedCount,
+		&i.LockedUntil,
+		&i.LastFailureAt,
+	)
 	return i, err
 }

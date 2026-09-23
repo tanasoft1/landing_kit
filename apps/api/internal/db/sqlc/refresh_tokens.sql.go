@@ -13,26 +13,32 @@ import (
 )
 
 const createRefreshToken = `-- name: CreateRefreshToken :exec
-INSERT INTO refresh_tokens (jti, admin_id, family_id, expires_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO refresh_tokens (jti, admin_id, family_id, expires_at, family_expires_at)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateRefreshTokenParams struct {
-	Jti       uuid.UUID `json:"jti"`
-	AdminID   uuid.UUID `json:"admin_id"`
-	FamilyID  uuid.UUID `json:"family_id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Jti             uuid.UUID `json:"jti"`
+	AdminID         uuid.UUID `json:"admin_id"`
+	FamilyID        uuid.UUID `json:"family_id"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	FamilyExpiresAt time.Time `json:"family_expires_at"`
 }
 
 // A rotation's insert runs in the same transaction as the revoke that preceded it, under the
 // family lock (see LockTokenFamily). The two halves of spending a token and issuing its successor
 // commit together or not at all, and no family revoke can interleave between them.
+//
+// family_expires_at is written once by the login that started the family and copied forward
+// unchanged by every rotation, which is what makes it an absolute deadline rather than another
+// idle timeout. The caller clamps expires_at to it, so a successor can never outlive its family.
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error {
 	_, err := q.db.Exec(ctx, createRefreshToken,
 		arg.Jti,
 		arg.AdminID,
 		arg.FamilyID,
 		arg.ExpiresAt,
+		arg.FamilyExpiresAt,
 	)
 	return err
 }
@@ -43,13 +49,16 @@ DELETE FROM refresh_tokens WHERE admin_id = $1 AND expires_at < now()
 
 // Housekeeping, run on each login for the admin logging in. That keeps the table bounded with no
 // scheduled job: a row can only outlive its expiry until its owner next signs in.
+//
+// expires_at alone still covers the family deadline, because every row's expiry is clamped to its
+// family_expires_at at issue time: a row whose family has lapsed is already past its own expiry.
 func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context, adminID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteExpiredRefreshTokens, adminID)
 	return err
 }
 
 const getRefreshToken = `-- name: GetRefreshToken :one
-SELECT jti, admin_id, family_id, expires_at, revoked_at FROM refresh_tokens WHERE jti = $1
+SELECT jti, admin_id, family_id, expires_at, revoked_at, family_expires_at, replaced_by FROM refresh_tokens WHERE jti = $1
 `
 
 func (q *Queries) GetRefreshToken(ctx context.Context, jti uuid.UUID) (RefreshToken, error) {
@@ -61,6 +70,8 @@ func (q *Queries) GetRefreshToken(ctx context.Context, jti uuid.UUID) (RefreshTo
 		&i.FamilyID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.FamilyExpiresAt,
+		&i.ReplacedBy,
 	)
 	return i, err
 }
@@ -82,8 +93,15 @@ func (q *Queries) LockTokenFamily(ctx context.Context, familyID uuid.UUID) error
 }
 
 const revokeRefreshToken = `-- name: RevokeRefreshToken :execrows
-UPDATE refresh_tokens SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NULL
+UPDATE refresh_tokens
+SET revoked_at = now(), replaced_by = $1
+WHERE jti = $2 AND revoked_at IS NULL
 `
+
+type RevokeRefreshTokenParams struct {
+	ReplacedBy *uuid.UUID `json:"replaced_by"`
+	Jti        uuid.UUID  `json:"jti"`
+}
 
 // Returns rows affected, and the caller must read it. The WHERE clause carries revoked_at IS NULL,
 // so this single statement is both the check and the write: under READ COMMITTED the second of two
@@ -92,8 +110,12 @@ UPDATE refresh_tokens SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NU
 // therefore means another request spent this token first, which is the same event as presenting an
 // already-revoked one. Reading the count is what settles which of the two spent the token; a
 // preceding SELECT cannot, because both callers can pass it before either writes.
-func (q *Queries) RevokeRefreshToken(ctx context.Context, jti uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeRefreshToken, jti)
+//
+// replaced_by is written by the same statement that spends the row, so a spent row always names
+// its successor. Refresh reads it to tell a lost rotation response apart from a replay: see the
+// grace window there.
+func (q *Queries) RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeRefreshToken, arg.ReplacedBy, arg.Jti)
 	if err != nil {
 		return 0, err
 	}

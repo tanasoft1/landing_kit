@@ -40,15 +40,18 @@ type Lead struct {
 }
 
 type LoginAttempt struct {
-	Email       string     `json:"email"`
-	FailedCount int32      `json:"failed_count"`
-	LockedUntil *time.Time `json:"locked_until"`
+	Email         string     `json:"email"`
+	FailedCount   int32      `json:"failed_count"`
+	LockedUntil   *time.Time `json:"locked_until"`
+	LastFailureAt time.Time  `json:"last_failure_at"`
 }
 
 type RefreshToken struct {
-	Jti       uuid.UUID  `json:"jti"`
-	AdminID   uuid.UUID  `json:"admin_id"`
-	FamilyID  uuid.UUID  `json:"family_id"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	RevokedAt *time.Time `json:"revoked_at"`
+	Jti             uuid.UUID  `json:"jti"`
+	AdminID         uuid.UUID  `json:"admin_id"`
+	FamilyID        uuid.UUID  `json:"family_id"`
+	ExpiresAt       time.Time  `json:"expires_at"`
+	RevokedAt       *time.Time `json:"revoked_at"`
+	FamilyExpiresAt time.Time  `json:"family_expires_at"`
+	ReplacedBy      *uuid.UUID `json:"replaced_by"`
 }

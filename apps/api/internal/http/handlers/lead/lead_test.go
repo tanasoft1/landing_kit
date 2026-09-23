@@ -31,10 +31,11 @@ const (
 	testJWTSecret           = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
 	testAccessExpireMinutes = 15
 	testRefreshExpireDays   = 7
+	testSessionMaxDays      = 30
 )
 
 func newTestTokenService() *secure.TokenService {
-	return secure.NewTokenService(testJWTSecret, testAccessExpireMinutes, testRefreshExpireDays)
+	return secure.NewTokenService(testJWTSecret, testAccessExpireMinutes, testRefreshExpireDays, testSessionMaxDays)
 }
 
 // validRequest clears every check this handler applies: field shape, the honeypot, and the

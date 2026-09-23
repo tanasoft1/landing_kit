@@ -30,7 +30,8 @@ type Services struct {
 // New wires every service from the pool, the chosen notifier and config.
 func New(pool *pgxpool.Pool, notifier notify.Notifier, cfg *conf.Config) *Services {
 	q := sqlc.New(pool)
-	tokenService := secure.NewTokenService(cfg.JWT.Secret, cfg.JWT.AccessExpireMinutes, cfg.JWT.RefreshExpireDays)
+	tokenService := secure.NewTokenService(
+		cfg.JWT.Secret, cfg.JWT.AccessExpireMinutes, cfg.JWT.RefreshExpireDays, cfg.JWT.SessionMaxDays)
 
 	auditService := audit.New(q)
 

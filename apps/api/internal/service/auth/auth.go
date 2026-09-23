@@ -46,6 +46,24 @@ const (
 	// anyone who knows the admin's email can deny them access indefinitely, which trades an
 	// authentication problem for an availability one.
 	maxLockDuration = 15 * time.Minute
+	// loginFailureDecay is how long a failure counts towards the curve. It is what keeps the
+	// sentence above true, and the code did not have it: failed_count only ever grew, so an email
+	// that had failed nine times sat at maxLockDuration permanently and every later failure
+	// re-locked it for the full fifteen minutes. One request every fifteen minutes was enough to
+	// hold a known admin address shut forever -- a hard lock by accumulation, reachable by anyone
+	// who knows the email.
+	//
+	// Thirty minutes is longer than the longest lock the curve can set, so an attacker cannot
+	// simply wait out a lock and resume at the same count. It also means holding the lock costs a
+	// sustained rate rather than four requests an hour, and the per-IP limiter bounds that rate.
+	loginFailureDecay = 30 * time.Minute
+	// loginAttemptStale is how old the last failure must be before PruneLoginAttempts deletes the
+	// row. Well past loginFailureDecay, so the prune can never remove a row a live decision would
+	// still have read.
+	loginAttemptStale = 24 * time.Hour
+	// rotationGrace is how long after a rotation the token it spent is still honoured as a lost
+	// response rather than treated as a replay. See Refresh.
+	rotationGrace = 30 * time.Second
 )
 
 // lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
@@ -152,6 +170,13 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	}
 	if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
 		slog.Warn("login attempt against a locked email")
+		// Recorded, not merely logged. This branch returns before every other audit write in
+		// Login, so an attacker hammering a locked address used to leave nothing in
+		// admin_audit_log at all -- the table an operator reads to find out they are under
+		// attack stayed empty for exactly the attack it should have shown. No admin id: the row
+		// is not looked up on this path, deliberately, since doing so would make the lock a
+		// probe for whether the address is registered.
+		s.audit.Record(ctx, auditsvc.EventLoginLocked, nil, ip, userAgent)
 		return nil, errAccountLocked
 	}
 
@@ -206,7 +231,10 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	// The same bargain for login_attempts, which ClearLoginAttempts above only ever empties for
 	// the email that just succeeded. A row for an address that failed and was never tried again
 	// would otherwise live forever, so a spray across a million addresses leaves a million rows.
-	if err := s.queries.PruneLoginAttempts(ctx); err != nil {
+	//
+	// The prune keys on staleness, not on the lock. Keying on locked_until only reached rows that
+	// had failed five times, and the million-address sprayer stops at four.
+	if err := s.queries.PruneLoginAttempts(ctx, time.Now().Add(-loginAttemptStale)); err != nil {
 		slog.Warn("pruning login attempts failed", slog.Any("err", err))
 	}
 
@@ -215,7 +243,11 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 
 	// A login starts a new family. Nothing issued before it is related to it, so a replay
 	// detected later cannot reach back and revoke a session the admin started deliberately.
-	return s.issueTokenPair(ctx, s.queries, admin, uuid.New())
+	//
+	// This is also the only place the family's absolute deadline is chosen. Every rotation copies
+	// it forward untouched, so signing in again is the one way to get a later one.
+	return s.issueTokenPair(ctx, s.queries, admin, uuid.New(), uuid.New(),
+		s.tokenService.SessionDeadline(time.Now()))
 }
 
 // noteFailure records a failed attempt and returns the error Login should surface.
@@ -234,8 +266,14 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 // write failure is logged, not returned: the caller supplied bad credentials either way, and
 // refusing to answer would hand an attacker a way to tell a bookkeeping error from a wrong
 // password.
+// The count the write returns is a decayed one, not a running total: a previous failure older than
+// loginFailureDecay resets it to one instead of adding to it, in the same statement, so two
+// concurrent failures cannot disagree about whether the window had lapsed.
 func (s *Service) noteFailure(ctx context.Context, email string) error {
-	attempt, err := s.queries.RecordLoginFailure(ctx, email)
+	attempt, err := s.queries.RecordLoginFailure(ctx, sqlc.RecordLoginFailureParams{
+		Email:       email,
+		DecayBefore: time.Now().Add(-loginFailureDecay),
+	})
 	if err != nil {
 		slog.Error("recording login failure failed", slog.Any("err", err))
 		return errInvalidCredentials
@@ -286,6 +324,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	}
 
 	if row.RevokedAt != nil {
+		if result, handled, err := s.resumeLostRotation(ctx, row); handled {
+			return result, err
+		}
 		slog.Warn("refresh token replay detected, revoking family",
 			slog.String("admin_id", row.AdminID.String()),
 			slog.String("family_id", row.FamilyID.String()))
@@ -300,6 +341,18 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 		return nil, errInvalidToken
 	}
 
+	// The family's absolute deadline, refused exactly like an expired row: same error, same
+	// status, same body, per errInvalidToken's uniformity above. Every row's own expires_at is
+	// clamped to this value at issue time, so the check above almost always fires first -- almost,
+	// because a row written before the clamp existed has no such guarantee, and a check that only
+	// holds for rows this version wrote is not a bound.
+	if row.FamilyExpiresAt.Before(time.Now()) {
+		slog.Warn("refresh token's family is past its absolute lifetime",
+			slog.String("admin_id", row.AdminID.String()),
+			slog.String("family_id", row.FamilyID.String()))
+		return nil, errInvalidToken
+	}
+
 	admin, err := s.queries.GetAdminByID(ctx, row.AdminID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -311,7 +364,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 		return nil, fmt.Errorf("get admin by id: %w", err)
 	}
 
-	result, err := s.rotate(ctx, admin, jti, row.FamilyID)
+	result, err := s.rotate(ctx, admin, jti, row.FamilyID, row.FamilyExpiresAt)
 	if err != nil {
 		if errors.Is(err, errTokenAlreadySpent) {
 			// Someone else spent this token between the ledger read above and rotate's write.
@@ -330,6 +383,90 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 
 	slog.Info("token refresh succeeded", slog.String("admin_id", admin.ID.String()))
 	return result, nil
+}
+
+// resumeLostRotation decides whether a revoked row is a rotation whose response never reached the
+// client, and if it is, hands that client the successor it never received. handled reports whether
+// this function answered the request; when it is false the caller carries on to the replay path
+// unchanged.
+//
+// The case it exists for needs no attacker and no race. A refresh commits, the response is lost --
+// the tab closed mid-flight, the network dropped, a proxy timed out -- and the browser still holds
+// the cookie the server has already spent. The next refresh presented it, found revoked_at set, and
+// killed the whole family. Closing a tab at the wrong moment logged the admin out and wrote a
+// token_reuse_detected row, which internal/service/audit calls the only signal a refresh token was
+// stolen. Honest clients writing that row routinely is how a real one gets ignored.
+//
+// What this trades, plainly: a thief who replays a stolen token within rotationGrace of an honest
+// rotation is not detected, and lands in the same live session the honest client holds. That is a
+// real cost, not a free win. It is much smaller than the one the old behaviour charged real admins,
+// because the thief's window is thirty seconds wide and starts only at a rotation they did not
+// cause, while the admin's window was every refresh they ever made. Outside the window nothing
+// changes: the family still dies and the audit row is still written.
+//
+// Nothing is written here. No rotation, no revocation, no new ledger row, no new jti, no audit row.
+// The successor already exists and is still live; this only re-signs a JWT naming it, with that
+// row's own expiry rather than a recomputed one, so the answer cannot extend anything.
+func (s *Service) resumeLostRotation(ctx context.Context, row sqlc.RefreshToken) (*LoginResult, bool, error) {
+	if row.ReplacedBy == nil || row.RevokedAt == nil || time.Since(*row.RevokedAt) > rotationGrace {
+		return nil, false, nil
+	}
+
+	successor, err := s.queries.GetRefreshToken(ctx, *row.ReplacedBy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The successor was pruned or never landed. Not a lost response, so the caller's
+			// replay path takes it from here.
+			return nil, false, nil
+		}
+		// Deliberately answered rather than passed through. Falling through on a failed read would
+		// revoke a family and record a stolen token because the database hiccuped, and a
+		// destructive answer is the wrong default for "we do not know".
+		slog.Error("reading a spent token's successor failed", slog.Any("err", err))
+		return nil, true, fmt.Errorf("get successor refresh token: %w", err)
+	}
+
+	now := time.Now()
+	if successor.RevokedAt != nil || successor.ExpiresAt.Before(now) || successor.FamilyExpiresAt.Before(now) {
+		// The successor is dead too, which is a chain someone kept rotating, not one response
+		// that went missing thirty seconds ago.
+		return nil, false, nil
+	}
+
+	admin, err := s.queries.GetAdminByID(ctx, successor.AdminID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("a spent token's successor names an admin that no longer exists",
+				slog.String("admin_id", successor.AdminID.String()))
+			return nil, true, errInvalidToken
+		}
+		slog.Error("failed to query admin while resuming a lost rotation", slog.Any("err", err))
+		return nil, true, fmt.Errorf("get admin by id: %w", err)
+	}
+
+	accessToken, err := s.tokenService.GenerateAccessToken(admin.ID, admin.Email)
+	if err != nil {
+		return nil, true, fmt.Errorf("generate access token: %w", err)
+	}
+	refreshToken, err := s.tokenService.SignRefreshToken(successor.AdminID, successor.Jti, successor.ExpiresAt)
+	if err != nil {
+		return nil, true, fmt.Errorf("re-sign successor refresh token: %w", err)
+	}
+
+	slog.Info("resent the successor of a rotation whose response was lost",
+		slog.String("admin_id", admin.ID.String()),
+		slog.String("family_id", successor.FamilyID.String()))
+
+	return &LoginResult{
+		AccessToken:      accessToken,
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: successor.ExpiresAt,
+		Admin: models.RsAdminProfile{
+			ID:        admin.ID,
+			Email:     admin.Email,
+			CreatedAt: admin.CreatedAt.Format(time.RFC3339),
+		},
+	}, true, nil
 }
 
 // Logout revokes every token in the presented token's family.
@@ -392,7 +529,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string
 // live token can both pass it, because neither has written anything yet. The UPDATE settles it
 // instead, by matching only a row that is still unrevoked (see RevokeRefreshToken). Exactly one
 // of the two changes a row.
-func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyID uuid.UUID) (*LoginResult, error) {
+func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyID uuid.UUID, familyExpiresAt time.Time) (*LoginResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin token rotation: %w", err)
@@ -415,7 +552,16 @@ func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyI
 		return nil, fmt.Errorf("lock token family: %w", err)
 	}
 
-	spent, err := qtx.RevokeRefreshToken(ctx, jti)
+	// The successor's jti is minted here rather than inside issueTokenPair because the revoke
+	// below writes it into replaced_by, in the same statement that spends the presented token. A
+	// spent row therefore always names its successor, which is what lets Refresh tell a rotation
+	// whose response was lost from a genuine replay.
+	successorJti := uuid.New()
+
+	spent, err := qtx.RevokeRefreshToken(ctx, sqlc.RevokeRefreshTokenParams{
+		Jti:        jti,
+		ReplacedBy: &successorJti,
+	})
 	if err != nil {
 		slog.Error("revoking spent refresh token failed", slog.Any("err", err))
 		return nil, fmt.Errorf("revoke refresh token: %w", err)
@@ -424,7 +570,9 @@ func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyI
 		return nil, errTokenAlreadySpent
 	}
 
-	result, err := s.issueTokenPair(ctx, qtx, admin, familyID)
+	// familyExpiresAt is carried forward from the presented row, never recomputed. Recomputing it
+	// is what made the seven days an idle timeout instead of a session lifetime.
+	result, err := s.issueTokenPair(ctx, qtx, admin, familyID, successorJti, familyExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -493,23 +641,28 @@ func (s *Service) revokeFamily(ctx context.Context, familyID uuid.UUID) error {
 // transaction-bound handle, so the insert commits with the revoke that preceded it; a login
 // passes the pool-bound one. A login also passes a fresh familyID, where a rotation passes the
 // one the presented token already belonged to, which is what lets replay revoke the whole chain.
-func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sqlc.AdminUser, familyID uuid.UUID) (*LoginResult, error) {
+//
+// jti and familyExpiresAt are supplied by the caller for the same reason familyID is. A rotation
+// has already written the successor's jti into the predecessor's replaced_by, and has already read
+// the family's deadline off the row it spent; both have to be the values this function uses, not
+// fresh ones it invents.
+func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sqlc.AdminUser, familyID, jti uuid.UUID, familyExpiresAt time.Time) (*LoginResult, error) {
 	accessToken, err := s.tokenService.GenerateAccessToken(admin.ID, admin.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	jti := uuid.New()
-	refreshToken, expiresAt, err := s.tokenService.GenerateRefreshToken(admin.ID, jti)
+	refreshToken, expiresAt, err := s.tokenService.GenerateRefreshToken(admin.ID, jti, familyExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
 	if err := q.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
-		Jti:       jti,
-		AdminID:   admin.ID,
-		FamilyID:  familyID,
-		ExpiresAt: expiresAt,
+		Jti:             jti,
+		AdminID:         admin.ID,
+		FamilyID:        familyID,
+		ExpiresAt:       expiresAt,
+		FamilyExpiresAt: familyExpiresAt,
 	}); err != nil {
 		// Fail the whole call. A signed refresh token with no ledger row is worse than no token:
 		// Refresh would reject it as unknown, so the admin would appear to log in and then be

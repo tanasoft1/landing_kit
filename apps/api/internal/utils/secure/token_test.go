@@ -14,10 +14,16 @@ import (
 
 const testSecret = "test-secret-at-least-32-bytes-long"
 
+// testFamilyDeadline is far enough out that GenerateRefreshToken's absolute-lifetime clamp never
+// bites, so the assertions below keep measuring the refresh TTL itself rather than the clamp.
+func testFamilyDeadline() time.Time {
+	return time.Now().Add(365 * 24 * time.Hour)
+}
+
 func TestAccessTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 15, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
 	token, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
@@ -43,12 +49,12 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 func TestRefreshTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 15, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
 	jti := uuid.New()
 
-	token, expiresAt, err := svc.GenerateRefreshToken(adminID, jti)
+	token, expiresAt, err := svc.GenerateRefreshToken(adminID, jti, testFamilyDeadline())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}
@@ -79,14 +85,14 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 15, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
 	access, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
-	refresh, _, err := svc.GenerateRefreshToken(adminID, uuid.New())
+	refresh, _, err := svc.GenerateRefreshToken(adminID, uuid.New(), testFamilyDeadline())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}
@@ -102,8 +108,8 @@ func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 func TestValidateRejectsWrongSecret(t *testing.T) {
 	t.Parallel()
 
-	issuer := secure.NewTokenService(testSecret, 15, 7)
-	verifier := secure.NewTokenService("a-completely-different-secret-value", 15, 7)
+	issuer := secure.NewTokenService(testSecret, 15, 7, 30)
+	verifier := secure.NewTokenService("a-completely-different-secret-value", 15, 7, 30)
 
 	token, err := issuer.GenerateAccessToken(uuid.New(), "admin@example.mn")
 	if err != nil {
@@ -134,7 +140,7 @@ func TestValidateRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 15, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted an expired token, want error")
 	}
@@ -166,7 +172,7 @@ func TestValidateRejectsWrongAlgorithm(t *testing.T) {
 		t.Fatalf("sign rs256 token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 15, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted a token signed with RS256, want error")
 	}

@@ -2,8 +2,12 @@
 -- A rotation's insert runs in the same transaction as the revoke that preceded it, under the
 -- family lock (see LockTokenFamily). The two halves of spending a token and issuing its successor
 -- commit together or not at all, and no family revoke can interleave between them.
-INSERT INTO refresh_tokens (jti, admin_id, family_id, expires_at)
-VALUES ($1, $2, $3, $4);
+--
+-- family_expires_at is written once by the login that started the family and copied forward
+-- unchanged by every rotation, which is what makes it an absolute deadline rather than another
+-- idle timeout. The caller clamps expires_at to it, so a successor can never outlive its family.
+INSERT INTO refresh_tokens (jti, admin_id, family_id, expires_at, family_expires_at)
+VALUES ($1, $2, $3, $4, $5);
 
 -- name: GetRefreshToken :one
 SELECT * FROM refresh_tokens WHERE jti = $1;
@@ -16,7 +20,13 @@ SELECT * FROM refresh_tokens WHERE jti = $1;
 -- therefore means another request spent this token first, which is the same event as presenting an
 -- already-revoked one. Reading the count is what settles which of the two spent the token; a
 -- preceding SELECT cannot, because both callers can pass it before either writes.
-UPDATE refresh_tokens SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NULL;
+--
+-- replaced_by is written by the same statement that spends the row, so a spent row always names
+-- its successor. Refresh reads it to tell a lost rotation response apart from a replay: see the
+-- grace window there.
+UPDATE refresh_tokens
+SET revoked_at = now(), replaced_by = @replaced_by
+WHERE jti = @jti AND revoked_at IS NULL;
 
 -- name: LockTokenFamily :exec
 -- Serializes every writer that touches one token family, for the length of the calling
@@ -39,4 +49,7 @@ UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at
 -- name: DeleteExpiredRefreshTokens :exec
 -- Housekeeping, run on each login for the admin logging in. That keeps the table bounded with no
 -- scheduled job: a row can only outlive its expiry until its owner next signs in.
+--
+-- expires_at alone still covers the family deadline, because every row's expiry is clamped to its
+-- family_expires_at at issue time: a row whose family has lapsed is already past its own expiry.
 DELETE FROM refresh_tokens WHERE admin_id = $1 AND expires_at < now();

@@ -52,14 +52,28 @@ type TokenService struct {
 	secret              string
 	accessExpireMinutes int
 	refreshExpireDays   int
+	sessionMaxDays      int
 }
 
-func NewTokenService(secret string, accessExpireMinutes, refreshExpireDays int) *TokenService {
+func NewTokenService(secret string, accessExpireMinutes, refreshExpireDays, sessionMaxDays int) *TokenService {
 	return &TokenService{
 		secret:              secret,
 		accessExpireMinutes: accessExpireMinutes,
 		refreshExpireDays:   refreshExpireDays,
+		sessionMaxDays:      sessionMaxDays,
 	}
+}
+
+// SessionDeadline is the absolute expiry a login stamps on the refresh-token family it starts.
+// Every rotation copies that value forward unchanged, so it bounds the whole chain rather than the
+// one token holding it.
+//
+// It lives here, beside refreshExpireDays, because the two are one policy read from opposite ends:
+// refreshExpireDays is how long a single token may sit unused, sessionMaxDays is how long the
+// session may live no matter how often it is used. Splitting them across two packages is how they
+// drift.
+func (s *TokenService) SessionDeadline(from time.Time) time.Time {
+	return from.Add(time.Duration(s.sessionMaxDays) * 24 * time.Hour)
 }
 
 // GenerateAccessToken signs a short-lived token carrying the admin's identity, used to
@@ -97,9 +111,32 @@ func (s *TokenService) GenerateAccessToken(adminID uuid.UUID, email string) (str
 // expiresAt is returned for the same reason: the ledger row and the token's own exp claim have
 // to agree, and recomputing "now plus the TTL" in the caller would drift by however long the
 // signing took.
-func (s *TokenService) GenerateRefreshToken(adminID, jti uuid.UUID) (string, time.Time, error) {
+//
+// familyExpiresAt caps the result. Without the cap this function computed "now plus the TTL" from
+// scratch on every rotation, which made refreshExpireDays an idle timeout rather than a session
+// lifetime: a family stayed alive forever as long as somebody kept rotating it, honest holder or
+// thief. Capping here rather than only in the ledger means the signed token dies with its family
+// too, so a clock-skewed or ledger-less path cannot honour one past the deadline.
+func (s *TokenService) GenerateRefreshToken(adminID, jti uuid.UUID, familyExpiresAt time.Time) (string, time.Time, error) {
 	expiresAt := time.Now().Add(time.Duration(s.refreshExpireDays) * 24 * time.Hour)
+	if expiresAt.After(familyExpiresAt) {
+		expiresAt = familyExpiresAt
+	}
 
+	signed, err := s.SignRefreshToken(adminID, jti, expiresAt)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, expiresAt, nil
+}
+
+// SignRefreshToken signs a refresh token for a jti and an expiry the caller already holds, without
+// minting either. GenerateRefreshToken is the usual door and this is the one case that cannot use
+// it: re-handing a client the successor of a rotation whose response was lost (see the grace window
+// in internal/service/auth.Refresh). That token already has a ledger row with its own expiry, so
+// recomputing "now plus the TTL" here would sign a token claiming to outlive the row that governs
+// it.
+func (s *TokenService) SignRefreshToken(adminID, jti uuid.UUID, expiresAt time.Time) (string, error) {
 	claims := &Claims{
 		AdminID:   adminID,
 		TokenType: TokenTypeRefresh,
@@ -113,9 +150,9 @@ func (s *TokenService) GenerateRefreshToken(adminID, jti uuid.UUID) (string, tim
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(s.secret))
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign refresh token: %w", err)
+		return "", fmt.Errorf("sign refresh token: %w", err)
 	}
-	return signed, expiresAt, nil
+	return signed, nil
 }
 
 // ValidateAccessToken parses tokenString and rejects it unless its type is access. See the
