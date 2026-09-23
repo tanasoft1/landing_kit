@@ -269,6 +269,11 @@ function pickDeps(names, deps) {
   return out
 }
 
+// The package manager a generated project declares. Kept beside the generated package.json rather
+// than read from the kit's own, because the kit's version is what BUILDS the kit and this is what a
+// scaffolded project is told to USE. They move together today and need not always.
+const PACKAGE_MANAGER = 'pnpm@12.4.2'
+
 function packageJson(outDir, answers, { deps }) {
   const runtime = [...RUNTIME_DEPS]
   for (const [block, extra] of Object.entries(BLOCK_RUNTIME_DEPS)) {
@@ -294,6 +299,11 @@ function packageJson(outDir, answers, { deps }) {
     name: packageName(outDir),
     private: true,
     type: 'module',
+    // Pinned on request, and it is a harder pin than the `verify` comment below assumes: corepack
+    // enforces this field, so a generated project now wants pnpm specifically. The scripts stay
+    // package-manager-neutral anyway, because the two decisions are separable and someone who
+    // deletes this line should get a project that still works under npm.
+    packageManager: PACKAGE_MANAGER,
     scripts: {
       dev: 'vite dev',
       build: 'vite build',
