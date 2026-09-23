@@ -13,7 +13,7 @@
     "tanstack-start",
     "react"
   ],
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@12.4.2",
   "type": "module",
   "bin": {
     "landing-kit": "./cli/index.mjs"
