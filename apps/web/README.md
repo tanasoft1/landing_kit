@@ -15,6 +15,7 @@ below is written to keep that true.
 - [Adding a variant](#adding-a-variant)
 - [Changing the design](#changing-the-design)
 - [The contact form](#the-contact-form)
+- [The admin panel](#the-admin-panel)
 - [Fonts and Mongolian Cyrillic](#fonts-and-mongolian-cyrillic)
 - [`/docs`: the live reference](#docs-the-live-reference)
 - [Removing the /docs page](#removing-the-docs-page)
@@ -346,6 +347,60 @@ it. If not, point the variable at whatever receives your form; it needs to accep
 `name`, `email`, `message`, `honeypot_url`, `elapsed_ms`, `locale` and `source_page`, and it should
 reject a filled honeypot or an `elapsed_ms` under 2000.
 
+## The admin panel
+
+`/admin` reads the leads the contact form collected: a login screen, then a table of them. It is a
+client for `api/`, not a second service. The same build serves it and the same API answers it, so
+there is nothing extra to run.
+
+### Signing in
+
+There is no sign-up screen, deliberately. The first account is created from the API:
+
+```bash
+cd api && make seed-admin email=owner@example.mn password=at-least-12-characters
+```
+
+The password must be at least 12 characters, and `seed-admin` refuses anything shorter. Then open
+`/admin` and sign in with it. `api/README.md` covers the rest of that side.
+
+### Where it lives
+
+| Path | What is in it |
+|---|---|
+| `src/routes/admin/` | The routes: the login screen, the leads table, and the guard between them |
+| `src/admin/` | Everything they render: components, the `ui/` primitives, the API client, and the panel's own Mongolian and English strings in `i18n/` |
+
+None of it touches the marketing pages, and the marketing pages import none of it. `/admin` is not
+in `pages.config.ts`, so it is in neither the sitemap nor the nav, and it carries
+`noindex, nofollow`. It stays fetchable rather than blocked in `robots.txt` for the same reason
+`/docs` does: a crawler told not to fetch the page never reads the tag telling it not to index it.
+
+### Staying signed in
+
+Two tokens, and you can inspect neither:
+
+- The **access token** lives in memory, for the life of the tab. A reload throws it away.
+- The **refresh token** is an HttpOnly cookie. No script can read it, the panel's own included.
+
+So a reload, a restart, or a second tab starts with no access token and spends one round trip
+turning the cookie back into one. The brief skeleton before the table appears is that round trip.
+You are asked to sign in again only once the refresh token itself expires, after
+`JWT_REFRESH_EXPIRE_DAYS`, 7 by default, or sooner if the browser was told to clear cookies on exit.
+
+**Sign out revokes the whole token family**, so every session descended from that login is dead on
+the server. Another tab does not fall out at that moment. It still holds its own access token in
+memory and keeps working until that token expires, up to `JWT_ACCESS_EXPIRE_MINUTES`, 15 by default.
+Its next refresh is what fails, and that is when it lands on the login screen.
+
+> **The panel is same-origin, and keep it that way if you can.** In development it calls the API
+> through the `/api` proxy in `vite.config.ts`; in production the one Go binary serves both. So
+> nothing it sends is preflighted and `CORS_ORIGINS` does not govern it. Serve the panel from an
+> origin of its own and it does: the refresh token arrives as a cookie, and the browser discards it
+> unless the response carries `Access-Control-Allow-Credentials: true`, which the API sends only for
+> a listed origin. Miss that and login answers 200, every later call is unauthenticated, and nothing
+> says why.
+
 ## Fonts and Mongolian Cyrillic
 
 Both fonts **must** cover Cyrillic Extended. Mongolian uses `ө` and `ү`, which sit outside the
@@ -401,11 +456,6 @@ it fails silently.
 - **If the contact form "silently fails", check CORS first.** In endpoint mode the browser POSTs
   cross-origin, so an endpoint without `Access-Control-Allow-Origin` fails at preflight — and it
   surfaces as the same generic error a real code bug would.
-- **If admin login "works" but every later call is unauthenticated, check CORS too.** The refresh
-  token arrives as a cookie, and a browser discards it unless the response carries
-  `Access-Control-Allow-Credentials: true`. The API sends that header only for an origin listed in
-  its `CORS_ORIGINS`, so a panel served from an unlisted origin sees a 200 login followed by a
-  session that never survives a refresh.
 - **React warns `Invalid DOM property 'hreflang'` in dev.** Expected. The lowercase spelling is
   what SEO tools read from the built HTML. Renaming it to `hrefLang` would ship the wrong casing.
 - **A light-only or dark-only build ships no theme-switching code at all** — none of the

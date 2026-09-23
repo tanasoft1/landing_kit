@@ -34,8 +34,12 @@ VITE_CONTACT_ENDPOINT=http://localhost:3000/api/leads
 
 `api/.env.example`'s `CORS_ORIGINS` already defaults to `http://localhost:5173`, Vite's own
 default port, so the two dev servers talk to each other with no CORS changes on a fresh scaffold.
-The same list governs the admin panel, which runs on that origin too. Serving the panel from a
-different port means adding that origin here, or login fails at preflight.
+
+The admin panel is not governed by that list, and it is worth knowing why before you go adding
+origins to fix it. The panel calls the API with relative paths. Vite's own `/api` proxy forwards
+those here in development and the one binary answers them directly in production, so the panel is
+same-origin on both sides and nothing it sends is preflighted. `CORS_ORIGINS` starts to govern it
+only if you deploy the panel on an origin of its own.
 
 `CORS_ORIGINS=*` is refused at startup. The admin session cookie only crosses origins because the
 API answers with `Access-Control-Allow-Credentials: true`, and a wildcard origin on a credentialed
@@ -124,6 +128,17 @@ gets a 401 that takes the session with it. From the server there is no differenc
 thief racing the real client. If several requests can discover an expired access token at the same
 time, funnel them through one refresh and let the rest wait for its result.
 
+**A `token_reuse_detected` row is worth opening, not scrolling past.** It is the only signal this
+service can raise that a refresh token was used from somewhere it was not issued to. Nothing else in
+the log separates a stolen session from a real one, because a stolen token is a valid token. The row
+carries `ip` and `user_agent`; compare them with the `login_success` row for the same `admin_id`
+nearby. The benign causes above all look like the same client twice, so a different address or a
+different browser is the case to take seriously. The family is already revoked by the time you read
+the row, which is the containment. What is left to decide is whether the password went with it.
+There is no change-password command. `seed-admin` is the only account tool and it refuses an email
+that already exists, so rotating a password means seeding a second account and deleting the first,
+which cascades away its refresh tokens and leaves its audit rows with a null `admin_id`.
+
 `JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to
 anything but `development` when the secret is empty or shorter than 32 characters, because a short
 or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example
@@ -140,6 +155,10 @@ wall: guesses already in flight when the lock lands still get an answer, so a bu
 costs twenty guesses before the address goes quiet for the window. Both limits answer with the same
 429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would
 leave someone stuck in a session they are trying to end.
+
+A successful login clears that account's counter, so the doubling starts from nothing next time. An
+admin who mistyped their password five times should wait out the window and log in again rather than
+go editing `login_attempts` by hand. The row clears itself the moment they get in.
 
 `GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
 capped at 200 regardless of what is requested, so one request can't pull every lead the site has

@@ -7,11 +7,16 @@ question about this repo resolves once you know which of the three you are looki
 |---|---|---|---|
 | **Scaffold time** | `cli/`, under `pnpm dlx` | once, per new project | a standalone project on disk that no longer depends on this package |
 | **Build time** | Vite plus TanStack Start prerendering; optionally `go build` | per deploy | static HTML in `dist/client`, optionally a Go binary with that HTML inside it |
-| **Run time** | the browser; optionally the Go service | per visitor | pages, and exactly one JSON exchange |
+| **Run time** | the browser; optionally the Go service | per visitor | pages, and one JSON exchange; two with the admin panel |
 
 The site a visitor loads has **no server component at all** unless the optional backend was asked
 for. That is the premise the whole repo is arranged around, and it is why "how does this exchange
 data with the backend" has such a small answer: one endpoint, one direction, one payload.
+
+`--backend=admin` adds the one exception, and confines it. The admin panel is a real client: it logs
+in, holds a token, refreshes it, and reads a paginated list. But it lives behind `/admin`, it ships
+only to a project that asked for it, and the marketing pages import none of it. So the sentence
+above still describes every page a visitor sees, on every answer. Section 6 is the panel's half.
 
 ## Contents
 
@@ -33,6 +38,7 @@ flowchart LR
   subgraph KIT["landing_kit (this repo, a pnpm workspace)"]
     direction TB
     WEB["apps/web<br/>TanStack Start template"]
+    WADMIN["apps/web/src/admin + src/routes/admin<br/>the panel, a subtree of the same template"]
     API["apps/api<br/>GoFiber service on Postgres"]
     CLI["cli/<br/>the scaffolder"]
     TOOLS["tools/<br/>maintainer scripts, never published"]
@@ -43,10 +49,12 @@ flowchart LR
   subgraph PROJ["my-site (generated, flat, one package)"]
     direction TB
     PSRC["src/ public/ vite.config.ts<br/>package.json tsconfig.json"]
-    PAPI["api/<br/>only with --backend=api"]
+    PADMIN["src/admin + src/routes/admin<br/>only with --backend=admin"]
+    PAPI["api/<br/>only with --backend=api or admin"]
   end
 
   WEB -.->|"WEB_ROOT: lands at the project root"| PSRC
+  WADMIN -.->|"only with --backend=admin"| PADMIN
   API -.->|"API_DEST: lands at api/"| PAPI
 ```
 
@@ -55,6 +63,14 @@ The asymmetry is the thing to hold onto. This repo is a workspace whose packages
 `api/`. `WEB_ROOT` and `API_DEST` in `cli/kit-manifest.mjs` are the only two places that know about
 that difference, which is what lets `add-block` and `add-page` run without any awareness that a
 backend can exist.
+
+The panel is not a fourth tree. It is two directories inside the web one, `src/admin` for everything
+it renders and `src/routes/admin` for the URLs, and it reaches a generated project only under
+`--backend=admin`. Opposite mechanisms keep the two halves out, which is worth knowing before going
+looking for one switch. `src/admin` is listed in `ADMIN_COPY_DIRS` and walked only for that answer.
+`src/routes/admin` sits inside `src/routes`, a directory `COPY_DIRS` already copies whole, so
+`isAdminPath` filters it back out. Add a panel file under `src/routes` and the filter has to learn
+about it; add one under `src/admin` and it is covered already.
 
 ## 2. Scaffold time
 
@@ -221,9 +237,10 @@ hydration and React then throws away the server-rendered HTML. That was measured
 becoming 0.169.
 
 This loading happens once, for the first URL only. Nothing re-runs it, which is safe only because
-every link in the template is a plain `<a href>` full page load. A `@tanstack/react-router` `Link`
-would navigate to a page whose block chunks were never fetched, so `check-conventions.mjs` fails the
-build on any such import inside `src/blocks`, `src/components` or `src/routes`.
+every link on a marketing page is a plain `<a href>` full page load. A `@tanstack/react-router`
+`Link` would navigate to a page whose block chunks were never fetched, so `check-conventions.mjs`
+fails the build on any such import inside `src/blocks`, `src/components` or `src/routes`. The
+panel's own routes are excepted, since it renders no blocks and so has no chunks to miss.
 
 If a chunk fails to load, hydration is **deliberately skipped**: the static page stays on screen and
 readable, and one console error names every block that failed. A missing block module would make
@@ -231,7 +248,9 @@ readable, and one console error names every block that failed. A missing block m
 
 ## 5. Run time: data exchange with the backend
 
-This is the whole of it. One endpoint, one direction, fire and forget.
+For the site itself, this is the whole of it. One endpoint, one direction, fire and forget: a
+visitor submits the contact form and nothing is ever read back. Only `--backend=admin` adds a second
+exchange, and only behind `/admin`, where the reading happens. That one is section 6.
 
 ### The submit boundary, both modes
 
@@ -375,10 +394,14 @@ instance profile's resolved region) that the other two do not.
 
 ## 6. The admin read path
 
+Present only under `--backend=admin`. The client below is the panel in `src/admin` and
+`src/routes/admin`; with `--backend=api` these endpoints are all still there and nothing in the
+project calls them, so the same path runs against curl or a client you write.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant OP as Operator, or a client you write
+    participant OP as The panel, or a client you write
     participant CMD as ./cmd seed-admin
     participant A as landing-api
     participant DB as Postgres
@@ -397,7 +420,7 @@ sequenceDiagram
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
     A->>A: AuthMiddleware: HS256 asserted, token_type must be access
     A->>DB: ORDER BY created_at DESC, id DESC, LIMIT and OFFSET
-    A-->>OP: success true, data is an array of RsLead
+    A-->>OP: success true, data is an RsLeadPage: items plus the whole table's total
     OP->>A: POST /api/auth/refresh carrying the refresh cookie
     A->>DB: GetRefreshToken by jti; already revoked means replay
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
@@ -661,6 +684,8 @@ the third column is the part worth knowing.
 | Block dependencies | `requires.blocks` in each `block.ts`, the `target`s in each `copy.ts` | `readBlockDeps`, before the CLI's first question |
 | Page SEO copy | `PAGE_SEO` in `cli/generate.mjs`, the kit's `pages.config.ts` | `assertSeoCopyMatchesKit` at generate time |
 | Compiler options | `apps/web/tsconfig.json`, `tsconfigJson` in the CLI | `assertTsconfigMatchesKit`, compared semantically |
+| The route tree | `apps/web/src/app/routeTree.gen.ts`, `routeTreeGen` in the CLI | `assertRouteTreeMatchesKit`, on every scaffold: it builds the admin branch and compares the whole file against the kit's |
+| The Vite config | `apps/web/vite.config.ts`, `viteConfigTs` in the CLI | **nothing.** The two are written by hand against each other, and the panel gave them two more things to agree on: the `/api` dev proxy and the `/admin` prerender entry |
 | pnpm settings | `pnpm-workspace.yaml`, `pnpmWorkspaceYaml` in the CLI | byte comparison after stripping the `packages:` key |
 | Compose file | root `docker-compose.yml`, `dockerComposeYml` in the CLI | `assertDockerComposeMatchesKit`, only when the kit's copy is on disk |
 | Dependency versions | the kit's `package.json`, a generated project's | versions are read from the kit manifest; only the *grouping* is listed, and an unclassified package is an error |
@@ -680,15 +705,21 @@ read `apps/web/src`, which the tarball does carry, so they run on every scaffold
 
 Useful to know before going looking for it.
 
-- **No admin UI.** `GET /api/admin/leads` is the read path; nothing in `apps/web` calls it, and no
-  page or route in the template mentions an admin. Bring your own client, or curl.
+- **No admin UI on two of the three answers.** The panel exists, and `--backend=admin` is the only
+  way to get it. Section 6 covers it. On `none` and `api` nothing in the project calls
+  `GET /api/admin/leads` and no route mentions an admin, so it is curl or a client you write, as it
+  was before the panel existed.
 - **No server runtime in a default build.** `src/app/server.ts` exists for prerendering; the shipped
   artifact is static files. RPC submit mode would change that, and it is not a scaffolding option.
-- **No client-side navigation.** Every link is a plain `<a href>`. Full page loads are cheap when
-  every page is static HTML, and the alternative would land on a page whose block chunks were never
-  fetched.
+- **No client-side navigation on the marketing pages.** Every link there is a plain `<a href>`. Full
+  page loads are cheap when every page is static HTML, and the alternative would land on a page whose
+  block chunks were never fetched. The panel is the exception, and the reason does not reach it: it
+  renders no blocks, so it has no chunks to miss and navigates with TanStack's `<Link>` like any
+  other single-page app. `check-conventions.mjs` enforces the ban across `src/blocks`,
+  `src/components` and every route but the panel's.
 - **No CMS.** The marketing pages are prerendered at build time and the Go service never touches
-  them. Content changes are code changes.
+  them. Content changes are code changes, panel or no panel: it reads leads and offers no screen for
+  editing a page.
 - **No global rate limiter.** The three public routes carry their own, because each needs a key
   generator that cannot collapse callers into one bucket.
 - **No `api` service in a generated `docker-compose.yml`.** See topology C above.

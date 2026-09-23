@@ -83,6 +83,18 @@ const DROPPED_SCRIPTS = []
 // genuinely cannot be moved into a dropped section.
 const README_EDITS = []
 
+// The one README section whose removal depends on an ANSWER rather than on the kit/project
+// difference. Everything in the two lists above is dropped from every scaffold, because a
+// generated project of any shape lacks what those sections describe. This one is true of a
+// `--backend=admin` project and false of the other two, so it is dropped for those two and kept
+// for that one — the same rule `transformThemeCss` and `ADMIN_COPY_DIRS` follow, applied to prose.
+//
+// A README telling a `--backend=none` project's owner to sign in to a panel it does not have is
+// the same defect as shipping the panel's files, and a likelier one to survive: nothing type-checks
+// a paragraph. `dropContentsEntry` and `dropSection` both throw on a miss, so renaming the heading
+// without renaming it here fails every non-admin scaffold rather than shipping the section back.
+const ADMIN_README_SECTION = 'The admin panel'
+
 // --- guards -----------------------------------------------------------------------------------
 
 // Overwriting a developer's work silently is the worst thing this tool could do, so "exists" is
@@ -293,11 +305,16 @@ function replaceExactText(text, file, from, to) {
   return text.slice(0, at) + to + text.slice(at + from.length)
 }
 
-function transformReadme(text) {
+function transformReadme(text, answers) {
   const lines = text.split('\n')
   for (const heading of [...DROPPED_SECTIONS, ...DROPPED_SECTIONS_README_ONLY]) {
     dropContentsEntry(lines, heading)
     dropSection(lines, heading)
+  }
+  // See ADMIN_README_SECTION for why this one is conditional and the lists above are not.
+  if (answers.backend !== 'admin') {
+    dropContentsEntry(lines, ADMIN_README_SECTION)
+    dropSection(lines, ADMIN_README_SECTION)
   }
   for (const script of DROPPED_SCRIPTS) {
     dropRowIn(
