@@ -294,10 +294,15 @@ func (s *Service) noteFailure(ctx context.Context, email string) error {
 // re-read rather than trusted from the token's claims, so an admin removed after the refresh
 // token was issued cannot use it to obtain a new access token.
 //
-// The ledger lookup is what makes a refresh token single-use. Presenting one that has already
-// been spent means two parties hold the same token, and only one of them came by it honestly, so
-// the entire family dies and both are forced back to the login screen. That is deliberately
-// disruptive: the alternative is letting a thief keep rotating quietly for a week.
+// The ledger lookup is what makes a refresh token single-use. Presenting one that has already been
+// spent means two parties hold the same token, and only one of them came by it honestly, so the
+// entire family dies and both are forced back to the login screen. That is deliberately disruptive:
+// the alternative is letting a thief keep rotating quietly for a week.
+//
+// With one exception, and only one: a token spent within rotationGrace whose successor is still
+// live. That is what a rotation whose response went missing looks like, and it was costing honest
+// admins their session for closing a tab at the wrong moment. See resumeLostRotation, which both
+// spent-token paths below go through.
 func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent string) (*LoginResult, error) {
 	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
 	if err != nil {
@@ -367,11 +372,33 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	result, err := s.rotate(ctx, admin, jti, row.FamilyID, row.FamilyExpiresAt)
 	if err != nil {
 		if errors.Is(err, errTokenAlreadySpent) {
-			// Someone else spent this token between the ledger read above and rotate's write.
-			// That is the same event as the already-revoked row above, only caught a few
-			// milliseconds earlier, and it gets the same answer. A client that fires two refreshes
-			// at once on one token is indistinguishable from a thief racing its owner, and pays
-			// the same price.
+			// Someone else spent this token between the ledger read above and rotate's write. That
+			// is the same event as the already-revoked row above, caught a few milliseconds
+			// earlier, and it now gets the same answer in both senses: same grace window, same
+			// no-write rule, same fall-through to the replay path when the window does not apply.
+			//
+			// The two paths converge deliberately. They used to differ -- this one always revoked
+			// the family -- and the difference was an accident of where the race is noticed, not a
+			// judgement about what it means. Both are "this token was spent by somebody else
+			// moments ago", and the winner's successor is live either way. Do not restore the
+			// asymmetry; it was never reasoned for.
+			//
+			// The row read at the top of Refresh is stale here by definition: the winner committed
+			// after it. So re-read, because revoked_at and replaced_by are exactly the two columns
+			// that changed and exactly the two resumeLostRotation needs.
+			spent, readErr := s.queries.GetRefreshToken(ctx, jti)
+			if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
+				// Same reasoning as in resumeLostRotation: revoking a family because a read failed
+				// is the wrong answer to "we do not know".
+				slog.Error("re-reading a concurrently spent token failed", slog.Any("err", readErr))
+				return nil, fmt.Errorf("get refresh token after concurrent spend: %w", readErr)
+			}
+			if readErr == nil {
+				if resumed, handled, resumeErr := s.resumeLostRotation(ctx, spent); handled {
+					return resumed, resumeErr
+				}
+			}
+
 			slog.Warn("refresh token was spent by a concurrent request, revoking family",
 				slog.String("admin_id", row.AdminID.String()),
 				slog.String("family_id", row.FamilyID.String()))
@@ -389,6 +416,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 // client, and if it is, hands that client the successor it never received. handled reports whether
 // this function answered the request; when it is false the caller carries on to the replay path
 // unchanged.
+//
+// Both of Refresh's ways of meeting a spent token come here: the row that was already revoked when
+// Refresh read it, and the row another request spent while rotate was working. They are one event
+// seen at two moments, and one function answering both is what keeps them from drifting apart
+// again.
 //
 // The case it exists for needs no attacker and no race. A refresh commits, the response is lost --
 // the tab closed mid-flight, the network dropped, a proxy timed out -- and the browser still holds
