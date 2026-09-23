@@ -80,10 +80,23 @@ export default defineConfig({
         failOnError: true,
         concurrency: 8,
       },
-      pages: enumerateUrls(pages, site).map((u) => ({
-        path: u.path,
-        prerender: { enabled: true, outputPath: u.outputPath },
-      })),
+      pages: [
+        ...enumerateUrls(pages, site).map((u) => ({
+          path: u.path,
+          prerender: { enabled: true, outputPath: u.outputPath },
+        })),
+        // Appended here, never added to pages.config.ts. Going through pages.config.ts would put
+        // /admin in enumerateUrls, and from there into the sitemap, the nav and the SEO layer,
+        // which is the opposite of what a noindex route wants.
+        //
+        // It is prerendered at all for one reason: the Go binary serves /admin/* by falling back
+        // to a file, and the only other file available is the prerendered HOME page. Falling back
+        // to that painted the hero on every hard load of an admin URL before hydration replaced
+        // it. What lands in this file is the index route's `pendingComponent` (PanelSkeleton):
+        // `src/routes/admin/index.tsx` is `ssr: false` with no `component` at all, so the
+        // prerenderer emits the pending frame, which is the skeleton.
+        { path: '/admin', prerender: { enabled: true, outputPath: '/admin/index.html' } },
+      ],
     }),
     viteReact(),
     emitSeoFiles({ pages, site, outDir: OUT_DIR }),

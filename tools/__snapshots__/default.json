@@ -10,7 +10,7 @@
   "public/logo.svg": "d17d6e1c0e99781d2f6b612b17fa90b49cc601082dd479b3a808c1eb11268001",
   "public/og-default.jpg": "83717587e6266f502ad4cf61b57826a2819fa619e83ad0337bcd60d857cee212",
   "scripts/check-conventions.mjs": "97275acab6b23908ea207aaca6a4d54b10385163ee653d6184dd0eed13b3e661",
-  "scripts/verify-build.mjs": "698e21ba46b14786740928f9b2e5c508dd308866d08e9f5adc0d633409a6e8e4",
+  "scripts/verify-build.mjs": "912a729c75816410a3ecbf94b7e5bbbf8311695176c62da309b55119ae6cd8fe",
   "src/app/client.tsx": "20530deb26dbe3e6bc2d442c0e6d2c80909032452a1f75874b331f7672230396",
   "src/app/routeTree.gen.ts": "476cec5d222741baffd60fa7ded50a9bb6b4c6f92ddd6c59a9f31564b5a0a642",
   "src/app/router.tsx": "0ab41093c1dcfd0ca4bbe6b5b0884e63df1ff2270027b8b313a22d9bcb92f047",

@@ -432,7 +432,13 @@ else {
   // paths like `/docs-guide` (`\b` sits between `s` and `-`). A false failure in the project's only
   // machine gate is the failure mode this file's `decodeEntities` docstring warns about at length:
   // it teaches people to distrust the gate, which is worse than the gap it was closing.
-  const forbiddenDocsPaths = new Set(['/docs', ...new Set(urls.map((u) => `/${u.locale}/docs`))])
+  const forbiddenSitemapPaths = new Set([
+    '/docs',
+    ...new Set(urls.map((u) => `/${u.locale}/docs`)),
+    // The panel is prerendered, unlike /docs, so this is not merely belt and braces: there is a
+    // real file, and a sitemap entry would be a direct invitation to index it.
+    '/admin',
+  ])
   const locPaths = [...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => {
     const loc = decodeEntities(m[1] ?? '').trim()
     const path = loc.startsWith(site) ? loc.slice(site.length) : loc
@@ -440,11 +446,8 @@ else {
     return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
   })
   for (const path of locPaths) {
-    if (forbiddenDocsPaths.has(path)) {
-      fail(
-        'sitemap.xml',
-        `lists '${path}' — the developer docs route must never be advertised for indexing`,
-      )
+    if (forbiddenSitemapPaths.has(path)) {
+      fail('sitemap.xml', `lists '${path}' — a noindex route must never be advertised for indexing`)
     }
   }
 
@@ -513,6 +516,22 @@ if (!existsSync(robotsPath)) {
 // --- docs route must not ship ---------------------------------------------------
 if (existsSync(join(outDir, 'docs/index.html'))) {
   fail('/docs', 'docs route was prerendered; it must be excluded')
+}
+
+// --- the admin shell --------------------------------------------------------------
+// internal/static/static.go in the Go service falls back to admin/index.html for every /admin
+// URL. If it is missing, that fallback finds nothing and every hard load of an admin page
+// answers with the prerendered home page instead — a flash of the wrong site that nothing else
+// here would catch, because the file it falls back to does exist and is perfectly valid.
+//
+// Keyed off the same `HAS_PANEL` as ALLOWED_ROUTE_FILES above, not off a second test of its own.
+// Two ways to ask "is the panel here" can disagree, and the disagreement would show up as this
+// check quietly never running.
+if (HAS_PANEL) {
+  const shell = join(outDir, 'admin', 'index.html')
+  if (!existsSync(shell)) {
+    fail('/admin', 'the panel is in src/routes but dist has no admin/index.html shell')
+  }
 }
 
 if (failures.length) {

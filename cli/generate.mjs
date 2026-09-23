@@ -504,6 +504,42 @@ function viteConfigTs(answers) {
 `
       : ''
 
+  // The panel's prerendered shell, gated on the same answer as the proxy. The Go binary answers
+  // every /admin URL by falling back to one file (internal/static/static.go), and without this
+  // entry the only file there is the prerendered home page, so a hard load of an admin URL paints
+  // the hero until hydration replaces it.
+  //
+  // A project that declined the panel has no /admin route, and the entry cannot simply be emitted
+  // unconditionally and left to do nothing: `src/routes/$.tsx` answers an unrouted path with a
+  // 404, and the prerenderer treats that status as an error. Measured on the kit itself by adding
+  // a `/nope` entry — `Failed to fetch /nope: Not Found`, and `failOnError: true` (three lines
+  // above in the emitted file) turns it into a build that exits 1.
+  //
+  // The non-admin branch is byte-identical to what this function emitted before the panel existed,
+  // deliberately: the five non-admin scaffold snapshots are what prove no admin content reaches a
+  // project that declined it, and reformatting them for a branch they never take would spend that
+  // signal on noise.
+  const prerenderPages =
+    (answers.backend ?? 'none') === 'admin'
+      ? `pages: [
+        ...enumerateUrls(pages, site).map((u) => ({
+          path: u.path,
+          prerender: { enabled: true, outputPath: u.outputPath },
+        })),
+        // Appended here, never added to pages.config.ts. Going through pages.config.ts would put
+        // /admin in enumerateUrls, and from there into the sitemap, the nav and the SEO layer,
+        // which is the opposite of what a noindex route wants.
+        //
+        // What lands in the file is the index route's \`pendingComponent\` (PanelSkeleton):
+        // src/routes/admin/index.tsx is \`ssr: false\` with no \`component\` at all, so the
+        // prerenderer emits the pending frame, which is the skeleton.
+        { path: '/admin', prerender: { enabled: true, outputPath: '/admin/index.html' } },
+      ],`
+      : `pages: enumerateUrls(pages, site).map((u) => ({
+        path: u.path,
+        prerender: { enabled: true, outputPath: u.outputPath },
+      })),`
+
   return `import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
@@ -555,10 +591,7 @@ ${devProxy}  resolve: {
         failOnError: true,
         concurrency: 8,
       },
-      pages: enumerateUrls(pages, site).map((u) => ({
-        path: u.path,
-        prerender: { enabled: true, outputPath: u.outputPath },
-      })),
+      ${prerenderPages}
     }),
     viteReact(),
     emitSeoFiles({ pages, site, outDir: OUT_DIR }),
