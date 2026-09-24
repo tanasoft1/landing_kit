@@ -451,7 +451,7 @@ Eleven properties of this path are deliberate and easy to undo by accident:
 - **Failed logins back off per email as well as per client.** The per-client limiter alone lets an
   attacker spread across a thousand addresses take five thousand guesses at one account. From the
   fifth failure the email is refused for a minute, doubling with each further failure to a
-  fifteen-minute cap, answered with the same 429 the limiter returns so a client needs one case
+  one-hour cap, answered with the same 429 the limiter returns so a client needs one case
   rather than two. A row is written for every email tried, registered or not: if only real accounts
   were recorded, a lockout would prove an account exists, which is the leak the dummy hash above
   closes on the timing side.
@@ -467,11 +467,14 @@ Eleven properties of this path are deliberate and easy to undo by accident:
   with `PROXY_HEADER` set and `TRUSTED_PROXIES` empty. They can still lock that address out. A caller with no resolvable
   address is not counted at all, for the reason the limiter gives such a caller a key of their own:
   one shared bucket for everyone without an address is the account-wide lock again.
-- **The count decays faster than the lock lasts.** A failure older than `loginFailureDecay`, ten
-  minutes, resets the count to one instead of adding to it. Shorter than the fifteen-minute cap on
-  purpose, so a source that serves a full-length lock comes back at the bottom of the curve instead
-  of re-locking on its next failure indefinitely; a constant assertion fails the build if that
-  relationship is ever inverted.
+- **The decay window sits between two walls.** A failure older than `loginFailureDecay`, thirty
+  minutes, resets the count to one instead of adding to it. It is shorter than the one-hour cap, so
+  a source that serves a full-length lock comes back at the bottom of the curve instead of
+  re-locking on its next failure indefinitely, and a constant assertion fails the build if that
+  relationship is ever inverted. It is longer than the limiter's fifteen-minute window, which
+  nothing can enforce from the code: a shorter decay is spent before the limiter releases the next
+  attempt, so the count resets between windows, the curve never leaves its first step, and the
+  backoff costs an attacker nothing the limiter was not already costing them.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
   extends the session from fifteen minutes to seven days.

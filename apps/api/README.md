@@ -234,12 +234,14 @@ behind a proxy where `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, which m
 look like it came from the proxy. They can still lock that address out.
 
 A successful login clears the counter for the address it came from, so the doubling starts from
-nothing next time. So does ten minutes of quiet: a failure older than that no longer counts towards
-the curve, and the next one starts the count again at one. Ten is shorter than the fifteen-minute
-cap on purpose, which is what lets a source that served a full-length lock climb back down instead
-of re-locking forever. An admin who mistyped their password five times should wait out the window
-and log in again rather than go editing `login_attempts` by hand. The row clears itself the moment
-they get in.
+nothing next time. So does half an hour of quiet: a failure older than that no longer counts
+towards the curve, and the next one starts the count again at one. Thirty minutes sits between two
+walls on purpose. It is shorter than the one-hour cap, which is what lets a source that served a
+full-length lock climb back down instead of re-locking forever. It is longer than the limiter's
+fifteen-minute window, without which the count would reset before the limiter let the next attempt
+through and the doubling would never get past its first step. An admin who mistyped their password
+five times should wait out the window and log in again rather than go editing `login_attempts` by
+hand. The row clears itself the moment they get in.
 
 **Set `TRUSTED_PROXIES` if you deploy behind a load balancer**, together with `PROXY_HEADER`. Every
 limit above is keyed on the client address, and `PROXY_HEADER` alone used to mean the service
