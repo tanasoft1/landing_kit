@@ -127,6 +127,20 @@ func run() error {
 	services := service.New(pool, notifier, cfg)
 	h := handlers.New(services, cfg)
 
+	// PROXY_HEADER without TRUSTED_PROXIES is a half-configured deployment, and the half that is
+	// missing degrades silently: EnableTrustedProxyCheck with an empty list means trust nobody, so
+	// the header is read from nothing and every caller keys on the socket the request arrived on,
+	// which behind a load balancer is the balancer. Warn rather than refuse. Booting is the safe
+	// direction here -- the alternative would be honouring a header anyone can write -- but the
+	// operator who set one variable and not the other almost certainly did not mean to collapse
+	// every client into one.
+	if cfg.Server.ProxyHeader != "" && len(cfg.Server.TrustedProxyList()) == 0 {
+		slog.Warn("PROXY_HEADER is set but TRUSTED_PROXIES is empty, so the header is ignored and "+
+			"every request is attributed to the address it arrived from: behind a proxy that is one "+
+			"shared bucket for the rate limits and one shared key for the login backoff",
+			slog.String("proxy_header", cfg.Server.ProxyHeader))
+	}
+
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",
 		// BodyLimit is 1 MB, well under the framework default: the largest request this service accepts is
