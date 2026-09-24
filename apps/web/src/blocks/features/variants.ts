@@ -5,9 +5,7 @@ import type { FeaturesCopy } from './copy'
 import { FeaturesAlternating } from './features-alternating'
 import { FeaturesGrid } from './features-grid'
 
-// The only place these components are imported statically — see hero/variants.ts for why, and
-// for why `satisfies Record<FeaturesVariant, …>`: a variant declared in block.ts but missing
-// here becomes a compile error instead of an empty preview on `/docs`.
+// See hero/variants.ts.
 export const variants = {
   grid: FeaturesGrid,
   alternating: FeaturesAlternating,

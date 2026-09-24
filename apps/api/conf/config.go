@@ -23,52 +23,25 @@ type Config struct {
 type ServerConfig struct {
 	Port   string
 	AppEnv string
-	// CORSOrigins is a comma-separated allowlist. In endpoint mode the browser posts the contact
-	// form cross-origin, so a wrong value fails at preflight and surfaces as the same generic
-	// error a real code bug would. See "check CORS first" under Gotchas in the web project's README.
-	//
-	// The default is the Vite dev origin, which is right for development and catastrophic in
-	// production: a deploy that forgets this boots cleanly, answers /api/health with 200, and
-	// silently drops every real submission at preflight with no server-side log line. Load()
-	// therefore refuses to start in production while this is still the default.
-	//
-	// The admin panel's session rides on this setting too. internal/http/routes answers with
-	// credentialed CORS so the browser will carry the refresh cookie, which means the panel's
-	// origin has to be listed here or login, refresh and logout all fail cross-origin.
-	//
-	// A "*" default would fail open, so there deliberately is not one: Load
-	// refuses a "*" entry outright, in every environment. A wildcard origin on a credentialed
-	// response would hand a logged-in admin session to any site a browser visits, and even
-	// without the cookie "*" lets any site on the internet post leads here.
+	// CORSOrigins is a comma-separated allowlist. The admin panel's origin must be listed too, or
+	// the refresh cookie never travels. The default is the Vite dev origin, and Load refuses it
+	// outside development, because a wrong origin drops every form submission at preflight with no
+	// server log. Load refuses any "*" entry in every environment, since responses are credentialed.
 	CORSOrigins string
-	// ProxyHeader names the header Fiber reads the client IP from behind a load balancer.
-	// Empty means "use the socket address". Do not set it unless a proxy really sets that header:
-	// naming one nothing writes buys a lookup per request and tells you nothing about the caller.
-	// Which field of it is believed is decided in internal/http/routes/clientip.go, because the
-	// leftmost is the caller's to write.
+	// ProxyHeader names the header to read the client IP from behind a load balancer.
+	// Empty means use the socket address. Only set it if a proxy really writes that header.
 	ProxyHeader string
-	// TrustedProxies is the comma-separated list of IPs or CIDR ranges allowed to set
-	// ProxyHeader, and it is what makes ProxyHeader safe to honour at all.
-	//
-	// Fiber only consults ProxyHeader when EnableTrustedProxyCheck is on, and that flag defaults
-	// to false, which means IsProxyTrusted() answers true for every caller. Setting ProxyHeader
-	// without this list therefore hands the client the pen: c.IP() returns whatever the request
-	// wrote, so the login limiter is bypassed one bucket per request and attacker-chosen text is
-	// persisted into admin_audit_log.ip. cmd/main.go turns the check on unconditionally, so an
-	// empty list here means the header is ignored and every request is keyed on its socket peer.
+	// TrustedProxies lists the IPs or CIDR ranges allowed to set ProxyHeader. Without it the
+	// header is ignored, because otherwise any client could pick its own IP and dodge the login limiter.
 	TrustedProxies string
 }
 
-// TrustedProxyList splits TrustedProxies into the form fiber.Config wants. Entries are already
-// known to parse: Load rejects the whole configuration otherwise, because Fiber only logs a
-// warning and drops an unparseable entry, which silently narrows the trusted set instead of
-// failing.
+// TrustedProxyList splits TrustedProxies into the form fiber.Config wants. Load has already
+// checked each entry, because Fiber silently drops one it cannot parse.
 func (s ServerConfig) TrustedProxyList() []string {
 	return splitList(s.TrustedProxies)
 }
 
-// splitList turns a comma-separated setting into its entries, trimmed, with empties dropped, so a
-// trailing comma or a line wrapped for readability does not become an entry of its own.
 func splitList(raw string) []string {
 	var out []string
 	for _, part := range strings.Split(raw, ",") {
@@ -88,12 +61,8 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
-// NotifyConfig drives internal/service/notify. Driver is "ses" or "log".
-//
-// It defaults to "log" so `pnpm dev` runs with no AWS account and no credentials. That default is
-// also the trap: a production deploy that forgets NOTIFY_DRIVER stores every lead correctly and
-// tells nobody, with no error anywhere. Load therefore refuses to start when AppEnv is
-// "production" and the driver is still "log".
+// NotifyConfig drives the lead notifier. Driver is "ses" or "log". Load refuses "log" in
+// production, where leads would be stored and nobody told.
 type NotifyConfig struct {
 	Driver    string
 	To        string
@@ -101,44 +70,23 @@ type NotifyConfig struct {
 	AWSRegion string
 	AWSKeyID  string
 	AWSSecret string
-	// SiteName prefixes the subject line, so an owner whose inbox receives leads from several
-	// sites this template built can tell them apart. Optional: empty means the subject carries
-	// just the visitor's name. Deliberately NOT the source path, which belongs in the body;
-	// "New lead from /contact" names a route rather than a site.
-	//
-	// Duplicated from site.config.ts's `name` rather than shared, because the API is a separate
-	// process from the web build and has no way to read a TypeScript file.
+	// SiteName prefixes the subject line so one inbox can tell several sites apart. Optional.
+	// It copies site.config.ts's name, because the API cannot read a TypeScript file.
 	SiteName string
 }
 
-// JWTConfig drives internal/utils/secure.TokenService. Secret is validated below, at the config
-// boundary: HS256 with a short secret is brute-forceable offline once an attacker holds one
-// token to check guesses against, and an empty secret makes every token forgeable by anyone who
-// can compute an HMAC. Load refuses to start on either problem outside development, the same
-// asymmetry the CORS_ORIGINS development-default check documents: a staging deploy has real
-// admins and the same forgeable-token failure mode a production deploy has.
+// JWTConfig drives secure.TokenService. Load rejects an empty or short Secret outside development.
 type JWTConfig struct {
 	Secret              string
 	AccessExpireMinutes int
 	RefreshExpireDays   int
-	// SessionMaxDays is the absolute lifetime of one login's refresh-token family, stamped at
-	// login and copied forward unchanged by every rotation.
-	//
-	// RefreshExpireDays on its own is an idle timeout, not a session lifetime: each rotation
-	// recomputes the successor's expiry from the current time, so a family survives as long as
-	// somebody keeps refreshing it. That "somebody" is not always the admin. This is the bound
-	// that makes a quietly-rotated stolen refresh token eventually stop working without anyone
-	// having to notice it was stolen.
+	// SessionMaxDays is the absolute lifetime of one login's token family. RefreshExpireDays alone
+	// is an idle timeout, so a stolen token that keeps rotating would never expire without this.
 	SessionMaxDays int
 }
 
-// DSN builds one connection URL, used by BOTH golang-migrate and pgxpool.
-//
-// One method, not two. The common split is a DSN() returning a URL for golang-migrate, which
-// accepts only a URL, alongside a ConnectionString() returning key=value for pgx. One is enough
-// because this URL is built with net/url rather than fmt.Sprintf, so every component is escaped
-// and pgx parses it as happily as migrate does. A hand-built key=value form interpolates the
-// password unquoted, which breaks on a password containing a space.
+// DSN builds one connection URL for both golang-migrate and pgxpool. net/url escapes every part,
+// so a password with a space still works.
 func (d DatabaseConfig) DSN() string {
 	u := url.URL{
 		Scheme: "postgres",
@@ -157,9 +105,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	// Parsed here, not left as strings for a caller to convert: a bad value fails Load itself
-	// rather than reaching secure.NewTokenService, which has no way to report it beyond a panic
-	// or a silently wrong duration.
 	accessExpireMinutes, err := strconv.Atoi(getEnv("JWT_ACCESS_EXPIRE_MINUTES", "15"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_ACCESS_EXPIRE_MINUTES: %w", err)
@@ -199,13 +144,8 @@ func Load() (*Config, error) {
 			SiteName:  getEnv("NOTIFY_SITE_NAME", ""),
 		},
 		JWT: JWTConfig{
-			// No blanket default, deliberately unlike CORS_ORIGINS above: that default is safe
-			// to apply in every environment because the check right below catches it still
-			// being in effect outside development. A default JWT secret cannot work that way,
-			// because a shared, publicly-readable-in-this-repo string would make every deployed
-			// instance's tokens forgeable by anyone who cloned the repo. So the default is
-			// applied only when AppEnv is development (right after this literal), and every
-			// other environment must set JWT_SECRET or fail the validation below.
+			// No default here: a public default secret would make every deploy's tokens forgeable.
+			// Only development gets devJWTSecret, just below.
 			Secret:              getEnv("JWT_SECRET", ""),
 			AccessExpireMinutes: accessExpireMinutes,
 			RefreshExpireDays:   refreshExpireDays,
@@ -217,12 +157,7 @@ func Load() (*Config, error) {
 		cfg.JWT.Secret = devJWTSecret
 	}
 
-	// Validated here, at the config boundary, so service wiring can never see a value that
-	// half-works. Every other setting that can half-work is checked the same way, in the same
-	// shape as the NOTIFY_DRIVER checks below.
-	// Any environment that is not development, not just the literal "production". A staging or
-	// UAT deploy has a real origin and the same silent-drop failure mode, and guarding only the
-	// one spelling leaves every other spelling unprotected.
+	// Any non-development env, not only "production": staging has a real origin too.
 	if cfg.Server.AppEnv != defaultAppEnv && cfg.Server.CORSOrigins == devCORSOrigins {
 		return nil, fmt.Errorf(
 			"CORS_ORIGINS is still the development default (%s) with APP_ENV=%s: "+
@@ -230,25 +165,9 @@ func Load() (*Config, error) {
 			devCORSOrigins, cfg.Server.AppEnv)
 	}
 
-	// Unconditional, unlike the check just above: "*" is wrong in development too. The admin
-	// session cookie only travels cross-origin because internal/http/routes turns credentialed
-	// CORS on, and the CORS spec forbids answering a credentialed request with a wildcard origin.
-	// Fiber enforces that itself by panicking inside cors.New, so all this check adds is a
-	// startup error that names the variable instead of a stack trace from middleware setup.
-	//
-	// Any "*" is refused, not only a bare one. Fiber also accepts a subdomain wildcard
-	// ("https://*.example.com") and reflects the caller's own origin back for a match, which
-	// looks safe next to a literal "*" and is not, because the response is credentialed. The
-	// refresh cookie rides on it, and the refresh response carries a fresh access token in its
-	// body, so any host that matches the pattern can call /api/auth/refresh with the admin's
-	// cookie and READ the answer. That turns a takeover of one forgotten subdomain into full
-	// panel access.
-	//
-	// The deployment this leaves working is the one that matters: admin.example.com calling
-	// api.example.com, listed literally. That is cross-origin but same-site, so the Strict cookie
-	// does travel and AllowCredentials in internal/http/routes is doing real work there. A panel
-	// on a genuinely different registrable domain never receives the cookie at all, whatever CORS
-	// says, so nothing is lost by refusing to guess at hostnames.
+	// Refuse any "*" in every env, including subdomain patterns like "https://*.example.com".
+	// Responses are credentialed, so any matching host could read a fresh access token from
+	// /api/auth/refresh. A takeover of one forgotten subdomain would become full panel access.
 	for _, origin := range strings.Split(cfg.Server.CORSOrigins, ",") {
 		if !strings.Contains(origin, "*") {
 			continue
@@ -267,10 +186,7 @@ func Load() (*Config, error) {
 			strings.TrimSpace(origin))
 	}
 
-	// Checked here because Fiber does not check it anywhere a deploy would notice: an entry it
-	// cannot parse gets a log.Warnf and is dropped from the trusted set. A typo'd CIDR would
-	// therefore boot cleanly and quietly stop trusting the proxy it names, which shows up as every
-	// caller sharing one rate-limit bucket and nothing else.
+	// Fiber only warns and drops an entry it cannot parse, so a typo would quietly stop trusting the proxy.
 	for _, proxy := range cfg.Server.TrustedProxyList() {
 		if strings.Contains(proxy, "/") {
 			if _, _, err := net.ParseCIDR(proxy); err != nil {
@@ -286,23 +202,12 @@ func Load() (*Config, error) {
 	if cfg.Notify.Driver != notifyDriverLog && cfg.Notify.Driver != notifyDriverSES {
 		return nil, fmt.Errorf("invalid NOTIFY_DRIVER %q: want \"ses\" or \"log\"", cfg.Notify.Driver)
 	}
-	// Only "production", unlike the CORS_ORIGINS development-default check above, which fires for
-	// anything that is not "development". The asymmetry is deliberate: a staging deploy SHOULD keep the log driver,
-	// because a staging site emailing a real client is worse than a staging site not emailing.
-	// A staging deploy with the wrong CORS origin, by contrast, is simply broken.
+	// Only "production", on purpose: staging should keep the log driver so it never emails a real client.
 	if cfg.Server.AppEnv == "production" && cfg.Notify.Driver == notifyDriverLog {
 		return nil, errors.New("NOTIFY_DRIVER=log in production: leads would be stored and never delivered")
 	}
-	// Both required at this boundary, not just checked lazily inside NewSES: Notifier.Lead's
-	// error is deliberately never allowed to fail the request it notifies about (see
-	// notify.Notifier), so a deploy missing either of these boots cleanly, reports Driver=ses,
-	// stores every lead, and notifies nobody from the first lead onward, discoverable only by
-	// reading logs. Same trap as NOTIFY_DRIVER=log in production, through a different door.
-	//
-	// AWS_REGION is deliberately NOT required here alongside them: it has a legitimate ambient
-	// source (an EC2 or EKS role's resolved region) that NOTIFY_TO and SES_FROM do not, so
-	// requiring the variable would break that case. See the resolved-Region check in
-	// notify.NewSES instead.
+	// A notify failure never fails the request, so a missing value here would mean silent loss.
+	// AWS_REGION is not required: an EC2 or EKS role can supply it. notify.NewSES checks it.
 	if cfg.Notify.Driver == notifyDriverSES {
 		if cfg.Notify.To == "" {
 			return nil, errors.New("NOTIFY_DRIVER=ses requires NOTIFY_TO")
@@ -312,12 +217,6 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Same asymmetry as the CORS_ORIGINS development-default check above, and for the same
-	// reason: anything that is not development gets a real admin login, so anything that is not
-	// development gets this guard. devJWTSecret is long enough to pass the length check itself,
-	// but the check still runs on it here rather than being skipped by construction, so a
-	// copy-pasted "just set APP_ENV=development in prod to make the error go away" cannot
-	// silently work either.
 	if cfg.Server.AppEnv != defaultAppEnv {
 		if cfg.JWT.Secret == "" {
 			return nil, errors.New("JWT_SECRET is required outside development: " +
@@ -334,45 +233,29 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// devCORSOrigins is both the development default and the sentinel Load() checks for. Naming it
-// once means the check cannot drift from the default it is guarding.
 const devCORSOrigins = "http://localhost:5173"
 
 const defaultAppEnv = "development"
 
-// IsDevelopment reports whether this process is running under the one environment allowed weaker
-// defaults. Exported so callers outside this package can make the same distinction Load makes
-// internally, instead of each one re-hardcoding the string "development".
+// IsDevelopment reports whether this process runs in the one environment allowed weaker defaults.
 func (c *Config) IsDevelopment() bool {
 	return c.Server.AppEnv == defaultAppEnv
 }
 
-// notifyDriverLog and notifyDriverSES are the only two valid NOTIFY_DRIVER values. Named once so
-// the default, the "invalid driver" check and the production guard cannot drift from each other.
 const (
 	notifyDriverLog = "log"
 	notifyDriverSES = "ses"
 )
 
-// defaultDBPort matches the HOST port in docker-compose.yml, deliberately not Postgres's usual
-// 5432. See the comment there for why compose avoids 5432.
-//
-// Kept in step with compose on purpose. A default of 5432 makes a fresh clone with no .env
-// connect to whatever Postgres the developer already runs, which is a silently wrong database.
-// A default of 5433 with no compose service running is a connection refused, which says what is
-// wrong. Prefer the loud failure.
+// defaultDBPort matches the host port in docker-compose.yml, not 5432. A 5432 default would
+// quietly connect a fresh clone to whatever Postgres the developer already runs.
 const defaultDBPort = "5433"
 
-// devJWTSecret is the JWT_SECRET applied only when AppEnv is development and nothing else set
-// one, so `pnpm dev` runs with no .env at all. It is long enough to pass minJWTSecretLen itself,
-// but that is incidental, not load-bearing: the validation below never runs against it, because
-// it only runs outside development.
+// devJWTSecret is used only in development when JWT_SECRET is unset, so `pnpm dev` needs no .env.
 const devJWTSecret = "development-only-secret-do-not-use-in-prod"
 
-// minJWTSecretLen is the floor Load enforces on JWT_SECRET outside development. HS256 with a
-// secret shorter than this is brute-forceable offline once an attacker holds one token to check
-// guesses against; 32 bytes matches the guidance for HMAC-SHA256 keys (RFC 2104's "at least as
-// long as the hash output", 32 bytes for SHA-256).
+// minJWTSecretLen is 32 bytes, the SHA-256 output size. A shorter HS256 secret can be brute-forced
+// offline from one token.
 const minJWTSecretLen = 32
 
 var (
@@ -380,19 +263,8 @@ var (
 	errEnvFile  error
 )
 
-// LoadEnvFile reads .env into the process environment, at most once.
-//
-// Exported and called by cmd/main.go BEFORE logging is configured, because APP_ENV commonly lives
-// only in .env (see .env.example) and a handler chosen before that file is read locks the
-// development text format in for the WHOLE PROCESS, even when .env says production. Reading
-// APP_ENV before the file that defines it is the bug this function exists to prevent.
-//
-// Load calls it too, so Load stays correct when called on its own, for example from a test. The
-// sync.Once makes the second call free.
-//
-// Absence is not an error: under docker-compose or any orchestrator the variables are injected
-// directly and there is no .env on disk. godotenv never overrides a variable already in the OS
-// environment, so OS env always wins over the file.
+// LoadEnvFile reads .env into the process environment, at most once. main calls it before setting
+// up logging, because APP_ENV often lives only in .env. A missing file is fine, and real env vars win.
 func LoadEnvFile() error {
 	envFileOnce.Do(func() {
 		if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
@@ -402,14 +274,9 @@ func LoadEnvFile() error {
 	return errEnvFile
 }
 
-// AppEnv reads APP_ENV with the same default Load applies, after making sure .env has been read.
-//
-// Exported because cmd/main.go configures logging BEFORE calling Load: a Load failure is the most
-// important line this service logs and has to come out in the environment's own format. Reading
-// through this function rather than a second os.Getenv means the two readings cannot drift.
+// AppEnv reads APP_ENV with Load's default, after reading .env. main needs it before Load runs.
 func AppEnv() string {
-	// Error deliberately dropped: Load returns it, and the only thing it changes here is which
-	// format a failing startup logs in. Reporting a malformed .env twice is worse than once.
+	// Load reports this error, so do not report it twice.
 	_ = LoadEnvFile()
 	return getEnv("APP_ENV", defaultAppEnv)
 }

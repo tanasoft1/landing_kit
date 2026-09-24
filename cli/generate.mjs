@@ -1,34 +1,18 @@
-// The generate layer: the files a scaffold cannot inherit, written fresh from the answers.
-//
-// Everything here is a string template plus the `Answers` object. Nothing is copied — that is
-// the copy layer's job, and the two lists never overlap. `src/config/`, `registry.ts`,
-// `block-modules.ts` and `variants.all.ts` are left out of every COPY_* list on purpose, so this
-// file can write them.
-//
-// `tsconfig.json` and `pnpm-workspace.yaml` are templated here because they have to be: neither
-// is in `package.json`'s `files`, so under `pnpm dlx` they are not on disk at all. Reading them
-// at runtime would work in this repo and fail on every real install. Both carry a drift check
-// that runs only when the kit's own copy IS present — a working copy, which is exactly where
-// someone would edit them — so changing one and not the other stops the CLI here.
+// The generate layer: files a scaffold can't inherit, written fresh from the answers. Nothing is
+// copied here. `tsconfig.json`, `pnpm-workspace.yaml` and `docker-compose.yml` are templated
+// because they aren't in `files`, so they don't exist under `pnpm dlx`. Each has a drift check
+// that runs when the kit's own copy is on disk.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { builtinModules } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { blockFiles } from './add.mjs'
 import { kitPath } from './kit-manifest.mjs'
-import { BLOCK_DEFAULT_VARIANT, BLOCK_ORDER, CUSTOM_VARIANT } from './prompts.mjs'
+import { BLOCK_ORDER, CUSTOM_VARIANT } from './prompts.mjs'
 
 // --- the dependency split ----------------------------------------------------------------------
-//
-// The kit keeps every package in `devDependencies` (Task 1): it is a generator that ships no
-// runtime, so nothing it depends on should be downloaded by a `pnpm dlx` that only copies files.
-// A generated project is an app and wants the ordinary split, which is the exact opposite. So the
-// versions come from the kit's manifest — one source of truth, no drift — and the *grouping* comes
-// from the lists below.
-//
-// Every name in every list must exist in the kit's manifest, and every name in the kit's
-// manifest must appear in one of them. Both directions matter and they catch different mistakes: a
-// rename upstream would silently drop a dependency from every generated project, and a package
-// ADDED to the kit would silently never reach one. Neither has any other signal.
+// The kit keeps every package in devDependencies; a generated project wants the normal split.
+// Versions come from the kit's manifest, grouping from the lists below. Every kit package must be
+// in exactly one list, and every listed package must exist, or the CLI throws.
 
 /** Shipped to the browser or imported by app code at runtime. */
 const RUNTIME_DEPS = [
@@ -39,8 +23,7 @@ const RUNTIME_DEPS = [
   'motion',
   'react',
   'react-dom',
-  // `src/integrations/submit-schema.ts` imports zod and is always copied, so this is never
-  // optional.
+  // `src/integrations/submit-schema.ts` imports zod and is always copied.
   'zod',
 ]
 
@@ -48,26 +31,14 @@ const RUNTIME_DEPS = [
 const BLOCK_RUNTIME_DEPS = { contact: ['react-hook-form'] }
 
 /**
- * Runtime, but only when the admin panel was asked for.
- *
- * A flat list rather than BLOCK_RUNTIME_DEPS's object, because there is one panel and not one
- * entry per block, but it exists for the same reason: a project that answered `none` or `api`
- * has no panel, so shipping it Radix and TanStack Table would be a dozen-odd packages it can
- * never import. The CLASSIFIED check below is what keeps this list honest in both directions — a
- * package added to apps/web and left out of here fails the CLI, and one named here but renamed
- * upstream fails it too.
- *
- * `react-hook-form` is deliberately in both this list and BLOCK_RUNTIME_DEPS.contact, so how many
- * packages the panel actually adds depends on whether the contact block was picked too. The
- * panel's login form needs it either way, and `pickDeps` builds an object, so naming it twice is
- * harmless.
+ * Runtime, but only for `--backend=admin`. `react-hook-form` is also in
+ * BLOCK_RUNTIME_DEPS.contact; the panel's login form needs it either way.
  */
 const ADMIN_RUNTIME_DEPS = [
   '@hookform/resolvers',
   '@radix-ui/react-dialog',
   '@radix-ui/react-dropdown-menu',
   '@radix-ui/react-label',
-  '@radix-ui/react-separator',
   '@radix-ui/react-slot',
   '@tanstack/react-table',
   'class-variance-authority',
@@ -76,16 +47,9 @@ const ADMIN_RUNTIME_DEPS = [
   'react-hook-form',
   'sonner',
   'tailwind-merge',
-  // The `animate-in` / `zoom-in-95` / `slide-in-from-*` utilities `sheet.tsx` and
-  // `dropdown-menu.tsx` are written against. Tailwind v4 dropped them and nothing else here
-  // defines them, so without this the sheet and the dropdown appear and vanish with no
-  // transition and no error.
-  //
-  // Imported from `src/styles/theme.css`, which ships to EVERY project — so unlike the rest of
-  // this list, the gate is not "the file is never copied". `transformThemeCss` in cli/copy.mjs
-  // removes the `@import` and the comment paragraph above it for any answer but `admin`, and that
-  // removal and this entry have to move together: a project that kept the import and lost the
-  // package fails its build on a missing module.
+  // The animation utilities the panel's sheet and dropdown use. The `@import` lives in
+  // theme.css, which ships to every project, and `transformThemeCss` removes it without the panel.
+  // That removal and this entry must move together.
   'tw-animate-css',
 ]
 
@@ -102,26 +66,16 @@ const BUILD_DEPS = [
   'vite',
 ]
 
-// Lighthouse is deliberately not shipped to generated projects (spec §2: too slow, developers
-// would delete it). Listed rather than merely omitted so the completeness check below still
-// accounts for it — an unclassified package is an error, and silence is not a classification.
-const EXCLUDED_DEPS = ['@lhci/cli']
-
 const CLASSIFIED = [
   ...RUNTIME_DEPS,
   ...Object.values(BLOCK_RUNTIME_DEPS).flat(),
   ...ADMIN_RUNTIME_DEPS,
   ...BUILD_DEPS,
-  ...EXCLUDED_DEPS,
 ]
 
 // --- SEO copy ------------------------------------------------------------------------------------
-//
-// The kit's own wording, reused verbatim so a scaffold reads like the kit's demo rather than like
-// lorem ipsum. Held here rather than parsed out of the kit's `pages.config.ts` — parsing TS text
-// for string literals is the kind of fragile reach this project keeps replacing with real parsers —
-// but checked against that file at generate time by `assertSeoCopyMatchesKit`, so the two cannot
-// drift apart quietly.
+// The kit's own wording, so a scaffold reads like the demo. `assertSeoCopyMatchesKit` checks it
+// against the kit's `pages.config.ts`.
 const PAGE_SEO = {
   home: {
     mn: { title: 'Эхлэл', description: 'Хурдан, хайлтад оновчлогдсон вэб хуудас.' },
@@ -152,19 +106,8 @@ function writeOut(outDir, rel, text, written) {
 }
 
 // --- JSON, in Biome's formatting rather than JSON.stringify's ------------------------------------
-//
-// `biome ci .` is the generated project's `pnpm lint` and the first gate of its `pnpm verify`,
-// and it formats every `.json` file written here. `JSON.stringify(…, null, 2)` always puts each
-// array element on its own line, while Biome collapses any array or object that fits in 100
-// columns. They disagree, and the disagreement is a lint error.
-//
-// This was seen, not guessed: the first `pnpm verify` on a fresh scaffold failed on
-// `.kit/scaffold.json`, because `"blocks"` held four short strings on four lines. That file is
-// linted because a fresh scaffold has no `.git` for Biome's `useIgnoreFile` to read, and the
-// generated `.gitignore` un-ignores `scaffold.json` anyway, so it stays linted after `git init`.
-//
-// Objects would be safe either way, since Biome keeps an object the author expanded. The same
-// fits-or-expands rule is used for both so the output has one shape and no special cases.
+// Biome collapses arrays and objects that fit in 100 columns; JSON.stringify never does. The
+// generated project lints its JSON, so this writes Biome's shape.
 const LINE_WIDTH = 100
 
 const compactJson = (value) => {
@@ -181,11 +124,7 @@ const compactJson = (value) => {
 function formatJson(value, indent, used) {
   const compact = compactJson(value)
   if (used + compact.length <= LINE_WIDTH) return compact
-  // A scalar has nothing to expand. Checked before the branches below and not after, because
-  // `Object.entries('pnpm lint && …')` is a list of that string's CHARACTERS and expands happily
-  // into one JSON property per letter — which is exactly what the over-long `verify` script did
-  // here before this line existed. Nothing about the output looked like an error; it was valid
-  // JSON, and only reading it caught it.
+  // Scalars first: `Object.entries` on a string would expand it into one property per character.
   if (value === null || typeof value !== 'object') return compact
   const inner = `${indent}  `
   if (Array.isArray(value)) {
@@ -208,9 +147,7 @@ const themeFile = (answers) => (answers.theme === 'both' ? 'theme.both.tsx' : 't
 // --- package.json ---------------------------------------------------------------------------------
 
 function kitManifest(kitRoot) {
-  // The version is the ROOT package's: that is what npm publishes and what `.kit/scaffold.json`
-  // records. `readKitFile` would look under WEB_ROOT and find the private web package, whose
-  // version nobody outside this repo ever sees.
+  // The root package's version: that is what npm publishes.
   const rootPkg = JSON.parse(readFileSync(join(kitRoot, 'package.json'), 'utf8'))
   if (typeof rootPkg.version !== 'string' || rootPkg.version === '') {
     throw new Error(
@@ -218,12 +155,9 @@ function kitManifest(kitRoot) {
         'generated a project, and a scaffold that cannot say so is not worth writing',
     )
   }
-  // The dependency ranges are the web template's, and only the web template's. The root package
-  // depends on Biome to lint `cli/`, which no generated project needs and which would fail the
-  // CLASSIFIED check below if it were mixed in here.
+  // Dependency ranges come from the web template only. The root's Biome is for linting `cli/`.
   const pkg = JSON.parse(readKitFile(kitRoot, 'package.json'))
-  // Both groups, because which group the kit uses is Task 1's business and could change again;
-  // what this layer needs is the version range, whichever side it is filed under.
+  // Both groups, since only the version range matters here.
   const deps = { ...pkg.dependencies, ...pkg.devDependencies }
 
   for (const name of CLASSIFIED) {
@@ -239,8 +173,8 @@ function kitManifest(kitRoot) {
     if (!CLASSIFIED.includes(name)) {
       throw new Error(
         `Kit apps/web/package.json lists '${name}', which cli/generate.mjs does not classify ` +
-          'as runtime, block-only runtime, admin-only runtime, build or excluded. Add it to ' +
-          'RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, ADMIN_RUNTIME_DEPS, BUILD_DEPS or EXCLUDED_DEPS ' +
+          'as runtime, block-only runtime, admin-only runtime or build. Add it to ' +
+          'RUNTIME_DEPS, BLOCK_RUNTIME_DEPS, ADMIN_RUNTIME_DEPS or BUILD_DEPS ' +
           '— otherwise every generated project silently goes without it',
       )
     }
@@ -249,10 +183,8 @@ function kitManifest(kitRoot) {
 }
 
 /**
- * `basename` is the developer's directory name, and npm's rules for a package name are narrower
- * than a directory's: uppercase letters and spaces are both legal in a path and both rejected by
- * `pnpm install`. Normalised rather than passed through, so `landing-kit "Client Site"` scaffolds
- * and installs instead of scaffolding and then failing at the first install.
+ * `basename` is the directory name. npm package names are narrower (no uppercase, no spaces), so
+ * it is normalised and `"Client Site"` still installs.
  */
 function packageName(outDir) {
   const name = basename(outDir)
@@ -269,9 +201,7 @@ function pickDeps(names, deps) {
   return out
 }
 
-// The package manager a generated project declares. Kept beside the generated package.json rather
-// than read from the kit's own, because the kit's version is what BUILDS the kit and this is what a
-// scaffolded project is told to USE. They move together today and need not always.
+// The pnpm a generated project declares. Separate from the kit's own, which builds the kit.
 const PACKAGE_MANAGER = 'pnpm@12.4.2'
 
 function packageJson(outDir, answers, { deps }) {
@@ -282,13 +212,8 @@ function packageJson(outDir, answers, { deps }) {
   const hasAdmin = answers.backend === 'admin'
   if (hasAdmin) runtime.push(...ADMIN_RUNTIME_DEPS)
   const hasBackend = (answers.backend ?? 'none') !== 'none'
-  // Chains the binaries directly rather than `pnpm lint && pnpm typecheck && …`. Naming the
-  // package manager here would hard-require pnpm: `npm run verify` would die on
-  // `pnpm: command not found`, which is a miserable first experience for anyone who installed
-  // with npm. Every package manager puts `node_modules/.bin` on PATH for a script, so this
-  // form works under all three. The Go steps are appended the same way, not via the `api:*`
-  // script names below — `cd api` is the last thing this chain does, and nothing runs after it,
-  // so there is nothing to `cd` back to.
+  // Calls the binaries directly, not `pnpm lint && …`, so `npm run verify` works without pnpm.
+  // The Go steps go last because they end in `cd api`.
   const verify =
     'biome ci . && tsc --noEmit && node scripts/check-conventions.mjs && vite build && ' +
     'node scripts/verify-build.mjs' +
@@ -299,10 +224,8 @@ function packageJson(outDir, answers, { deps }) {
     name: packageName(outDir),
     private: true,
     type: 'module',
-    // Pinned on request, and it is a harder pin than the `verify` comment below assumes: corepack
-    // enforces this field, so a generated project now wants pnpm specifically. The scripts stay
-    // package-manager-neutral anyway, because the two decisions are separable and someone who
-    // deletes this line should get a project that still works under npm.
+    // Corepack enforces this pin. The scripts stay package-manager-neutral anyway, so removing
+    // this line still leaves a project that works under npm.
     packageManager: PACKAGE_MANAGER,
     scripts: {
       dev: 'vite dev',
@@ -312,9 +235,7 @@ function packageJson(outDir, answers, { deps }) {
       fix: 'biome check --write .',
       conventions: 'node scripts/check-conventions.mjs',
       verify,
-      // Runnable on their own, matching the kit's own script names and bodies (apps/api's path
-      // becomes `api`, not `apps/api`, since a generated project is flat). Not referenced from
-      // `verify` above by name — see the comment there for why.
+      // Runnable on their own, matching the kit's script names. Not used by `verify` above.
       ...(hasBackend
         ? {
             'api:sqlc': 'cd api && sqlc diff',
@@ -330,32 +251,14 @@ function packageJson(outDir, answers, { deps }) {
 }
 
 // --- what ships must be installable ----------------------------------------------------------
-//
-// The CLASSIFIED loops above prove every package is FILED somewhere. They do not prove a filing is
-// TRUE. `lucide-react` is filed admin-only; nothing stopped `src/components/header.tsx` from
-// importing it, and a `--backend=none` scaffold then shipped source importing a package its own
-// `package.json` does not list — no CLI error, and a snapshot line reading `changed
-// src/components/header.tsx` like any ordinary edit.
-//
-// So: read what actually shipped. Walk the finished target, collect every bare module specifier,
-// and reconcile against the `package.json` this run just wrote. It runs per answer set, which is
-// the only level at which the question has an answer — `lucide-react` in `src/admin` is correct
-// and `lucide-react` in `src/components` is a broken `none` project, and the difference is which
-// files the answer put on disk.
-//
-// This subsumes the admin-only case rather than special-casing it. An undeclared package is an
-// undeclared package whichever list it came from, so BLOCK_RUNTIME_DEPS is covered by the same
-// walk with no extra code.
+// Walk the finished target, collect every bare import, and check each is in the `package.json`
+// this run wrote. Per answer set: `lucide-react` in `src/admin` is fine, in `src/components` it
+// breaks a `none` project.
 
-// Names Node resolves without a `package.json` entry. `node:`-prefixed specifiers are handled
-// separately; these are the bare spellings (`fs`, `path`) that `scripts/*.mjs` could still use.
+// Built-ins Node resolves without a `package.json` entry. `node:` specifiers are handled apart.
 const BUILTIN_MODULES = new Set(builtinModules)
 
-// Comment-only lines, dropped before the patterns below run. A JSDoc line quoting an import is
-// not an import, and this kit's prose quotes them often — `src/admin/lib/utils.ts` explains that
-// shadcn now writes `import { cn } from 'cn'`, and a scan that believed it failed every admin
-// scaffold on a package nobody depends on. Line-shaped rather than a real comment parser: no
-// import statement ever starts with any of these three, so nothing real is lost.
+// Comment lines are dropped first: the kit's comments quote imports, and those aren't imports.
 const COMMENT_LINE = /^[ \t]*(?:\/\/|\/?\*)/
 const stripCommentLines = (text) =>
   text
@@ -363,13 +266,9 @@ const stripCommentLines = (text) =>
     .filter((l) => !COMMENT_LINE.test(l))
     .join('\n')
 
-// Static `from '…'`, bare `import '…'`, dynamic `import('…')` and `require('…')`. Deliberately
-// regex and not a parser: no new dependency, and a false POSITIVE here is a loud failure someone
-// reads, while the alternative — shipping nothing — is the silence this exists to end.
-//
-// The first is anchored at the start of a line and forbids a quote before `from`, so it spans a
-// multi-line import clause (`import {\n  a,\n} from 'x'`) and cannot run past the end of one
-// statement into the next one's specifier.
+// Static `from '…'`, bare `import '…'`, dynamic `import('…')` and `require('…')`. A regex, not a
+// parser, to avoid a dependency. The first pattern spans multi-line import clauses but can't run
+// into the next statement.
 const JS_SPECIFIERS = [
   /^[ \t]*(?:import|export)[ \t][^'"\n]*(?:\n[^'"\n]*)*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm,
   /^[ \t]*import[ \t]*['"]([^'"\n]+)['"]/gm,
@@ -377,21 +276,14 @@ const JS_SPECIFIERS = [
   /\brequire[ \t]*\([ \t]*['"]([^'"\n]+)['"]/g,
 ]
 
-// `@import "tw-animate-css";` is a real dependency edge and the exact one the panel added to a
-// file that ships to EVERY project (`transformThemeCss` is what removes it for `none` and `api`).
-// A CSS-only check would have caught that coupling breaking in the direction the JS scan cannot
-// see, so the two run together.
+// CSS `@import` counts too: the panel's `tw-animate-css` import sits in a file every project gets.
 const CSS_SPECIFIERS = [/@import\s+['"]([^'"\n]+)['"]/g]
 
 const SCANNED = { js: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'], css: ['.css'] }
 
 /**
- * The npm package a specifier names, or null when it names no package at all.
- *
- * `@/…` is this project's own source alias and is NOT a scope, which is the one case worth
- * spelling out: `@/admin/lib/api` and `@radix-ui/react-dialog` are the same shape and only one is
- * a package. Subpaths collapse to their package, so `lucide-react/icons/x` is `lucide-react` and
- * `@fontsource-variable/inter/wght.css` is `@fontsource-variable/inter`.
+ * The npm package a specifier names, or null. `@/…` is the project's source alias, not a scope.
+ * Subpaths collapse to their package.
  */
 function packageOfSpecifier(spec) {
   if (spec === '' || spec.startsWith('.') || spec.startsWith('/')) return null
@@ -413,14 +305,9 @@ function collectSpecifiers(text, patterns) {
 }
 
 /**
- * Every package the shipped source imports must be in the shipped `package.json`.
- *
- * Runs on the finished target rather than on the kit, because the question is about one answer
- * set: the kit's own tree always contains the panel and always declares its packages, which is
- * precisely why the kit's `pnpm verify` stayed green while a `none` scaffold was broken.
- *
- * The `api/` tree is walked too and costs nothing — Go files match no extension here — so a `.ts`
- * or `.css` ever added under it is covered without this function learning about the backend.
+ * Every package the shipped source imports must be in the shipped `package.json`. Checked on the
+ * target, not the kit: the kit always has the panel and its packages, so only a scaffold shows the
+ * gap.
  */
 function assertShippedImportsAreDeclared(outDir, packageJsonText) {
   const pkg = JSON.parse(packageJsonText)
@@ -451,8 +338,7 @@ function assertShippedImportsAreDeclared(outDir, packageJsonText) {
   }
   walk('')
   if (problems.length === 0) return
-  // Sorted and de-duplicated: one package imported by six files is one mistake, and a list that
-  // repeats it six times reads like six.
+  // Sorted and de-duplicated: one package imported by six files is one mistake.
   const unique = [...new Set(problems)].sort()
   throw new Error(
     'The scaffold imports packages its own package.json does not declare, so it cannot ' +
@@ -467,13 +353,8 @@ function assertShippedImportsAreDeclared(outDir, packageJsonText) {
 // --- pnpm-workspace.yaml --------------------------------------------------------------------------
 
 /**
- * `allowBuilds` is not optional decoration: without it pnpm 10 silently skips esbuild's and
- * lightningcss's build scripts, and the site breaks in a way that names neither package.
- *
- * The `typescript` version comes from the kit's `package.json` rather than from its
- * `pnpm-workspace.yaml`, because that file is not in `package.json`'s `files` and therefore does
- * not exist under `pnpm dlx`. The assertion below closes the gap that creates: when the kit's own
- * copy IS on disk, what this function produces must equal it byte for byte.
+ * Without `allowBuilds`, pnpm skips esbuild's and lightningcss's build scripts and the site
+ * breaks. When the kit's own workspace file is on disk, the output must match it exactly.
  */
 function pnpmWorkspaceYaml(kitRoot, deps) {
   const text = `allowBuilds:
@@ -482,14 +363,10 @@ function pnpmWorkspaceYaml(kitRoot, deps) {
 overrides:
   typescript: ${deps.typescript}
 `
-  // The kit's workspace file is a root file, not part of the web template, so this is a direct
-  // join rather than `kitPath`. There is one workspace per repository by definition.
+  // A root file, not part of the web template, so a plain join rather than `kitPath`.
   const kitFile = join(kitRoot, 'pnpm-workspace.yaml')
   if (existsSync(kitFile)) {
-    // The kit declares `packages:` because it holds two workspace packages; a generated project
-    // holds one and declares none. That is the only difference allowed. Everything below it,
-    // the pnpm settings a generated project inherits, must still match exactly, so the key is
-    // stripped rather than the comparison loosened.
+    // The kit's `packages:` key is the only allowed difference: a generated project is one package.
     const kitText = readFileSync(kitFile, 'utf8').replace(/^packages:\n(?:[ \t]+-.*\n)+/m, '')
     if (kitText !== text) {
       throw new Error(
@@ -525,28 +402,10 @@ __unconfig*
 !.kit/scaffold.json
 `
 
-// The git rules the generated \`api/\` tree needs, appended only when a backend was scaffolded
-// (api/ does not otherwise exist) and never spliced into GITIGNORE unconditionally: the four
-// --backend=none snapshot variants must see byte-identical output to before, and an unconditional
-// append would move every one of them for rules that name paths none of them have.
-//
-// Both halves exist because the kit's own .gitignore needed the same rule and fixing it only there
-// pushes the failure one level out, into every project this kit generates. That distance is the
-// argument, not a detail of it. A maintainer of THIS repo knows why a stray binary appeared; the
-// client's team is whoever the kit was handed to, running \`make build\` on day one and \`git add -A\`
-// after it.
-//
-// The placeholder negation is three lines, not the two it looks like it should need, for the
-// identical reason as this kit's own .gitignore (see there): the bare \`dist\` rule three lines up
-// already excludes that directory outright, and a directory excluded that way cannot be reopened
-// by a file-level negation below it. Without it a scaffolded project's OWN \`git init\` never tracks
-// its placeholder, and a fresh clone of THAT project hits the \`go:embed\` failure Task 1 exists to
-// prevent.
-//
-// \`api/bin/\` and \`api/tmp/\` are the two binaries the makefile writes, and both \`makefile\` and
-// \`.air.toml\` ship (API_COPY_FILES in cli/kit-manifest.mjs). \`make build\` writes
-// api/bin/landing-api, 34 MB with the whole site embedded. \`make dev\` runs air, whose tmp_dir is
-// \`tmp\`, so every save rebuilds api/tmp/main. The bare \`dist\` rule covers neither.
+// Git rules for `api/`, appended only when a backend was scaffolded, so the `none` output stays
+// the same. The placeholder needs three lines because the bare `dist` rule excludes the
+// directory, and a file negation can't reopen it. `api/bin/` and `api/tmp/` are the makefile's
+// and air's build output.
 const API_GITIGNORE = `
 !api/internal/static/dist/
 api/internal/static/dist/*
@@ -561,9 +420,8 @@ api/tmp/
 // --- docker-compose.yml ---------------------------------------------------------------------------
 
 /**
- * Templated rather than copied, only when a backend is included: `docker-compose.yml` is a root
- * file that belongs to neither template tree (`WEB_ROOT` nor the API tree in `kit-manifest.mjs`),
- * and it is not in `package.json`'s `files`, so it does not exist on disk at all under `pnpm dlx`.
+ * Templated, not copied, only when a backend is included. The file isn't in `files`, so it doesn't
+ * exist under `pnpm dlx`.
  */
 function dockerComposeYml() {
   return `services:
@@ -594,24 +452,12 @@ volumes:
 `
 }
 
-/**
- * Same reason and same shape as `pnpmWorkspaceYaml`'s and `tsconfigJson`'s drift checks: the kit's
- * own `docker-compose.yml` is not readable at scaffold time (it is not in `files`), so this is the
- * one place a change to it can be caught — and only when the kit's own copy IS on disk, which is
- * every working copy, which is exactly where someone would edit it.
- */
+/** Drift check against the kit's own `docker-compose.yml`, when it is on disk. */
 function assertDockerComposeMatchesKit(kitRoot, generated) {
   const kitFile = join(kitRoot, 'docker-compose.yml')
   if (!existsSync(kitFile)) return
-  // The kit's file declares an `api` service and a generated project's does not. That is the one
-  // difference allowed, and it is not cosmetic: the kit has a Dockerfile at its root built for its
-  // own apps/web plus apps/api shape, and a scaffolded project is a flat web app with the service
-  // in `api/`, so that Dockerfile does not apply and the CLI does not yet generate one. Shipping a
-  // compose file that referenced a Dockerfile the scaffold never receives would look complete and
-  // fail on `docker compose up`, so the service is omitted until there is one to point at.
-  //
-  // Stripped rather than the comparison loosened, so every OTHER line, which is the database
-  // configuration a scaffold really does inherit, still has to match exactly.
+  // The kit's `api` service is the one allowed difference: its Dockerfile is built for the kit's
+  // layout, and a scaffold gets no Dockerfile yet. Every other line must match.
   const kitText = readFileSync(kitFile, 'utf8').replace(
     /\n {2}api:\n(?:(?: {2,}.*)?\n)*?(?=\nvolumes:)/,
     '',
@@ -630,25 +476,11 @@ function assertDockerComposeMatchesKit(kitRoot, generated) {
 
 // --- vite.config.ts -------------------------------------------------------------------------------
 
-// No KIT_* branching and no `configs/` import: a generated project has exactly one config and one
-// implementation per boundary, so every branch the kit's own vite.config.ts carries has already
-// been decided by the answers. The comments that survive are the ones explaining a decision the
-// code cannot explain itself.
+// No KIT_* branching: a generated project has one config and one implementation per boundary.
 function viteConfigTs(answers) {
-  // The dev proxy is gated on `admin`, not on "has a backend". The panel's API client calls
-  // relative paths (`/api/...`), and in production the Go binary serves the site and the API
-  // together, so those paths resolve. Development has no such server, and the proxy is what
-  // gives it the same origin: `credentials: 'same-origin'` is then enough to send the refresh
-  // cookie, nothing is preflighted, and there is no allowlist entry or base URL to keep in sync.
-  //
-  // `--backend=api` deliberately gets no proxy. That project's contact form posts to an absolute
-  // `VITE_CONTACT_ENDPOINT` (src/integrations/submit.endpoint.ts) and reaches Fiber through CORS,
-  // which already works. Adding a proxy would silently change what a relative value in that
-  // variable means for someone who has already set one. The omission is a decision, not an
-  // oversight.
-  //
-  // `?? 'none'` for the same reason as the rest of this file: belt-and-braces for a caller that
-  // builds `answers` by hand rather than through `resolveAnswers`.
+  // The dev proxy is for `admin` only. The panel calls relative `/api` paths; the proxy gives
+  // development the same origin production has, so the refresh cookie is sent. `api` projects post
+  // to an absolute `VITE_CONTACT_ENDPOINT` through CORS, so they get no proxy.
   const devProxy =
     (answers.backend ?? 'none') === 'admin'
       ? `  // The panel calls the API with relative paths, so this makes development same-origin the way
@@ -665,21 +497,9 @@ function viteConfigTs(answers) {
 `
       : ''
 
-  // The panel's prerendered shell, gated on the same answer as the proxy. The Go binary answers
-  // every /admin URL by falling back to one file (internal/static/static.go), and without this
-  // entry the only file there is the prerendered home page, so a hard load of an admin URL paints
-  // the hero until hydration replaces it.
-  //
-  // A project that declined the panel has no /admin route, and the entry cannot simply be emitted
-  // unconditionally and left to do nothing: `src/routes/$.tsx` answers an unrouted path with a
-  // 404, and the prerenderer treats that status as an error. Measured on the kit itself by adding
-  // a `/nope` entry — `Failed to fetch /nope: Not Found`, and `failOnError: true` (three lines
-  // above in the emitted file) turns it into a build that exits 1.
-  //
-  // The non-admin branch is byte-identical to what this function emitted before the panel existed,
-  // deliberately: the five non-admin scaffold snapshots are what prove no admin content reaches a
-  // project that declined it, and reformatting them for a branch they never take would spend that
-  // signal on noise.
+  // The panel's prerendered shell, for `admin` only. The Go binary serves this file for every
+  // /admin URL; without it a hard load paints the home page. Without the panel the route would
+  // 404 and `failOnError` would fail the build.
   const prerenderPages =
     (answers.backend ?? 'none') === 'admin'
       ? `pages: [
@@ -767,10 +587,8 @@ ${devProxy}  resolve: {
 }
 
 /**
- * The span starting at `opener` and ending at its matching close bracket.
- *
- * `opener` must end in the bracket itself (`'alias: {'`, `'plugins: ['`), so depth starts at one
- * and the first unmatched close ends the span.
+ * The span from `opener` to its matching close bracket. `opener` must end in the bracket itself
+ * (`'alias: {'`), so depth starts at one.
  */
 function matchedSpan(text, opener, file, label) {
   const at = text.indexOf(opener)
@@ -802,37 +620,21 @@ function oneLine(text, needle, file, label) {
 }
 
 // --- vite.config.ts, against the kit's own ------------------------------------------------------
-//
-// The last generated file with a hand-maintained twin and no drift assertion. Every other one has
-// a check — `assertTsconfigMatchesKit`, `pnpmWorkspaceYaml`'s byte comparison,
-// `assertDockerComposeMatchesKit`, `assertRouteTreeMatchesKit`, `assertSeoCopyMatchesKit` — and
-// this is the file that decides whether the panel shell is prerendered at all. Before this, the
-// `/admin` prerender entry and the `/api` dev proxy were proven by a re-recordable snapshot hash
-// and by a client's own build, and by nothing else.
-//
-// NOT text equality, deliberately. The two files legitimately differ: the kit branches on
-// `KIT_ANIMATION`, `KIT_SUBMIT` and `KIT_CONFIG` and a generated project has one answer baked in,
-// so `@/motion`, `@/submit`, `@/config` and the `pages`/`site` imports are different on purpose.
-// A check demanding equality there would fail on every scaffold and be switched off within a week.
-// What is asserted instead is the set of axes on which the two MUST agree — each extracted from
-// what the CLI emits, then required verbatim (whitespace-normalised) in the kit's file. An axis
-// whose anchor has moved fails on the extraction side, so the list cannot rot quietly either.
+// Not text equality: the kit branches on KIT_* flags and a scaffold has one answer baked in. The
+// check extracts the parts that must agree from what the CLI emits and requires each, whitespace-
+// normalised, in the kit's file. A moved anchor fails on the extraction side.
 const VITE_AXES = [
-  // The panel's prerendered shell. Drop this and the Go binary's /admin fallback serves the
-  // prerendered HOME page, so a hard load of an admin URL paints the marketing hero.
+  // The panel's prerendered shell. Without it, a hard load of an admin URL shows the home page.
   ['the /admin prerender entry', (t, f) => oneLine(t, "path: '/admin'", f, 'the panel shell')],
-  // The panel's dev-time same-origin. Without it `credentials: 'same-origin'` sends no refresh
-  // cookie and every panel request in development is cross-origin.
+  // The panel's dev-time same origin. Without it no refresh cookie is sent in development.
   ['the /api dev proxy', (t, f) => matchedSpan(t, 'server: {', f, 'the panel dev proxy')],
   // Read by block-preloads.ts at prerender time.
   ['build.manifest', (t, f) => oneLine(t, 'build: { manifest: true }', f, 'the vite manifest')],
-  // `autoStaticPathsDiscovery` and `crawlLinks` both false is what keeps /docs out of dist, and
-  // `failOnError` is what makes a broken prerender entry a failed build rather than a warning.
+  // These keep /docs out of dist, and `failOnError` makes a broken prerender entry fail the build.
   ['the prerender options', (t, f) => matchedSpan(t, 'prerender: {', f, 'prerender settings')],
-  // src/app/, not directly under src/ — without these three the build looks for src/router.* .
+  // src/app/, not src/. Without these the build looks for src/router.*.
   ['the tanstackStart entries', (t, f) => oneLine(t, 'router: { entry:', f, 'the app entries')],
-  // The one alias a generated project keeps as a runtime branch, because `site.theme.mode` must
-  // stay editable after scaffolding.
+  // Kept as a runtime branch, because `site.theme.mode` must stay editable after scaffolding.
   ['the @/theme alias', (t, f) => lineSpan(t, "'@/theme':", 'theme.single.tsx', f, 'theme alias')],
   ['the page list', (t, f) => matchedSpan(t, 'enumerateUrls(pages, site).map((u) => ({', f, 'x')],
 ]
@@ -847,19 +649,11 @@ const pluginNames = (text, file) =>
     (m) => m[1],
   )
 
-// Indentation differs between the two files in places, and comments differ wherever one of them
-// explains something the other does not have. Neither is an axis: this compares what the two
-// files DO. Comment LINES only, never a trailing `//`, because `'http://localhost:3000'` is one of
-// the values being compared.
+// Compare what the files do, not their comments or indentation. Whole comment lines only, never a
+// trailing `//`, because `'http://localhost:3000'` is one of the compared values.
 const flat = (s) => stripCommentLines(s).replace(/\s+/g, ' ').trim()
 
-/**
- * What `viteConfigTs` emits for `--backend=admin` must agree with the kit's own vite.config.ts.
- *
- * Guarded on `existsSync` for the same reason as the tsconfig, workspace and compose checks:
- * `apps/web/vite.config.ts` is not in `package.json`'s `files`, so under `pnpm dlx` it is not on
- * disk at all. It IS on disk in every working copy, which is the only place anyone edits it.
- */
+/** What `viteConfigTs` emits for `admin` must agree with the kit's vite.config.ts, when on disk. */
 function assertViteConfigMatchesKit(kitRoot) {
   const rel = 'vite.config.ts'
   const kitCopy = kitPath(kitRoot, rel)
@@ -936,17 +730,9 @@ const sortedJson = (value) =>
   )
 
 /**
- * The kit's tsconfig is the one this repo's own `pnpm typecheck` is proven against, and the
- * generated one is a template — so a compiler option added to one and not the other is a generated
- * project type-checked under different rules from the kit that produced it, with nothing saying so.
- *
- * Compared semantically, not textually: key order and formatting are not drift. Two differences are
- * expected and excluded — `paths` names the chosen boundary files (only the keys must match), and
- * `include` drops `configs`, which is never copied.
- *
- * Silent when the kit's tsconfig.json is absent, which is every `pnpm dlx` run: the file is not in
- * `package.json`'s `files`. That is not a hole, it is the only place the check can run — a change to
- * the kit's tsconfig can only be made in a working copy, where the file is here.
+ * The generated tsconfig must match the kit's, compared by meaning, not text. Expected
+ * differences: `paths` values name the chosen boundary files, and `include` drops `configs`. Runs
+ * only when the kit's tsconfig is on disk.
  */
 function assertTsconfigMatchesKit(kitRoot, generated) {
   const kitFile = kitPath(kitRoot, 'tsconfig.json')
@@ -979,41 +765,20 @@ function assertTsconfigMatchesKit(kitRoot, generated) {
 }
 
 // --- the route tree ----------------------------------------------------------------------------
-//
-// TanStack writes `src/app/routeTree.gen.ts` from whatever is in `src/routes/`, and it names every
-// route by import. That is why the file is templated here instead of copied: `src/routes/admin` is
-// filtered out of a scaffold that declined the panel (`isAdminPath` in cli/kit-manifest.mjs), so a
-// copied route tree would import five modules that are not there and `tsc` would stop on a
-// generated file nobody wrote.
-//
-// Reproduced by hand rather than by running TanStack, because the CLI has no bundler and a scaffold
-// must not need one before its first install. `assertRouteTreeMatchesKit` below is what keeps the
-// hand copy honest.
+// Templated, not copied: TanStack's route tree imports every route, and a scaffold without the
+// panel has no admin routes. Written by hand because the CLI has no bundler;
+// `assertRouteTreeMatchesKit` keeps it honest.
 
 /** Every admin-only line of `routeTree.gen.ts`, present or absent as one block per site. */
 function routeTreeGen(answers) {
-  // A chunk carries whatever whitespace has to disappear WITH it, which is not one fixed shape.
-  // Thirteen of the fourteen below continue a line that stays, so they open with a newline and
-  // end without one. The `AdminRouteChildren` block is the exception: it is a whole paragraph
-  // between two lines that both stay, so it opens AND closes with a newline, and writing it like
-  // the other thirteen would leave a stray blank line behind. Match the shape to where the chunk
-  // sits, not to the thirteen.
-  //
-  // The three union types in `FileRouteTypes` are not chunks in this sense, and they are the one
-  // place a bare `adm(…)` entry will not do. TanStack formats its output with prettier, which
-  // breaks a union onto one member per line as soon as the single-line form passes 80 columns.
-  // With the panel's routes in, `fullPaths` and `id` cross that width and `to` does not, so two
-  // of the three change SHAPE and not only length. So each union is written as a ternary between
-  // two spellings, and both helpers emit their own leading separator, a space or a newline,
-  // because that separator is the character the two shapes disagree about.
+  // Each chunk carries the whitespace that must go with it. Most continue a kept line, so they open
+  // with a newline; `AdminRouteChildren` is a whole paragraph and opens and closes with one.
+  // The `FileRouteTypes` unions change shape with the panel (prettier wraps past 80 columns), so
+  // each is a ternary between two spellings, and the helpers emit their own leading separator.
   const isAdmin = answers.backend === 'admin'
   const adm = (text) => (isAdmin ? text : '')
-  //
-  // Both filter, and neither call site needs it today: every entry below is a literal. It stays
-  // because the failure it prevents is silent and expensive. One `adm(…)` entry that evaluates
-  // to `''` would put ` |  | ` into a NON-admin scaffold, where the drift assertion never looks,
-  // since it only ever compares the admin output against the kit. The thing that would catch it
-  // is a snapshot diff someone has to sit down and read.
+  // Both drop empty entries. None are empty today, but one would put ` |  | ` into a non-admin
+  // scaffold, where the drift check never looks.
   const union = (...entries) => ` ${entries.filter(Boolean).join(' | ')}`
   const wrapped = (...entries) =>
     entries
@@ -1263,13 +1028,8 @@ declare module '@tanstack/react-start' {
 }
 
 /**
- * The kit's own routeTree.gen.ts is written by TanStack, and this function claims to reproduce
- * it. When the kit's copy is on disk — a working copy, which is exactly where someone would add
- * a route — the two must be identical.
- *
- * Without this, adding a route to the kit and forgetting this template ships every scaffold a
- * route tree missing that route, and the only symptom is a 404 on a page that exists in the
- * source.
+ * This function must reproduce the kit's TanStack-written routeTree.gen.ts exactly, when the kit's
+ * copy is on disk. Otherwise a new kit route would be missing from every scaffold.
  */
 function assertRouteTreeMatchesKit(kitRoot) {
   const rel = 'src/app/routeTree.gen.ts'
@@ -1291,12 +1051,8 @@ function assertRouteTreeMatchesKit(kitRoot) {
 const importOrder = (blocks) => [...blocks].sort()
 
 /**
- * Every block the scaffold will hold: the kit's, then the ones typed at the block question.
- *
- * The three files below have to name all of them — they are what makes a block exist, and
- * `verify-build.mjs` fails a folder in `src/blocks/` that no registry entry mentions. Only the
- * things that read the KIT for a block (its copy links, its nav declaration, its npm dependencies)
- * stay on `answers.blocks`, because a block the kit has never heard of has none of them.
+ * Every block the scaffold will hold: the kit's, then the ones typed at the block question. The
+ * three files below must name all of them, or verify-build fails the unregistered folder.
  */
 const allBlocks = (answers) => [...answers.blocks, ...(answers.custom ?? [])]
 
@@ -1332,35 +1088,12 @@ ${entries}
 }
 
 // --- block-to-block links ---------------------------------------------------------------------
-//
-// Blocks link to each other by target id from inside their own copy files. Hero's and cta's
-// `primaryCta` both point at `contact`, and cta's `secondaryCta` points at `features`. Those
-// fields are required and every variant renders them, so picking a block whose copy names a
-// block you did not pick ships a link to nothing.
-//
-// That failure is bad and tells you nothing about its cause. `createResolver`
-// (src/lib/pages/resolve-link.ts) throws while rendering on the server, so the page comes out as
-// an empty error boundary and `pnpm verify` reports `expected exactly 1 <h1>, found 0` on every
-// page without ever mentioning a link. Reproduced with `--blocks=hero,features,cta`, which is a
-// perfectly reasonable thing to ask for.
-//
-// Read from the copy files instead of hardcoding "hero and cta need contact", so a block that
-// gains or loses a link needs no edit here. This is the same check `createResolver` does at
-// render, moved to the last point where the answer can still change.
-//
-// `cli/index.mjs` calls this BEFORE the copy layer runs, not from inside `generateFiles`. That
-// order is the point: with the call inside `generateFiles`, the copy layer had already written
-// 60-odd files before this threw, and only the rollback cleaned up. The end state was fine
-// either way, but "refuses before anything is written" was not true, and that claim is what the
-// next person relies on.
+// Blocks link to each other from their copy (hero and cta point at `contact`, cta at `features`).
+// A link to a block you didn't pick throws during prerender, and verify only reports a missing
+// <h1>. So the links are read from the copy files and checked here, before anything is written.
 /**
- * Every `target: '…'` a block's copy files name, with the file each one came from.
- *
- * The only place the copy files are read for links, so `assertBlockLinksResolve` below and
- * `readBlockDeps` further down cannot disagree about what the copy says.
- *
- * Comments are stripped first, like in `navTargets`, so a commented-out `target: 'features'` in
- * an example does not count as a real link.
+ * Every `target: '…'` a block's copy files name, with the file it came from. The only place copy is
+ * read for links. Comments are stripped first.
  */
 function copyLinkTargets(kitRoot, id) {
   const found = []
@@ -1375,8 +1108,8 @@ function copyLinkTargets(kitRoot, id) {
 export function assertBlockLinksResolve(kitRoot, answers) {
   for (const id of answers.blocks) {
     for (const { target, rel } of copyLinkTargets(kitRoot, id)) {
-      // Only block ids: the page ids this layer writes are `home`, which no copy targets, and
-      // `contact`, which exists as a page only when the contact BLOCK was selected anyway.
+      // Only block ids: no copy targets the `home` page, and a `contact` page exists only with the
+      // contact block.
       if (answers.blocks.includes(target)) continue
       throw new Error(
         `Block '${id}' links to '${target}', which is not one of the selected blocks ` +
@@ -1392,43 +1125,23 @@ export function assertBlockLinksResolve(kitRoot, answers) {
 }
 
 // --- the manifests' declaration of those links, reconciled against them --------------------------
-//
-// `assertBlockLinksResolve` above refuses an unbuildable selection AFTER it has been made. That is
-// the right behaviour for the flag path and the wrong one for a prompt: a developer who unticks
-// `contact` should be told while the question is still open. So the prompt layer needs the same
-// fact up front, and gets it from each block's `requires.blocks` (src/lib/types.ts).
-//
-// That makes two descriptions of one fact — the manifest declaration and the copy files' actual
-// `target`s — and two descriptions drift. The drift is not cosmetic: an under-declared manifest
-// makes the prompt offer a combination `assertBlockLinksResolve` then refuses, which is precisely
-// the bug the declaration exists to remove, and an over-declared one makes the prompt refuse a
-// combination that would have built. Both are silent. So they are compared here, on every run,
-// before either is used, and a mismatch is fatal.
+// The prompt refuses bad selections using each block's declared `requires.blocks`. That must match
+// the copy's real links, or the prompt would offer or refuse the wrong sets. Checked every run.
 
 /** What a block's copy actually requires: its link targets, minus itself. Sorted, deduped. */
 function copyBlockDeps(kitRoot, id) {
   const deps = new Set()
   for (const { target } of copyLinkTargets(kitRoot, id)) {
-    // A block linking to itself is always satisfied whenever it is selected, so it is not a
-    // dependency — hero's `secondaryCta` targets `hero`. The manifests do not list it either.
+    // A block linking to itself (hero's `secondaryCta`) isn't a dependency.
     if (target !== id) deps.add(target)
   }
   return [...deps].sort()
 }
 
 /**
- * What a block's manifest DECLARES it requires: `requires: { …, blocks: [ … ] }`.
- *
- * Text-parsed with comments stripped, never imported — `block.ts` is TypeScript and this file is
- * plain `.mjs` under `pnpm dlx`, and the comment above every one of these arrays would otherwise
- * count as a declaration (each names the copy field, in quotes).
- *
- * An absent `requires`, or a `requires` without `blocks`, means no dependencies — which is the
- * truth for `features` and `contact` and is checked against the copy like every other block.
- *
- * `[^}]*` means the `requires` object must not contain a nested one: a `meta: { … }` alongside
- * `blocks` would end the match at the inner brace and hide the array behind it. That case is
- * detected and named rather than reported as an empty declaration — see below for why.
+ * What a block's manifest declares in `requires: { blocks: [ … ] }`. Parsed as text with comments
+ * stripped, since `block.ts` can't be imported from `.mjs`. No `requires` means no dependencies. A
+ * nested object inside `requires` isn't supported and is reported as unparseable.
  */
 function manifestBlockDeps(kitRoot, id) {
   const rel = `src/blocks/${id}/block.ts`
@@ -1436,11 +1149,7 @@ function manifestBlockDeps(kitRoot, id) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '')
 
-  // Returning `[]` for a manifest that plainly declares `blocks: [...]` would make the caller
-  // report "declares requires.blocks: []" against a file where it is right there, and advise
-  // setting it to a value it is already set to — an operator sent to a correct line to make a
-  // change already made. A throw that fires and names the wrong cause costs more than silence,
-  // because it is believed. So an unparseable `requires` is reported as unparseable.
+  // Unparseable, not `[]`: an empty result would send someone to fix a line that is already right.
   const unparseable = () => {
     if (!/\bblocks:\s*\[/.test(src)) return null
     return new Error(
@@ -1469,19 +1178,12 @@ function manifestBlockDeps(kitRoot, id) {
 }
 
 /**
- * `{ [blockId]: string[] }` for every block the kit ships — the prompt layer's copy of the
- * dependency graph. Throws if any manifest's declaration and its copy files disagree, naming both
- * sides so the fix is obvious from the message alone.
- *
- * Called from `cli/index.mjs` before `resolveAnswers`, so a kit whose manifests have drifted from
- * its copy cannot scaffold at all — not on the prompt path, not on the flag path, not with
- * `--yes`. A check that only ran on the path that consumes it would pass forever on CI, which only
- * ever runs `--yes`.
+ * `{ [blockId]: string[] }` for every kit block. Throws if a manifest and its copy disagree. Called
+ * from `cli/index.mjs` on every path, `--yes` included, because CI only runs `--yes`.
  */
 /**
- * `BLOCK_ORDER` is hand-written, but `src/blocks/` is the real list. A block added to the kit and
- * not to that array is simply never offered, and nothing else would say so: every gate below
- * iterates `BLOCK_ORDER`, so the new block is invisible to all of them.
+ * `BLOCK_ORDER` is hand-written; `src/blocks/` is the real list. A block missing from the array
+ * would never be offered.
  */
 function assertBlockOrderMatchesDisk(kitRoot) {
   const onDisk = readdirSync(kitPath(kitRoot, 'src/blocks'), { withFileTypes: true })
@@ -1526,23 +1228,15 @@ export function readBlockDeps(kitRoot) {
           'or change the copy.',
       )
     }
-    // The DECLARED array, not `actual`. The two are equal — the throw above guarantees it, and
-    // that is the only reason this is safe — but the prompt is specified to be driven by what the
-    // manifests declare, and returning the copy-derived set instead would make that specification
-    // true only by coincidence. The declaration drives; the throw above keeps it honest.
+    // The declared array drives the prompt. It equals `actual`; the throw above guarantees that.
     deps[id] = declared
   }
   return deps
 }
 
 /**
- * One property per block, wrapped exactly where Biome would wrap it.
- *
- * Biome breaks after the `=>` when the single-line form exceeds the 100-column line width, and
- * `features` is the one block id long enough to trip it (102 columns). Reproducing the rule rather
- * than the result keeps a fresh scaffold's `pnpm lint` green with no `biome check --write` first —
- * which matters because the first thing a developer is told to run is `pnpm verify`, and `lint` is
- * its first gate.
+ * One property per block, wrapped where Biome would wrap it (past 100 columns), so a fresh
+ * scaffold lints clean before Biome is installed.
  */
 function blockModuleEntry(id) {
   const body = `import('./${id}/variants').then((m) => registerVariants('${id}', m.variants)),`
@@ -1551,9 +1245,7 @@ function blockModuleEntry(id) {
 }
 
 function blockModulesTs(answers) {
-  // The measured figure names react-hook-form and zod, which only ship with `contact`. Quoting it
-  // in a scaffold without that block would explain the split with evidence from a block that is
-  // not there.
+  // The quoted measurement names react-hook-form and zod, which ship only with `contact`.
   const weight = answers.blocks.includes('contact')
     ? "since that's the weight (contact alone: 99 KB raw / 30 KB gzip of\n * react-hook-form + zod). Loading registers components into `variant-registry.ts` so\n * `RenderBlocks` can read them back synchronously."
     : "since that's where the weight is. Loading registers components\n * into `variant-registry.ts` so `RenderBlocks` can read them back synchronously."
@@ -1574,9 +1266,7 @@ ${entries}
 
 function variantsAllTs(answers) {
   const blocks = allBlocks(answers)
-  // Every relative import sorted together, `./registry` included. The block imports used to be
-  // emitted as a group above it, which is correct only while every block id sorts before the
-  // letter r: the kit's four do, so it held until the first block named `testimonials`.
+  // All relative imports sorted together, `./registry` included.
   const imports = [
     ['./registry', `import type { BlockId } from './registry'`],
     ['./variant-registry', `import { registerVariants } from './variant-registry'`],
@@ -1610,36 +1300,22 @@ for (const [id, variants] of Object.entries(all)) registerVariants(id as BlockId
 
 // --- src/config/pages.config.ts ---------------------------------------------------------------------
 
-/**
- * A block sitting on its own `defaultVariant` is emitted bare (`'hero'`), any other variant as an
- * object. `BlockRef` accepts both, and the bare form keeps a default scaffold's config free of
- * three lines that say nothing.
- */
-function blockRef(id, answers) {
-  const variant = answers.variants[id]
-  // A block typed in at the block question has one layout and no entry in BLOCK_DEFAULT_VARIANT,
-  // so without the fallback every one of them would be written in the three-line object form to
-  // name the only layout it has.
-  return variant === (BLOCK_DEFAULT_VARIANT[id] ?? CUSTOM_VARIANT)
-    ? `'${id}'`
-    : `{ id: '${id}', variant: '${variant}' }`
-}
-
-function blocksProperty(ids, answers) {
-  const refs = ids.map((id) => blockRef(id, answers))
+function blocksProperty(ids) {
+  // Always bare (`'hero'`): each block ships only its chosen layout, which is its `defaultVariant`.
+  const refs = ids.map((id) => `'${id}'`)
   const oneLine = `    blocks: [${refs.join(', ')}],`
   // Same reason as blockModuleEntry: match Biome's wrapping so a fresh scaffold lints clean.
   if (oneLine.length <= 100) return oneLine
   return ['    blocks: [', ...refs.map((ref) => `      ${ref},`), '    ],'].join('\n')
 }
 
-function pageLiteral(seoId, pageId, path, ids, answers) {
+function pageLiteral(seoId, pageId, path, ids) {
   const seo = PAGE_SEO[seoId]
   return [
     '  {',
     `    id: '${pageId}',`,
     `    path: '${path}',`,
-    blocksProperty(ids, answers),
+    blocksProperty(ids),
     '    seo: {',
     `      mn: { title: '${seo.mn.title}', description: '${seo.mn.description}' },`,
     `      en: { title: '${seo.en.title}', description: '${seo.en.description}' },`,
@@ -1649,10 +1325,8 @@ function pageLiteral(seoId, pageId, path, ids, answers) {
 }
 
 /**
- * The kit's own `pages.config.ts` ships in the tarball (`src` is in `files`) even though it is
- * never copied, so this can run everywhere — unlike the tsconfig and workspace checks above.
- * Reworded SEO copy in the kit that never reached the CLI would otherwise be invisible: a scaffold
- * would simply keep saying the old thing, correctly and forever.
+ * The kit's `pages.config.ts` ships in the tarball, so this check runs everywhere. It catches kit
+ * SEO copy that changed without the CLI.
  */
 function assertSeoCopyMatchesKit(kitRoot) {
   const kitText = readKitFile(kitRoot, 'src/config/pages.config.ts')
@@ -1673,23 +1347,19 @@ function assertSeoCopyMatchesKit(kitRoot) {
 
 function pagesConfigTs(answers) {
   const hasContact = answers.blocks.includes('contact')
-  // Blocks of your own go on the home page, after the kit's. Registering them without placing them
-  // would build and verify perfectly and show nothing — the developer types a name, runs `pnpm
-  // dev`, and finds the site unchanged.
+  // Your own blocks go on the home page, after the kit's. Otherwise they'd exist but not show.
   const home = answers.pages === 'multi' ? allBlocks(answers).filter((id) => id !== 'contact') : []
   const literals = []
 
-  // Multi-page splits contact onto its own route, matching the kit's own default — unless contact
-  // is the ONLY selected block, in which case the split would leave `/` with no blocks at all: a
-  // page with no <h1>, which `verify-build.mjs` fails. One page holding the one block is the same
-  // site, and it is the only shape these answers can take.
+  // Multi-page moves contact to its own route, unless contact is the only block: then `/` would be
+  // empty and fail verify.
   if (answers.pages === 'multi' && hasContact && home.length > 0) {
-    literals.push(pageLiteral('home', 'home', '/', home, answers))
-    literals.push(pageLiteral('contact', 'contact', '/contact', ['contact'], answers))
+    literals.push(pageLiteral('home', 'home', '/', home))
+    literals.push(pageLiteral('contact', 'contact', '/contact', ['contact']))
   } else if (answers.pages === 'multi' && !hasContact) {
-    literals.push(pageLiteral('home', 'home', '/', home, answers))
+    literals.push(pageLiteral('home', 'home', '/', home))
   } else {
-    literals.push(pageLiteral('home', 'home', '/', allBlocks(answers), answers))
+    literals.push(pageLiteral('home', 'home', '/', allBlocks(answers)))
   }
 
   return `import type { BlockId } from '@/blocks/registry'
@@ -1704,16 +1374,8 @@ ${literals.join('\n')}
 // --- src/config/site.config.ts ------------------------------------------------------------------------
 
 /**
- * Which selected blocks may appear in `nav`, read from each block's own manifest rather than from a
- * list here.
- *
- * `createResolver` (src/lib/pages/resolve-link.ts) throws at render for a nav target that is not a
- * page id and not a block on any page, and `Header`'s `labelFor` falls back to printing the raw
- * target for a block with no `nav` key — a nav entry reading "cta". Both failures are downstream of
- * this one decision, and a hardcoded list here would keep producing them after a manifest changed.
- *
- * Comments are stripped first for the same reason `verify-build.mjs` strips them before scanning
- * the registry: a `// no nav here` would otherwise register as a declaration.
+ * Which selected blocks may appear in `nav`, read from each block's manifest. A wrong nav target
+ * throws at render, and a block with no `nav` key shows its raw id. Comments are stripped first.
  */
 function navTargets(kitRoot, answers) {
   return answers.blocks.filter((id) => {
@@ -1760,8 +1422,8 @@ export const site: SiteConfig = {
 
 // --- .kit/scaffold.json ---------------------------------------------------------------------------
 
-// A record of what was generated, not of current state. A developer who hand-adds a block makes
-// this stale immediately, and that is fine — a future `add-block` must read it as history.
+// A record of what was generated, not current state. Hand-added blocks make it stale, and that's
+// fine.
 const scaffoldJson = (answers, kitVersion) =>
   json({ kitVersion, generatedAt: new Date().toISOString(), answers })
 
@@ -1779,16 +1441,9 @@ function normalizeEntry(raw) {
 }
 
 /**
- * The only write this CLI ever makes outside its target directory, so it is narrow, conditional,
- * and always announced by the caller.
- *
- * A `pnpm-workspace.yaml` with no `packages:` key is pnpm configuration (this kit's own is exactly
- * that: `allowBuilds` and `overrides`, no workspace at all), not a workspace definition, and is
- * left completely alone. "Repo root" is the parent of the target and nothing above it: a developer
- * scaffolding into a nested path did not ask for a file three levels up to be edited.
- *
- * Appends one list entry. Never rewrites the file, so existing formatting, ordering and comments
- * survive — which also means an inline `packages: [a, b]` is reported rather than rewritten.
+ * The only write outside the target directory. Only touches the target's parent
+ * `pnpm-workspace.yaml`, and only if it has a `packages:` key. Appends one entry and never
+ * rewrites the file, so an inline `packages: [a, b]` is reported instead.
  */
 export function registerInWorkspace(outDir) {
   const file = join(dirname(outDir), 'pnpm-workspace.yaml')
@@ -1810,8 +1465,7 @@ export function registerInWorkspace(outDir) {
     }
   }
 
-  // The block sequence under the key: blank lines and comments are passed over, anything that is
-  // not a `- ` item ends it (the next mapping key, at whatever indent).
+  // The list under the key: blank lines and comments are skipped; anything else ends it.
   const entries = []
   let indent = null
   let lastEntryAt = -1
@@ -1825,8 +1479,7 @@ export function registerInWorkspace(outDir) {
     entries.push(normalizeEntry(match[2]))
   }
 
-  // `*` is a real pnpm workspace pattern meaning every directory at the root, so it already covers
-  // the new folder; appending beside it would be a duplicate that changes nothing.
+  // `*` already covers the new folder, so appending would change nothing.
   if (entries.includes(name) || entries.includes('*')) {
     return { status: 'already', message: `✓ '${name}' is already listed in pnpm-workspace.yaml` }
   }
@@ -1844,13 +1497,8 @@ export function readKitVersion(kitRoot) {
 }
 
 /**
- * Writes every file a scaffold cannot inherit into `outDir`.
- *
- * Assumes the copy layer has already run: nothing here is written twice and nothing here overlaps
- * `cli/kit-manifest.mjs`. Every drift assertion runs before this layer's first write, so a kit
- * that has moved on fails with nothing of its own left behind — and `assertBlockLinksResolve`,
- * the one check that rejects the *answers* rather than the kit, runs earlier still, in
- * `cli/index.mjs` ahead of the copy layer, so a refused combination creates no directory at all.
+ * Writes every file a scaffold can't inherit into `outDir`, after the copy layer. Every drift check
+ * runs before the first write.
  *
  * @returns every path written, relative to `outDir`.
  */
@@ -1863,8 +1511,7 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   assertRouteTreeMatchesKit(kitRoot)
   assertViteConfigMatchesKit(kitRoot)
 
-  // `?? 'none'` for the same reason as `cli/copy.mjs`: belt-and-braces for a caller that builds
-  // an `answers` object by hand rather than through `resolveAnswers`.
+  // `?? 'none'` covers callers that build `answers` by hand.
   const hasBackend = (answers.backend ?? 'none') !== 'none'
   const dockerCompose = hasBackend ? dockerComposeYml() : null
   if (hasBackend) assertDockerComposeMatchesKit(kitRoot, dockerCompose)
@@ -1885,13 +1532,10 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
     ['.kit/scaffold.json', scaffoldJson(answers, kitVersion)],
   ]
 
-  // Only when a backend was asked for, and generated at the project root, not under `api/`:
-  // `docker-compose.yml` runs Postgres for the whole project, not just the Go service.
+  // At the project root, not under `api/`: it runs Postgres for the whole project.
   if (hasBackend) files.push(['docker-compose.yml', dockerCompose])
 
-  // Blocks of your own, from the same templates `add-block` uses — so a block created at scaffold
-  // time and one added a month later are the same four files. The registry entries for them are
-  // already in the three files above; these are the folders those entries point at.
+  // Your own blocks, from the same templates `add-block` uses.
   for (const id of answers.custom ?? []) {
     for (const [name, body] of Object.entries(blockFiles(id, [CUSTOM_VARIANT]))) {
       files.push([`src/blocks/${id}/${name}`, body])
@@ -1901,11 +1545,8 @@ export function generateFiles(kitRoot, outDir, answers, kitVersion) {
   const written = []
   for (const [rel, text] of files) writeOut(outDir, rel, text, written)
 
-  // Last, and the only check here that runs AFTER a write rather than before one. It has to: the
-  // question is what the finished project imports, and neither layer alone knows that — the copy
-  // layer put `src/` there and this one wrote the `package.json` being reconciled against. A
-  // failure still leaves nothing behind, because `cli/index.mjs` wraps this whole call in the
-  // same rollback the copy layer uses.
+  // Last, and after the writes: only the finished project shows what it imports. A failure still
+  // rolls back, because `cli/index.mjs` wraps this call.
   assertShippedImportsAreDeclared(outDir, packageJsonText)
   return written
 }

@@ -8,15 +8,14 @@ import { useT } from '@/admin/i18n/use-t'
 import { login } from '@/admin/lib/api'
 import { ApiError } from '@/admin/lib/errors'
 import { Button } from '@/admin/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/admin/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/admin/ui/card'
 import { Input } from '@/admin/ui/input'
 import { Label } from '@/admin/ui/label'
+import { site } from '@/config/site.config'
 
 const schema = z.object({
   email: z.email(),
-  // Length is deliberately not checked here. A minimum on the SIGN-IN form tells an attacker the
-  // password policy without them needing an account, and rejects nothing the server would accept.
-  // seed-admin is where the 12-character floor belongs, and it is enforced there.
+  // No length rule on sign-in. It would reveal the password policy. seed-admin enforces it.
   password: z.string().min(1),
 })
 
@@ -42,38 +41,29 @@ function LoginPage() {
       await login(values.email, values.password)
       await navigate({ to: '/admin' })
     } catch (err) {
-      // `messageFor` renders this panel's own string for every error code it knows, because the
-      // server's `message` is Mongolian prose and the panel may be in English. An UNMAPPED code
-      // falls back to that Mongolian text on purpose — a real description of what went wrong
-      // beats a generic one, and an unmapped code is a bug to go and map — and an unmapped code
-      // that arrived with an empty `message` falls through again, to `t.errUnknown`.
       setFormError(err instanceof ApiError ? err.messageFor(t) : t.errUnknown)
     }
   }
 
-  // Rendered from the field rather than from the resolver's message. Each field has exactly one
-  // rule, so presence is all there is to say, and the string comes from the dictionary like every
-  // other label — zod's own messages are English-only and would appear untranslated in a panel
-  // set to Mongolian.
-  //
-  // Without these the form fails silently: `noValidate` suppresses the browser's bubble,
-  // `handleSubmit` simply never calls `onSubmit`, and a bad email looks like a dead button.
+  // Field errors come from the dictionary, not zod, whose messages are English-only.
+  // With `noValidate`, a form without them fails silently.
   const { errors, isSubmitting } = form.formState
 
   return (
-    <main className="bg-background flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>{t.signIn}</CardTitle>
-          <LanguageToggle />
+    <main className="bg-muted relative flex min-h-screen flex-col items-center justify-center p-6">
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
+      <p className="font-display mb-6 text-lg font-bold">{site.name}</p>
+      <Card className="w-full max-w-sm gap-5">
+        <CardHeader>
+          <CardTitle className="font-display text-xl font-bold">{t.signIn}</CardTitle>
+          <CardDescription>{t.signInHint}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4" noValidate>
             <div className="grid gap-2">
               <Label htmlFor="email">{t.email}</Label>
-              {/* `aria-invalid` earns its keep twice: the screen reader announces the field as
-                  invalid, and `input.tsx` already styles `aria-invalid:border-destructive`, so
-                  the red border costs no class of its own here. */}
               <Input
                 id="email"
                 type="email"
@@ -108,15 +98,12 @@ function LoginPage() {
             </div>
 
             {formError !== null ? (
-              // aria-live, because the message replaces itself in place after a submit a screen
-              // reader has no other reason to revisit. The field errors above need none: they
-              // appear beside a field the reader is about to be sent to, not in place.
               <p role="alert" aria-live="polite" className="text-destructive text-sm">
                 {formError}
               </p>
             ) : null}
 
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="mt-1">
               {isSubmitting ? t.signingIn : t.signIn}
             </Button>
           </form>

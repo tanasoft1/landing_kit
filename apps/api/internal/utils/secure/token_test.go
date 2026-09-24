@@ -14,8 +14,7 @@ import (
 
 const testSecret = "test-secret-at-least-32-bytes-long"
 
-// testFamilyDeadline is far enough out that GenerateRefreshToken's absolute-lifetime clamp never
-// bites, so the assertions below keep measuring the refresh TTL itself rather than the clamp.
+// testFamilyDeadline is far enough out that the family clamp never applies.
 func testFamilyDeadline() time.Time {
 	return time.Now().Add(365 * 24 * time.Hour)
 }
@@ -72,16 +71,11 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	if claims.TokenType != secure.TokenTypeRefresh {
 		t.Errorf("TokenType = %q, want %q", claims.TokenType, secure.TokenTypeRefresh)
 	}
-	// The jti is what ties the token to its ledger row. A token that comes back without the id it
-	// was signed with cannot be looked up, spent, or revoked.
 	if claims.ID != jti.String() {
 		t.Errorf("ID = %q, want %q", claims.ID, jti.String())
 	}
 }
 
-// An access token presented where a refresh token is required, and vice versa, must both be
-// rejected. A token type checked only at issue time is not checked at all: accepting an access
-// token as a refresh token (or the reverse) would silently swap in the wrong session lifetime.
 func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 	t.Parallel()
 
@@ -124,9 +118,7 @@ func TestValidateRejectsWrongSecret(t *testing.T) {
 func TestValidateRejectsExpiredToken(t *testing.T) {
 	t.Parallel()
 
-	// Built directly with jwt, not through GenerateAccessToken: the service's expiry is
-	// configured in whole minutes, too coarse to produce an already-expired token in a fast test.
-	// Same secret and shape parseToken expects, so this exercises exactly the expiry check.
+	// Built directly with jwt: the service's expiry is in whole minutes, too coarse for this test.
 	claims := &secure.Claims{
 		AdminID:   uuid.New(),
 		TokenType: secure.TokenTypeAccess,
@@ -146,11 +138,7 @@ func TestValidateRejectsExpiredToken(t *testing.T) {
 	}
 }
 
-// jwt.Parse's keyfunc runs before signature verification, so a keyfunc that returns the secret
-// unconditionally accepts anything the library can parse. RS256 proves the method assertion
-// actually runs: it is a different concrete Go type from *jwt.SigningMethodHMAC, unlike HS384 or
-// HS512, which would pass a same-Go-type check while still being the "wrong" algorithm this
-// service issues.
+// RS256, not HS384 or HS512: those share the *jwt.SigningMethodHMAC type and would pass the check.
 func TestValidateRejectsWrongAlgorithm(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,4 @@
-// Package authhandler serves the admin login, refresh and logout endpoints. Named authhandler,
-// not auth, so that a caller importing both this package and internal/service/auth never needs
-// an import alias to tell them apart -- same convention as internal/http/handlers/lead's
-// leadhandler.
+// Package authhandler serves the admin login, refresh and logout endpoints.
 package authhandler
 
 import (
@@ -24,9 +21,7 @@ func New(svc *auth.Service, cookieSecure bool) *Handler {
 	return &Handler{svc: svc, cookieSecure: cookieSecure}
 }
 
-// Login validates the request body and, on success, returns a fresh access/refresh token pair.
-// Never logs req.Password: only the outcome and, on failure other than bad credentials, the
-// underlying error.
+// Login validates the request body and, on success, returns a fresh token pair.
 func (h *Handler) Login(c *fiber.Ctx) error {
 	var req models.RqLogin
 	if err := c.BodyParser(&req); err != nil {
@@ -44,15 +39,11 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 	result, err := h.svc.Login(c.Context(), &req, c.IP(), c.Get("User-Agent"))
 	if err != nil {
 		if auth.IsAccountLocked(err) {
-			// The same error code loginLimiter's 429 uses, so the panel needs one case, not two.
-			// The caller is only being told about failures they generated themselves.
+			// Same body as loginLimiter's 429, so the panel handles one case.
 			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
 				Error: "rate limited", Message: "Хэт олон удаа оролдлоо. Дараа дахин оролдоно уу.",
 			})
 		}
-		// Unknown email and wrong password reach here as the SAME error (see
-		// auth.errInvalidCredentials), so this branch cannot leak account existence even if it
-		// wanted to: it has no way left to tell the two cases apart.
 		if auth.IsInvalidCredentials(err) {
 			return c.Status(fiber.StatusUnauthorized).JSON(models.ErrorResponse{
 				Error: "invalid credentials", Message: "Имэйл эсвэл нууц үг буруу байна",
@@ -71,11 +62,7 @@ func (h *Handler) Login(c *fiber.Ctx) error {
 	}})
 }
 
-// Refresh reads the refresh cookie, rotates it, and returns a fresh access token. Never logs the
-// cookie's value.
-//
-// The token presented is dead either way: it was spent, or it was already spent and presenting it
-// again killed every token issued from the same login.
+// Refresh reads the refresh cookie, rotates it, and returns a fresh access token.
 func (h *Handler) Refresh(c *fiber.Ctx) error {
 	token := c.Cookies(RefreshCookieName)
 	if token == "" {
@@ -87,8 +74,6 @@ func (h *Handler) Refresh(c *fiber.Ctx) error {
 	result, err := h.svc.Refresh(c.Context(), token, c.IP(), c.Get("User-Agent"))
 	if err != nil {
 		if auth.IsInvalidToken(err) {
-			// Clear it. The token is dead, and leaving it in the browser means every future
-			// request carries a credential that can only ever produce this same 401.
 			clearRefreshCookie(c, h.cookieSecure)
 			return c.Status(fiber.StatusUnauthorized).JSON(models.ErrorResponse{
 				Error: "invalid token", Message: "Токен хүчингүй байна",
@@ -107,11 +92,7 @@ func (h *Handler) Refresh(c *fiber.Ctx) error {
 	}})
 }
 
-// Logout revokes the presented token's family and clears the cookie.
-//
-// Always 200, even with no cookie or a garbage one. A logout endpoint that distinguished "that
-// was a valid session" from "that was nothing" would answer a question the caller has not
-// authenticated to ask, and there is no action a client could take differently on the answer.
+// Logout revokes the presented token's family and clears the cookie. Always 200, so it reveals nothing.
 func (h *Handler) Logout(c *fiber.Ctx) error {
 	if token := c.Cookies(RefreshCookieName); token != "" {
 		h.svc.Logout(c.Context(), token, c.IP(), c.Get("User-Agent"))

@@ -87,9 +87,6 @@ func TestAdminLeadsReturnsSeededLeadWithValidToken(t *testing.T) {
 	}
 }
 
-// A refresh token must not be accepted where an access token is required. Without this check, a
-// refresh token -- which lives far longer, see conf.JWTConfig -- would silently extend the
-// session window to its own, much longer, lifetime.
 func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 	t.Parallel()
 
@@ -106,10 +103,7 @@ func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 		Status(http.StatusUnauthorized)
 }
 
-// The property under test: no matter how large a limit a caller asks for, at most MaxListLimit
-// (200) rows come back. 205 leads are seeded specifically so the 200th and 205th cannot both be
-// in the response -- if the clamp regressed to, say, "cap at 1000", this still passes; only
-// clamping to exactly 200 or fewer does.
+// At most MaxListLimit rows come back, whatever limit is asked for.
 func TestAdminLeadsClampsAnOversizedLimit(t *testing.T) {
 	t.Parallel()
 
@@ -141,7 +135,6 @@ func TestAdminLeadsClampsAnOversizedLimit(t *testing.T) {
 	if len(leads) != 200 {
 		t.Fatalf("got %d leads for limit=10000, want 200 (the clamp)", len(leads))
 	}
-	// total counts the whole table, not the page: 205 seeded, 200 returned.
 	if page["total"] != float64(205) {
 		t.Errorf("total = %v, want 205", page["total"])
 	}

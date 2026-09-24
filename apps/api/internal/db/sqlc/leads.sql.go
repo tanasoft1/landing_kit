@@ -77,10 +77,7 @@ type ListLeadsParams struct {
 	Offset int32 `json:"offset"`
 }
 
-// The id tiebreaker is not decoration. ORDER BY created_at alone is not a total order, and two
-// rows can share a created_at under concurrent inserts, at which point LIMIT/OFFSET paging can
-// show the same lead on two pages or skip one entirely. Postgres is free to return tied rows in
-// any order between queries.
+// The id tiebreaker keeps paging stable when two rows share a created_at.
 func (q *Queries) ListLeads(ctx context.Context, arg ListLeadsParams) ([]Lead, error) {
 	rows, err := q.db.Query(ctx, listLeads, arg.Limit, arg.Offset)
 	if err != nil {

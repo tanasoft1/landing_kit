@@ -1,16 +1,7 @@
 #!/usr/bin/env node
 /**
- * Maintainer-only commands for the kit itself: the multi-config smoke builds and the Lighthouse
- * budget runs.
- *
- * These lived in `package.json` `scripts`, which ships inside the published tarball — so every
- * consumer's `node_modules` carried four commands that reference `configs/` and `lighthouserc*`,
- * neither of which is in `files`. Nothing ran them and nothing could: they were four broken
- * references presented as part of the package's interface.
- *
- * `tools/` is deliberately absent from `package.json`'s `files`, so this file does not ship.
- * That is the whole mechanism — there is no publish-time rewriting of `package.json`, which
- * would edit the working tree during `npm publish`, exactly what the README warns against
+ * Maintainer-only commands: the multi-config smoke builds and the Lighthouse budget runs.
+ * `tools/` is not in `package.json` `files`, so none of this ships to users.
  *
  * Usage:  node tools/kit.mjs <command>
  */
@@ -18,10 +9,13 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Every command below drives the web app, which is no longer the repo root. `pnpm --filter`
-// would work for the pnpm steps but not for the bare `node` and `rm` ones, so the whole step
-// list runs with this as its cwd instead.
+// Every command runs from the web app, because the bare `node` and `rm` steps can't use
+// `pnpm --filter`.
 const WEB = join(dirname(dirname(fileURLToPath(import.meta.url))), 'apps/web')
+
+// Fetched per run, not installed: `@lhci/cli` pulls in old tmp, uuid, qs, js-yaml and extract-zip
+// (no fixed extract-zip exists), which kept `pnpm audit` red.
+const LHCI = ['dlx', '@lhci/cli@0.15.1', 'autorun']
 
 const COMMANDS = {
   'smoke:full': {
@@ -46,7 +40,7 @@ const COMMANDS = {
     steps: [
       ['rm', ['-rf', '.lighthouseci']],
       ['pnpm', ['build']],
-      ['pnpm', ['exec', 'lhci', 'autorun']],
+      ['pnpm', LHCI],
     ],
   },
   'lighthouse:desktop': {
@@ -55,7 +49,7 @@ const COMMANDS = {
     steps: [
       ['rm', ['-rf', '.lighthouseci']],
       ['pnpm', ['build']],
-      ['pnpm', ['exec', 'lhci', 'autorun', '--config=lighthouserc.desktop.json']],
+      ['pnpm', [...LHCI, '--config=lighthouserc.desktop.json']],
     ],
   },
 }
@@ -81,7 +75,6 @@ for (const [bin, args] of cmd.steps) {
     stdio: 'inherit',
     env: { ...process.env, ...cmd.env },
   })
-  // Stop at the first failure: the verify step after a failed build would report on stale output
-  // from the previous run, which reads as a pass.
+  // Stop at the first failure, or verify would grade the previous build's output.
   if (r.status !== 0) process.exit(r.status ?? 1)
 }

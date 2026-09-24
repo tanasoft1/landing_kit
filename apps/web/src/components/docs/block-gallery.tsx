@@ -5,16 +5,10 @@ import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 import { site } from '@/config/site.config'
 
-// A stub on purpose: nothing on this page should navigate. The real `resolve()` throws for any
-// target that is not on the current page, and every preview here is out of context by design.
+// Stub on purpose. The real resolve() throws for targets not on the current page.
 const resolve = (t: string) => `#${t}`
 
-/**
- * Do not wrap a preview in another `<Section>` or `<Container>`. Every block already renders
- * its own, and wrapping again doubles the padding and gutters, showing the block at a size no
- * real page produces. The label strip above each preview gets its own `<Container>`, so it
- * lines up with the block's content edge without changing the block itself.
- */
+// Do not wrap a preview in another <Section> or <Container>. Blocks render their own.
 export function BlockGallery() {
   const ids = Object.keys(registry) as BlockId[]
   return (
@@ -22,20 +16,12 @@ export function BlockGallery() {
       {ids.map((id) => {
         const manifest = registry[id]
         const variantNames = manifest.variantNames as readonly string[]
-        // Read through the registry instead of importing each block's `variants.ts`. That is
-        // what makes a new block or variant show up here with no edit to this file.
         const variants = getVariants(id)
         return (
           <div key={id}>
             <Section density="compact">
               <Container>
-                {/*
-                  `h2`, not `h3`: every preview below renders at `headingLevel={2}`, so an `h3`
-                  label would sit subordinate to the content it labels. Styling stays `text-h3` —
-                  this is a semantic level, not a size. Literal `<h2>` is fine here:
-                  check-conventions.mjs bans it only in `src/blocks`, where headingLevel is
-                  assigned.
-                */}
+                {/* h2, not h3: previews render at headingLevel 2. */}
                 <h2 className="text-h3 font-semibold">
                   {id}{' '}
                   <span className="text-muted-foreground text-sm font-normal">
@@ -64,9 +50,7 @@ export function BlockGallery() {
                       headingLevel={2}
                     />
                   ) : (
-                    // Unreachable while every block's `variants.ts` keeps its
-                    // `satisfies Record<…Variant, …>`. A backstop if that is ever dropped, and
-                    // loud on purpose — same rule as variant-registry.ts.
+                    // Backstop in case a variants.ts drops its `satisfies` check.
                     <Section density="compact" surface="accent">
                       <Container>
                         <p className="text-sm font-semibold">

@@ -4,10 +4,8 @@ import type { MotionModule } from '@/integrations/motion.types'
 
 type Props = { children: ReactNode; className?: string; delay?: number }
 
-// The server has no `matchMedia`, so it always renders the animated branch. If the client read
-// the real OS preference during hydration the HTML would mismatch, and React does not patch
-// that kind of mismatch — the element would freeze at `initial` forever. So flip only after
-// mount, and only when `reduce` is true, which means the common case never re-renders.
+// The server always renders the animated branch. Reading the OS setting during hydration would
+// mismatch and freeze the element at `initial`, so switch only after mount.
 function useReducedMotionAfterMount() {
   const reduce = useReducedMotion()
   const [committed, setCommitted] = useState(false)
@@ -17,15 +15,8 @@ function useReducedMotionAfterMount() {
   return committed
 }
 
-/**
- * On-load entrance for above-the-fold content, including the LCP element.
- *
- * Animates TRANSFORM ONLY, never opacity. `initial={{ opacity: 0 }}` puts `style="opacity:0"`
- * into the static HTML, so a visitor with no JS sees a blank hero. A transform stays fully
- * opaque and cannot shift the layout, so the offset is free.
- *
- * Want a real opacity fade above the fold? That is an LCP trade-off — measure LCP first.
- */
+// Transform only, never opacity. An opacity of 0 gets written into the static HTML, so visitors
+// without JS would see a blank hero.
 export function FadeIn({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
@@ -41,12 +32,7 @@ export function FadeIn({ children, className, delay = 0 }: Props) {
   )
 }
 
-/**
- * Scroll-triggered entrance. Same TRANSFORM-only rule as `FadeIn`, and being below the fold is
- * not an exception: off-screen is not the same as absent, and a crawler that never scrolls
- * would still read content the page marked invisible. `verify-build.mjs` scans the built HTML
- * for `opacity:0` and fails on any match.
- */
+// Same transform-only rule. verify-build fails on any `opacity:0` in the built HTML.
 export function Reveal({ children, className, delay = 0 }: Props) {
   const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
@@ -63,8 +49,7 @@ export function Reveal({ children, className, delay = 0 }: Props) {
   )
 }
 
-// Same no-opacity rule as `FadeIn` and `Reveal`. Giving `hidden`/`shown` an `opacity` value
-// here, or in a caller's child variants, brings back the hidden-content problem.
+// No opacity in `hidden`/`shown` here or in child variants.
 export function Stagger({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotionAfterMount()
   if (reduce) return <div className={className}>{children}</div>
@@ -81,8 +66,6 @@ export function Stagger({ children, className }: { children: ReactNode; classNam
   )
 }
 
-// Type-checks this file against the shared `@/motion` surface, so the two variants cannot drift
-// apart. `tsconfig` points `@/motion` at this file only, which is why motion.noop.tsx needs the
-// same line: without it, `KIT_ANIMATION=off` is the one setup nothing type-checks.
+// Checks every export against the shared type. Callers only check what they import.
 const _contract: MotionModule = { FadeIn, Reveal, Stagger }
 void _contract

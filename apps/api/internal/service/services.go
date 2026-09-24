@@ -1,5 +1,4 @@
-// Package service wires the domain services this API exposes from their shared dependencies:
-// the pgx pool, the notifier and config.
+// Package service wires the domain services from the pool, the notifier and config.
 package service
 
 import (
@@ -14,16 +13,14 @@ import (
 	"landing-api/internal/utils/secure"
 )
 
-// Services holds every domain service plus the shared handles they were built from, so main
-// registers one struct instead of threading each dependency through its own call site.
+// Services holds every domain service plus the shared handles they were built from.
 type Services struct {
 	Lead    *lead.Service
 	Auth    *auth.Service
 	Audit   *audit.Service
 	Queries *sqlc.Queries
 	Pool    *pgxpool.Pool
-	// TokenService is exposed separately from Auth because AuthMiddleware needs it too, on
-	// every route behind it, not only on the login and refresh handlers Auth itself serves.
+	// TokenService is exposed for AuthMiddleware.
 	TokenService *secure.TokenService
 }
 

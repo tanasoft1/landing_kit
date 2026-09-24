@@ -19,9 +19,7 @@ type ClearLoginAttemptsParams struct {
 	Ip    string `json:"ip"`
 }
 
-// Clears the pair that just succeeded, not every row for the email. Clearing them all would let
-// one successful sign-in wipe the backoff another source had accumulated, which hands an attacker
-// a free reset every time the real admin signs in.
+// Clears only this pair, so the admin's sign-in does not reset an attacker's backoff.
 func (q *Queries) ClearLoginAttempts(ctx context.Context, arg ClearLoginAttemptsParams) error {
 	_, err := q.db.Exec(ctx, clearLoginAttempts, arg.Email, arg.Ip)
 	return err
@@ -39,9 +37,7 @@ type ExtendLoginLockParams struct {
 	Ip          string     `json:"ip"`
 }
 
-// Only ever extends. Concurrent failures compute different windows from different counts, and the
-// longest one is the one that should stand: taking the last writer instead would let a request
-// that incremented to 5 shorten a lock a request that incremented to 20 had already set.
+// Only ever extends, so a concurrent request with a lower count cannot shorten a longer lock.
 func (q *Queries) ExtendLoginLock(ctx context.Context, arg ExtendLoginLockParams) error {
 	_, err := q.db.Exec(ctx, extendLoginLock, arg.LockedUntil, arg.Email, arg.Ip)
 	return err
@@ -75,20 +71,8 @@ WHERE last_failure_at < $1
   AND (locked_until IS NULL OR locked_until < now())
 `
 
-// Prunes on staleness, not on the lock. The previous version required locked_until IS NOT NULL,
-// and a row only gets that at five failures, so an attacker who stopped at four per address left
-// one permanent row per address tried -- exactly the "spray across a million addresses" the prune
-// was written to bound, and exactly the rows it did not touch.
-//
-// The locked_until half stays as a guard, not as the selector: a row still inside its lock window
-// is evidence of something current no matter how old its last failure looks.
-//
-// Rows now multiply by distinct source addresses per email rather than being one per email, so
-// this deletes more than it was written to. It still bounds the table, because the bound was never
-// the number of rows: every row needs a failed login to create it and a fresh failure every day to
-// survive, and the per-client rate limit caps how many of those one source can send. A sprayer
-// across many addresses and many sources writes more rows and still has to keep every one of them
-// warm.
+// Prunes by age, so rows that never reached a lock are removed too. A row still inside its lock
+// window is kept.
 func (q *Queries) PruneLoginAttempts(ctx context.Context, staleBefore time.Time) error {
 	_, err := q.db.Exec(ctx, pruneLoginAttempts, staleBefore)
 	return err
@@ -112,23 +96,8 @@ type RecordLoginFailureParams struct {
 	DecayBefore time.Time `json:"decay_before"`
 }
 
-// One statement so two concurrent failures cannot both read 2 and both write 3. The returned row
-// carries the post-increment value, which is the number the caller feeds to the backoff curve, and
-// the lock itself is written by ExtendLoginLock afterwards. The curve stays in Go because it is
-// policy, not storage.
-//
-// Keyed on the pair, not on the email. A lock that spanned every source address was a denial of
-// service against any admin whose address is known: it refused the real admin's correct password
-// along with the guesses, and one stranger sending a failure each time the lock lapsed held it on
-// indefinitely. Per source, a stranger locks out only themselves.
-//
-// The count decays on top of that. A failure older than decay_before resets it to one instead of
-// adding to it, so a source that served a full-length lock starts again from the bottom of the
-// curve rather than staying pinned at its cap. That is what lets an admin who fumbled their
-// password nine times from their own machine recover without waiting for the prune.
-//
-// decay_before is a timestamp computed in Go rather than an interval literal here, for the same
-// reason the curve is in Go: the window is policy. Storage only compares.
+// One statement, so two concurrent failures cannot both read 2 and write 3. The caller feeds the
+// returned count to the backoff curve. A failure older than decay_before resets the count to one.
 func (q *Queries) RecordLoginFailure(ctx context.Context, arg RecordLoginFailureParams) (LoginAttempt, error) {
 	row := q.db.QueryRow(ctx, recordLoginFailure, arg.Email, arg.Ip, arg.DecayBefore)
 	var i LoginAttempt

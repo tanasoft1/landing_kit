@@ -34,10 +34,7 @@ resolve.
 
 Paths in `cli/kit-manifest.mjs` are relative to **two** places at once: `apps/web/` in this repo,
 and the ROOT of a generated project. `WEB_ROOT` in that file is what reconciles them, and
-`kitPath()` is the only way kit files should be read. `ROOT_SOURCED` lists anything that should be
-read from the kit root instead of `WEB_ROOT`; it is empty today, kept as the seam for the next kit
-file that genuinely belongs at the root and still needs to land in a generated project's root too.
-A generated project is flat and stays flat.
+`kitPath()` is the only way kit files should be read. A generated project is flat and stays flat.
 
 `apps/api/` gets the same two-constant treatment, in the same file: `API_ROOT` (`apps/api`, where
 the service lives in this repo) and `API_DEST` (`api`, where it lands in a scaffold), reconciled by
@@ -50,12 +47,8 @@ need no branch for "does this project have `apps/api`?" A generated project with
 
 There are two READMEs and they are not copies. `apps/web/README.md` documents a generated site and
 is the file the scaffolder copies into one. The root `README.md` documents this repository and is
-what npm and GitHub display. The template's README used to be `ROOT_SOURCED` itself, kept at the
-kit root so npm's package page would show it there, and that split it from the tree it describes:
-`apps/web/scripts/check-conventions.mjs` cross-checks the README against the source tree and
-resolves every path, README included, against its own working directory, so it could no longer see
-the README sitting one level above. The template's README lives with the template now, and the kit
-root has its own, written for this repository rather than for a generated one.
+what npm and GitHub display. The template's README must stay inside `apps/web/`:
+`check-conventions.mjs` checks it against the source tree from its own working directory.
 
 `apps/web/package.json`'s version is deliberately `0.0.0` while the root's is the real published
 version. `kitManifest` reads the version from the root `package.json` and the dependency ranges
@@ -135,6 +128,10 @@ all four prerendered pages of the default build.
 node tools/kit.mjs lighthouse
 node tools/kit.mjs lighthouse:desktop
 ```
+
+Both fetch `@lhci/cli` with `pnpm dlx` instead of installing it. Its dependency tree carries old
+copies of tmp, uuid, qs, js-yaml and extract-zip, which kept `pnpm audit` red for a tool only
+these two commands use. The version is pinned in `tools/kit.mjs`.
 
 ## Publishing
 

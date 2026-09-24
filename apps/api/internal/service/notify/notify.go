@@ -1,14 +1,10 @@
-// Package notify delivers one notification per lead through a driver chosen at startup: SES for
-// real delivery, or a logger for development and any environment where the site owner should not
-// be emailed. See conf.NotifyConfig for how the driver is selected and why "log" is refused in
-// production.
+// Package notify delivers one notification per lead, through SES or a logger.
 package notify
 
 import "context"
 
-// LeadMessage is what the owner is told about. Deliberately not the database row: a notifier has
-// no business with an id, an IP or a timestamp, and passing the row would let a future field leak
-// into an email nobody meant to send.
+// LeadMessage is what the owner is told. It is not the database row, so a new column cannot leak
+// into an email.
 type LeadMessage struct {
 	Name       string
 	Email      string
@@ -17,11 +13,7 @@ type LeadMessage struct {
 	SourcePage string
 }
 
-// Notifier delivers one lead notification.
-//
-// An error here must never fail the request that produced it. The lead is already committed by
-// the time this runs, and losing it to a mail outage is strictly worse than a missing email.
-// internal/service/lead is where that rule is enforced; this interface only reports.
+// Notifier delivers one lead notification. Callers must not fail the request on its error.
 type Notifier interface {
 	Lead(ctx context.Context, l LeadMessage) error
 }

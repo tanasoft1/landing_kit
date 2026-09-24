@@ -7,11 +7,7 @@ const SURFACE_CLASS: Record<Surface, string> = {
   accent: 'bg-accent text-foreground',
 }
 
-// One optional knob, not a layout system. `py-section` is tuned for marketing pages: up to
-// 9.5rem top and bottom, about 300px between sections. That spacing is most of the look, so do
-// not change it. `compact` is for reference pages like `/docs`, which people scan instead of
-// reading down, where that much space slows them down. Both values come from the preset's
-// `--section-y` (see theme.css), so a reskin still moves them together.
+// `compact` is for reference pages like /docs. Both follow the preset's --section-y.
 const DENSITY_CLASS = {
   default: 'py-section',
   compact: 'py-section-tight',
@@ -26,7 +22,6 @@ export function Section({
 }: {
   id?: string
   surface?: Surface
-  /** `'default'` is the pre-existing spacing, unchanged, so no existing page moves. */
   density?: keyof typeof DENSITY_CLASS
   className?: string
   children: ReactNode

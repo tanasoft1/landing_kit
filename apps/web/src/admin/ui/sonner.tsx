@@ -8,20 +8,8 @@ import {
 import * as React from 'react'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
 
-/**
- * The current theme, read from the kit's own mechanism.
- *
- * shadcn ships this component reading `useTheme()` from next-themes. This kit has no provider to
- * read: the class on <html> IS the state. In a project with both themes
- * `@/components/theme-script` sets it before first paint and `@/components/theme-toggle` flips it;
- * in a light-only or dark-only project both of those render null and the class comes from
- * `src/routes/__root.tsx` instead. Reading the class rather than the mechanism is what makes this
- * hook correct in all three.
- *
- * `useState` then `useEffect`, the same shape the toggle uses, because there is no class during
- * prerender and reading one in render would hydrate to the wrong value. The observer is what keeps
- * an open toast in step when someone flips the toggle underneath it.
- */
+// Replaces shadcn's next-themes hook: the class on <html> is the theme state here.
+// Read in an effect, not in render, so hydration matches the prerendered HTML.
 function useKitTheme(): 'light' | 'dark' {
   const [theme, setTheme] = React.useState<'light' | 'dark'>('light')
 
@@ -51,13 +39,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
         error: <OctagonXIcon className="size-4" />,
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
-      // shadcn's own names for these (`--popover`, `--border`) are variables its stylesheet defines
-      // and this kit's presets do not. An inline `--normal-bg: var(--popover)` with `--popover`
-      // undefined is guaranteed-invalid, which behaves as `unset` on a custom property, so
-      // `background: var(--normal-bg)` on the toast would have been invalid at computed-value time
-      // and painted transparent -- not fallen back to sonner's own palette, which it declares on
-      // this same element and which the inline style overrides. Pointed at the preset tokens
-      // instead, the same ones `@theme inline` aliases `--color-popover` and friends onto.
+      // Preset tokens, not shadcn's `--popover` etc. Those are undefined here, so toasts would be
+      // transparent.
       style={
         {
           '--normal-bg': 'var(--c-background)',

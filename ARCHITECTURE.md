@@ -171,7 +171,7 @@ flowchart LR
     direction TB
     W["pnpm install then pnpm build"] --> D1["apps/web/dist/client"]
   end
-  subgraph S2["stage 2: golang:1.25-alpine"]
+  subgraph S2["stage 2: golang:1.27-alpine"]
     direction TB
     CP["COPY dist/client into internal/static/dist"] --> EMB["go:embed all:dist"]
     EMB --> BIN["CGO_ENABLED=0 go build, static binary"]

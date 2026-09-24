@@ -77,8 +77,6 @@ export function buildJsonLd(
 
   for (const ref of page.blocks) {
     const id = typeof ref === 'string' ? ref : ref.id
-    // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export, so no
-    // per-call-site widening is needed here.
     const manifest = registry[id]
     if (!manifest.schema) continue
     graph.push(...manifest.schema({ copy: manifest.copy[locale], site, page }))

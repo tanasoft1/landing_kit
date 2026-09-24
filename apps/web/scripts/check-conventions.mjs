@@ -1,26 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
 
-// --- layout conventions, checked against the AST -----------------------------------------------
-//
-// These rules are about who may WRITE spacing/width/positioning — the answer is `<Section>` and
-// `<Container>` and nothing else — so they apply to every directory that renders markup, not just
-// `src/blocks`.
-//
-// They are matched against **what they are actually about**: the contents of `className`/`class`
-// attributes, and the identity of JSX elements. Not against raw file text.
-//
-// That difference is the whole design. Matching raw lines let prose join in: `section.tsx`
-// explains `py-section`, `container.tsx` explains `px-gutter`. Blanking comments first only
-// moved the problem, because a character scanner cannot tell JSX text from code — a bare `//`
-// in JSX text blanked the rest of a real line and hid a `min-h-screen` violation, and an
-// apostrophe in `<p>don't</p>` opened a string that never closed, so correct code started
-// failing. Both were reproduced before this rewrite.
-//
-// TypeScript's own parser removes that whole class of bug instead of defending against it:
-// comments are trivia and never visited, JSX text is a `JsxText` node and never inspected, and
-// an apostrophe in it is just a character. `typescript` is already a devDependency, and this
-// script runs only in dev and CI, never in the shipped site.
+// --- layout conventions ---------------------------------------------------------------------------
+// Checked on the TypeScript AST, not raw text, so comments and JSX text can't cause false results.
 import ts from 'typescript'
 
 // Matched against a resolved class string, never against a line of source.
@@ -30,27 +12,14 @@ const CLASS_RULES = [
   { re: /\bmax-w-/, msg: 'max-width utility — use <Container width="narrow">' },
   { re: /\bcontainer\b/, msg: 'container utility — use <Container>' },
   { re: /\bmin-h-screen\b/, msg: 'min-h-screen — nothing here may assume viewport height' },
-  // Catches ANY Tailwind arbitrary-value bracket escape (`text-[length:...]`, `rounded-[...]`,
-  // `-left-[9999px]`, etc.), not just a couple of specific utilities — an earlier version matched
-  // only `text-[length:` and `rounded-[`, so `-left-[9999px]` (used to hide the contact form's
-  // honeypot) sailed straight through review. Use a scale/preset value (e.g. `-left-96`).
+  // Any arbitrary bracket value. Use a scale or preset utility instead.
   { re: /-\[/, msg: 'arbitrary Tailwind value (bracket syntax) — use a scale/preset utility' },
 ]
 
 const RAW_SECTION_MSG = 'raw <section> element — use <Section>'
 const INLINE_STYLE_MSG = 'inline style — use a Tailwind utility from the token layer'
-// Blocks-only, and unlike the rules above this one genuinely does NOT generalise.
-//
-// Heading level is never a block's own decision. It depends on whether the block is first on
-// the page, and only the renderer knows that (`headingLevel` on `BlockProps`, set by
-// `RenderBlocks`). A block with a heading writes `const H = headingLevel === 1 ? 'h1' : 'h2'`
-// and renders `<H>`. A literal `<h1>` or `<h2>` anywhere in `src/blocks` is always wrong.
-//
-// A route is the opposite. It is a fixed page, it knows what it is, and it owns its own heading
-// outline. `src/routes/docs.tsx` correctly writes a literal `<h1>` and three literal `<h2>`s,
-// because no renderer above it assigns levels — `/docs` is not built from blocks. Applying this
-// rule outside `src/blocks` would flag correct code, and a gate that does that stops being
-// trusted.
+// Blocks only. A block can't know if it opens the page, so the renderer picks its heading level.
+// Routes are fixed pages and may write literal headings.
 const HEADING_MSG =
   "literal <h1>/<h2> — use `const H = headingLevel === 1 ? 'h1' : 'h2'` and render <H>"
 
@@ -69,12 +38,8 @@ function parseTsx(file) {
 const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1
 
 /**
- * `const NAME = <initializer>` declarations anywhere in the file, so `className={NAME}` and
- * `className={`${MAP[key]}`}` can be resolved to the class strings they actually produce.
- *
- * Flat and scope-blind, as the previous text-based version was: two `const field = …` in different
- * scopes of one file collide, last one winning. The four blocks that copy this pattern should
- * avoid reusing an identifier name across scopes in one file.
+ * `const NAME = …` declarations, so `className={NAME}` can be resolved to real class strings.
+ * Scope-blind: two consts with the same name in one file collide.
  */
 function collectConsts(sf) {
   const consts = new Map()
@@ -89,13 +54,8 @@ function collectConsts(sf) {
 }
 
 /**
- * Every class string an expression can contribute, each tagged with how it was reached so a
- * failure can name the indirection.
- *
- * Returns `null` for an expression this cannot resolve — a prop, a destructured value, a call into
- * another module. That is reported as a failure rather than skipped: a convention checker that
- * stays quiet about what it cannot verify is worse than one with a narrower reach. `className=
- * {field}` bypassed every rule until that was fixed, and nothing said so.
+ * Every class string an expression can produce. Returns `null` when it can't resolve one, and
+ * that is reported as a failure, not skipped.
  */
 function classStrings(node, sf, consts, seen = new Set()) {
   if (!node) return []
@@ -112,9 +72,7 @@ function classStrings(node, sf, consts, seen = new Set()) {
     }
     return out
   }
-  // `undefined` / `null` / `false` / `true` contribute no classes and are not "unresolvable" —
-  // `className={cond ? 'md:order-2' : undefined}` is the idiomatic way to write "no class here",
-  // and reporting it as unverifiable would be a false failure.
+  // `undefined`, `null` and booleans add no classes. `cond ? 'x' : undefined` is normal code.
   if (
     node.kind === ts.SyntaxKind.NullKeyword ||
     node.kind === ts.SyntaxKind.FalseKeyword ||
@@ -143,9 +101,7 @@ function classStrings(node, sf, consts, seen = new Set()) {
     }
     return out
   }
-  // `cn(...)` / `clsx(...)` / `classNames(...)` / `twMerge(...)` and friends: every argument is a
-  // candidate class string. Handled generically rather than by helper name, so a project-local
-  // wrapper is covered without being enumerated here.
+  // `cn(...)`, `clsx(...)` and similar: every argument may be a class string.
   if (ts.isCallExpression(node)) {
     const out = []
     for (const arg of node.arguments) {
@@ -153,11 +109,8 @@ function classStrings(node, sf, consts, seen = new Set()) {
       if (inner === null) return null
       out.push(...inner)
     }
-    // `['a', 'py-section'].join(' ')` and `arr.join(' ')` keep the class strings in the RECEIVER,
-    // not the arguments — scanning arguments alone let that form through. An unresolvable receiver
-    // is deliberately NOT fatal here: for a plain `cn(x, 'y')` the callee is a bare function
-    // identifier that resolves to nothing, and treating that as unverifiable would report every
-    // ordinary helper call as a failure.
+    // `[...].join(' ')` keeps the classes in the receiver. An unresolvable receiver is fine: for
+    // `cn(x)` the callee is only a function name.
     if (ts.isPropertyAccessExpression(node.expression)) {
       const receiver = classStrings(node.expression.expression, sf, consts, seen)
       if (receiver !== null) out.push(...receiver)
@@ -251,11 +204,8 @@ function walk(dir, opts, isExempt = () => false) {
   }
 }
 
-// The two files that DEFINE the layout primitives are the only legitimate authors of the
-// utilities the rules ban — `section.tsx` is where `py-section` and the one raw `<section>`
-// element belong, `container.tsx` is where `px-gutter`/`max-w-*` belong. Exempting them by exact
-// path, not by a `src/components/layout/` prefix: a third file added to that directory would be a
-// new primitive nobody reviewed, and it should have to argue for its exemption explicitly.
+// The two files that define the layout primitives. Listed by exact path, so a new file in that
+// folder doesn't get the exemption for free.
 const LAYOUT_PRIMITIVES = new Set([
   'src/components/layout/section.tsx',
   'src/components/layout/container.tsx',
@@ -263,34 +213,9 @@ const LAYOUT_PRIMITIVES = new Set([
 const isLayoutPrimitive = (p) => LAYOUT_PRIMITIVES.has(p.split(sep).join('/'))
 
 // --- did this project ask for the panel? -------------------------------------------------------
-//
-// `.kit/scaffold.json` is the CLI's own record of the answers, written at scaffold time
-// (cli/generate.mjs) and explicitly un-ignored by the generated `.gitignore`, so it is present,
-// committed and stable in every project this kit generates. `answers.backend === 'admin'` is the
-// question, asked directly.
-//
-// This used to be `existsSync('src/admin')` alone, which asked a client's repo "did this team
-// ever create a directory called `src/admin`" and answered a question about the kit's panel with
-// it. `src/admin` is an ordinary name for a team building an admin area of their own product, and
-// both directions of that mistake were reproduced in a real `--backend=none` scaffold: creating
-// the directory failed verify-build over a panel they never asked for, and adding
-// `src/routes/admin/` beside it silently switched off the `<Link>` ban and three layout rules.
-//
-// Three cases, decided deliberately:
-//
-//  1. The record is there and readable — it decides, full stop.
-//  2. The record is there and unreadable, or has no `answers.backend` — FAIL. This file decides
-//     which rules run; a build gate that cannot read its own input and guesses is the failure
-//     mode this whole check exists to remove. The message names the file and the fix.
-//  3. The record is absent — fall back to the directory test. This covers exactly two
-//     populations, and no project this kit generates today is in either: the kit's own
-//     `apps/web`, which has no scaffold record and must still check the panel it contains, and a
-//     project scaffolded before the record existed. Deleting the record by hand puts a project
-//     back in this case, and back to the old behaviour, which is the honest consequence of
-//     removing the only evidence of what was asked for.
-//
-// `&&` with the directory test, not instead of it: a project that answered `admin` and then
-// deleted the panel by hand should have the panel rules switched off, because there is no panel.
+// `.kit/scaffold.json` records the scaffold answers. If it is missing (the kit itself, or an old
+// project), fall back to whether `src/admin` exists. If it is there but unreadable, fail: this
+// decides which rules run, so it must not guess.
 function scaffoldSaysPanel() {
   const RECORD = '.kit/scaffold.json'
   if (!existsSync(RECORD)) return true
@@ -315,32 +240,12 @@ function scaffoldSaysPanel() {
   return backend === 'admin'
 }
 
-// Whether this project HAS an admin panel, which is the only thing that earns the exemptions
-// below.
-//
-// Without this test the exemptions travel to projects that declined the panel and switch off ten
-// real rules for any route a client happens to file under `src/routes/admin/` — a pricing page
-// for their admin product, say. Ten because the exemption skips `checkFile` wholesale, which is
-// nine rules for a route (see the note on the `src/routes` walk below), and skips the `<Link>`
-// ban on top. The `<Link>` ban is the one that prevents an actual runtime break.
-//
-// The gate cuts both ways, and the second direction is deliberate: with no panel, the
-// `dangerouslySetInnerHTML` rule at the bottom of this file stops running on `src/routes/admin/`
-// too. That is right. Its message is written about leads and an access token, which is nonsense
-// in a project that has neither, and this kit has never banned that API outside the panel —
-// `components/theme-script.tsx` uses it. Without a panel, `src/routes/admin/` is just another
-// route directory, checked exactly like `index.tsx` and `docs.tsx`.
-//
-// The same logic is in `scripts/verify-build.mjs`, deliberately duplicated: both ship verbatim
-// into a flat generated project (COPY_FILES), and a third shared file would be a new entry in
-// cli/kit-manifest.mjs for fifteen lines. Change one, change the other.
+// The panel exemptions below apply only when the project really has the panel. Otherwise a
+// team's own `src/routes/admin/` would silently skip the rules. verify-build.mjs has the same
+// logic. Change one, change the other.
 const HAS_PANEL = scaffoldSaysPanel() && existsSync('src/admin')
 
-// The panel's routes. `src/routes/admin.tsx` is the layout route and `src/routes/admin/`
-// everything under it; `src/admin/` itself is outside every `walk` in this file already.
-//
-// Used by three rules below, all exempting the panel for reasons of their own, so it is defined
-// once here rather than three times.
+// The panel's routes: `src/routes/admin.tsx` and everything under `src/routes/admin/`.
 const isAdminRoute = (p) => {
   if (!HAS_PANEL) return false
   const rel = p.split(sep).join('/')
@@ -348,39 +253,14 @@ const isAdminRoute = (p) => {
 }
 
 walk('src/blocks', { headings: true })
-// The panel is exempt from EVERY rule `checkFile` applies, and it is the only part of
-// `src/routes` that is. `walk` skips the file wholesale rather than skipping a rule, so be clear
-// about what that costs — nine rules stop running here, and only six of them are the ones this
-// exemption is really about:
-//
-//   Given up on purpose, six. `py-section`, `px-gutter`, `max-w-*`, the `container` utility,
-//   `min-h-screen` and the raw `<section>` ban all say the same thing: <Section> and <Container>
-//   own spacing, width and viewport height. That is a claim about the marketing site — one
-//   column, one rhythm down the page, every block sharing it. The panel imports neither primitive
-//   and never will, being a shadcn app with its own card, sheet and table spacing, so those rules
-//   would ban `min-h-screen` on a full-page login and `max-w-sm` on a card with nothing to offer
-//   instead.
-//
-//   Given up as collateral, three. The arbitrary-bracket-value rule, the inline-`style` ban and
-//   the unresolvable-`className` check have nothing to do with layout primitives and would be
-//   right here. A leads table writing `style={{ width: sidebarWidth }}` goes unreported while
-//   identical code in `docs.tsx` fails. The fix is to make `checkFile` take a per-rule exemption
-//   instead of a per-file one; until someone needs it, this is the trade.
-//
-// The literal-<h1>/<h2> rule is NOT in either list. `headings` is false for `src/routes`, so it
-// never ran here in the first place and the exemption costs nothing against it.
-//
-// `src/admin/` is unwalked for the same reason, so without this the same panel code would pass or
-// fail depending on which of the two directories it sat in.
+// The panel's routes skip every layout rule. It is a shadcn app with its own spacing, so the
+// <Section>/<Container> rules don't fit. The bracket, inline-style and className checks are
+// skipped there too, which is an accepted trade.
 walk('src/routes', { headings: false }, isAdminRoute)
 walk('src/components', { headings: false }, isLayoutPrimitive)
 
 // --- src/lib stays .tsx-free --------------------------------------------------------------------
-// Nothing above walks `src/lib/`, so a `.tsx` added there would be invisible to the layout
-// rules, the heading rule and the `<Link>` ban — and nothing would throw. It would just quietly
-// go unchecked. Adding `walk('src/lib', …)` is NOT the fix: `src/lib/` holds only `.ts` files
-// today, so that call would pass no matter what, which tells you nothing. Check the rule itself
-// instead: no `.tsx` belongs in `src/lib/`.
+// Nothing walks src/lib, so a .tsx there would skip every rule above.
 function findTsxFiles(dir) {
   const found = []
   for (const entry of readdirSync(dir)) {
@@ -396,23 +276,9 @@ for (const p of findTsxFiles('src/lib')) {
 }
 
 // --- no client-side <Link> anywhere ------------------------------------------------------------
-// Block modules are loaded ONCE, for the first URL, before hydration — see the comment above
-// the `await` in `src/app/client.tsx`. A `<Link>` from `@tanstack/react-router` navigates on the
-// client, which can land on a page whose blocks were never fetched: the block renders with a
-// module that was never registered and `getVariants` throws, with nothing warning you at build
-// time. So every link here is a plain `<a href>`. That is cheap, because every page is
-// prerendered static HTML.
-//
-// `src/routes` is scanned too, and it is the MOST important directory for this rule. The trap
-// does not care where the `<Link>` sits: one in `src/routes/__root.tsx` — the natural place for
-// a global nav or a skip link — breaks in exactly the same way. Routes are where a global nav
-// would actually be written, so exempting them would exempt the likeliest place to get this
-// wrong. `src/app/router.tsx` still sets `defaultPreload: 'intent'`, which only matters for
-// `<Link>`, making the mistake easier to reach for.
-//
-// Read from the AST, for the same reason as the layout rules: the regex this replaced matched a
-// COMMENTED-OUT import and failed correct code. An `ImportDeclaration` node only exists for a
-// real import.
+// Block modules load once, for the first URL, before hydration (src/app/client.tsx). A client-side
+// <Link> can land on a page whose blocks never loaded, so use a plain <a href>. Routes are checked
+// too: a global nav in __root.tsx is the likeliest place for this mistake.
 function walkFiles(dir, visit) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
@@ -429,8 +295,7 @@ function checkNoRouterLink(file) {
     if (stmt.moduleSpecifier.text !== '@tanstack/react-router') continue
     const bindings = stmt.importClause?.namedBindings
     if (!bindings || !ts.isNamedImports(bindings)) continue
-    // The imported name as it exists in this module: `Link` or `Link as X` both count, since both
-    // put the component in scope.
+    // `Link` and `Link as X` both count.
     const importsLink = bindings.elements.some((el) => (el.propertyName ?? el.name).text === 'Link')
     if (!importsLink) continue
     const line = lineOf(sf, stmt)
@@ -445,29 +310,14 @@ function checkNoRouterLink(file) {
 
 walkFiles('src/blocks', checkNoRouterLink)
 walkFiles('src/components', checkNoRouterLink)
-// src/routes/admin is exempt, and only that. The rule exists because block modules load once,
-// before hydration, for the first URL only (src/app/client.tsx), so a client-side transition can
-// land on a page whose blocks were never registered. The panel renders no blocks at all, so the
-// trap cannot reach it — and a panel navigating with <a href> would do a full page load on every
-// click, which is the wrong behaviour for the one part of this app that is a real SPA.
+// The admin panel is exempt: it renders no blocks, and it is a real SPA.
 walkFiles('src/routes', (file) => {
   if (!isAdminRoute(file)) checkNoRouterLink(file)
 })
 
 // --- /docs and /admin must keep their `noindex` -----------------------------------------------
-// Checked in the source, because it CANNOT be checked from `dist/`: neither route is prerendered
-// from `pages.config.ts`, so `scripts/verify-build.mjs` has no file to read.
-//
-// This meta tag is the ONLY thing keeping either route out of the search index on an SSR deploy.
-// On a static deploy the route 404s and the sitemap never mentions it, but an SSR deploy serves
-// both at real URLs, and robots.txt deliberately does NOT `Disallow` either — a `Disallow` would
-// stop the crawler fetching the page, so it would never read this tag. See the header comments in
-// src/routes/docs.tsx and src/routes/admin.tsx. Delete the tag and the route becomes indexable
-// with nothing to stop it.
-//
-// Read from the AST, not with a regex. The regex this replaced passed GREEN when the meta was
-// commented out, because a regex cannot tell code from a comment — a silent false pass in the
-// one thing protecting `/docs`. In the AST, a commented-out object literal does not exist.
+// Checked in the source because neither route is prerendered. robots.txt doesn't Disallow them on
+// purpose, so crawlers can read this tag. Without it the route becomes indexable.
 const NOINDEX_ROUTES = ['src/routes/docs.tsx', 'src/routes/admin.tsx']
 
 /** `{ name: 'robots', content: '… noindex …' }` as a real object literal anywhere in the module. */
@@ -502,9 +352,8 @@ function hasNoindexRobotsMeta(sf) {
 }
 
 for (const route of NOINDEX_ROUTES) {
-  // Absence is fine: a scaffolded project may delete /docs (README: "Removing the /docs page"),
-  // and a project without the admin panel has no admin.tsx. Presence is not negotiable — if the
-  // route is here it must carry the noindex meta.
+  // A project may delete /docs, and one without the panel has no admin.tsx. If the file exists,
+  // it needs the tag.
   if (existsSync(route) && !hasNoindexRobotsMeta(parseTsx(route))) {
     failures.push(
       `${route}  no \`{ name: 'robots', content: 'noindex, …' }\` meta in the route head — ` +
@@ -516,13 +365,7 @@ for (const route of NOINDEX_ROUTES) {
 }
 
 // --- the panel never sets raw HTML -------------------------------------------------------------
-// Leads carry attacker-controlled text: name, email, message and user agent all arrive from a
-// public form. React escapes every one of them by default, so this rule is not about today's
-// code. It is about the next person reaching for a rich-text preview or a "render the message
-// with line breaks" shortcut, inside the one page that holds a valid access token.
-//
-// components/theme-script.tsx uses the same API on the public side and is untouched: it is a
-// fixed literal with no interpolation, and it has to run before first paint.
+// Lead fields come from a public form, and the panel holds an access token.
 function checkNoDangerousHtml(file) {
   const sf = parseTsx(file)
   const visit = (node) => {
@@ -548,25 +391,12 @@ walkFiles('src/routes', (file) => {
 })
 
 // --- every preset must define the complete token surface --------------------------------------
-// The kit's main claim is that a whole design swaps by changing one `@import` in `theme.css`,
-// and the README tells anyone writing a third preset to use "the same variable set".
-//
-// Getting this wrong fails silently. `@theme inline` maps `--color-ring: var(--c-ring)`, so a
-// preset with no `--c-ring` leaves that unresolved. The declaration becomes invalid when the
-// value is computed, and the focus outline just does not render. No CSS is malformed, so the
-// build stays green. Both presets that ship today are complete, so this check has not caught a
-// real break yet — it exists so the next preset cannot introduce one quietly.
+// A preset missing a token (say --c-ring) fails silently: the utility renders nothing and the
+// build stays green.
 const THEME_CSS = 'src/styles/theme.css'
 const PRESETS_DIR = 'src/styles/presets'
 
-/**
- * Strip CSS comments, preserving newlines so nothing downstream shifts.
- *
- * Same reason the TSX rules moved to the AST: a commented-out declaration inside `:root` — say a
- * `--c-legacy-accent` kept for reference — was read as a real one and reported as dead weight,
- * failing correct code. CSS is trivially safe to do textually where TSX was not: there are no line
- * comments and no quoting rules that interact with `/* … *\/`.
- */
+/** Strip CSS comments, keeping newlines so line numbers don't shift. */
 const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
 
 /** Balanced-brace extraction, so a nested `calc(…)` or a rule inside the block cannot truncate it. */
@@ -623,9 +453,7 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
           )
         }
       }
-      // Reverse direction: a token no one maps is dead weight. Exempted if the preset itself
-      // references it — an author may legitimately build a palette on an internal helper
-      // (`--brand-hue`, say) that the theme layer has no business knowing about.
+      // Reverse direction: a token nothing maps is dead weight, unless the preset uses it itself.
       for (const token of [...declared].sort()) {
         if (required.has(token)) continue
         const referencedInPreset = new RegExp(`var\\(\\s*${token}\\b`).test(css)
@@ -641,15 +469,7 @@ if (!existsSync(THEME_CSS) || !existsSync(PRESETS_DIR)) {
 }
 
 // --- /docs' RECIPES list must name real README headings ---------------------------------------
-// The RECIPES array in `src/components/docs/config-reference.tsx` names README `##` sections
-// word for word, as plain text rather than links, because README.md ships in neither `public/`
-// nor `dist/client/` and a link would 404. Plain text is the right call, but it has a cost:
-// renaming a README heading tells you nothing about `/docs` still pointing at the old name. A
-// reader who follows a stale pointer finds nothing and stops trusting the docs.
-//
-// One-directional on purpose. Every RECIPES entry must be a README heading, but not every README
-// heading has to be a recipe — `## Quick start`, `## Scripts` and `## Contents` are reference,
-// not tasks. Checking both directions would force every future README section into /docs.
+// One direction only: every recipe must be a heading, but not every heading is a recipe.
 const CONFIG_REFERENCE = 'src/components/docs/config-reference.tsx'
 const README = 'README.md'
 
@@ -672,24 +492,14 @@ function findRecipesArray(sf) {
   ts.forEachChild(sf, visit)
   return found
 }
-// Absence is fine: a scaffolded project may delete /docs entirely (README: "Removing the /docs
-// page"), and config-reference.tsx goes with it — there is no RECIPES list left to check.
-// Presence is not negotiable — if the file is here, README.md must be too, and every entry must
-// still name a real heading.
+// A project may delete /docs. If config-reference.tsx is here, every entry must name a heading.
 if (existsSync(CONFIG_REFERENCE)) {
   if (!existsSync(README)) {
     failures.push(`${CONFIG_REFERENCE} / ${README}  missing — the RECIPES↔README check needs both`)
   } else {
-    // Read off the AST, not with a regex over the source text. The regex collected every quoted
-    // string between `const RECIPES = [` and `] as const`, which includes one written inside a
-    // comment — `// e.g. 'Adding a widget' would go here` produced a confusing failure about a
-    // recipe nobody had declared. Same category as the prose problem the layout rules had: a false
-    // failure in the only machine gate. Array elements are array elements; comments are trivia.
     const recipesArray = findRecipesArray(parseTsx(CONFIG_REFERENCE))
     if (!recipesArray) {
-      // Not "no recipes, nothing to check": the array is the thing being verified, so failing to
-      // find it must fail loudly rather than vacuously pass. A `const RECIPES` reshaped into
-      // something this lookup misses is exactly when the coupling stops being watched.
+      // Fail loudly: a missing array means the check silently stopped running.
       failures.push(
         `${CONFIG_REFERENCE}  could not locate \`const RECIPES = [...] as const\` — this check ` +
           `verifies every entry names a real README '## ' heading and cannot run without it`,
@@ -721,36 +531,9 @@ if (existsSync(CONFIG_REFERENCE)) {
 }
 
 // --- README Contents list must mirror the '## ' headings, in both directions -------------------
-// The Contents block near the top of README.md is written by hand, not generated, so nothing
-// kept it honest. This file already parses README headings for the RECIPES check above, so the
-// same parsing is reused here.
-//
-// Checked in both directions, unlike RECIPES. RECIPES may legitimately name only some headings,
-// but a table of contents that misses a real section, or links to one that no longer exists, is
-// wrong either way. This is also what catches the CLI: when it trims a kit-only README section
-// from a generated project, the leftover Contents entry fails here instead of shipping a dead
-// anchor.
-//
-// Slugs are DERIVED with GitHub's own anchor rule, never listed by hand, so a heading like
-// "`/docs`: the living developer reference" — whose backticks, slash and colon all disappear in
-// the real anchor — needs no special case.
-//
-// This mirrors github-slugger (the library GitHub's own renderer uses): lowercase, DELETE
-// punctuation and symbols, then replace each remaining space with one hyphen. Three details are
-// load-bearing and were each got wrong by an earlier, tighter `[^a-z0-9 -]` allowlist:
-//
-//   - Letters outside ASCII survive. This kit is bilingual, so "## Монгол хэл" is a heading a
-//     developer here will really write; GitHub anchors it #монгол-хэл, and an ASCII-only allowlist
-//     slugged it to the empty string and failed a correct README.
-//   - Underscores survive (GitHub strips connector punctuation's neighbours, not `_` itself), so
-//     "## site_config and env" anchors #site_config-and-env, not #siteconfig-and-env.
-//   - Each space is replaced INDIVIDUALLY, never collapsed as a run. "## Blocks & variants" loses
-//     the "&" but keeps both spaces around it, so the real anchor is #blocks--variants — two
-//     hyphens. The same goes for any " — " or " / " between words.
-//
-// Written as a deny-list over Unicode property escapes (keep letters, digits, combining marks,
-// `_`, `-` and space; delete the rest) so it stays dependency-free — this script has to run inside
-// a generated project, where adding an npm package is not an option.
+// Slugs follow GitHub's anchor rule (github-slugger): lowercase, delete punctuation, and turn each
+// space into one hyphen. Non-ASCII letters and underscores survive, and spaces are not collapsed,
+// so "## Blocks & variants" becomes #blocks--variants.
 const githubSlug = (text) =>
   text
     .toLowerCase()
@@ -760,8 +543,7 @@ const githubSlug = (text) =>
 if (existsSync(README)) {
   const readmeLines = readFileSync(README, 'utf8').split('\n')
   const isH2 = (l) => l.startsWith('## ')
-  // The '## Contents' heading itself is the list, not an entry within it — a table of contents
-  // does not link to itself — so it is excluded from both directions of the comparison below.
+  // '## Contents' is the list itself, so it isn't tracked.
   const trackedHeadings = readmeLines
     .filter(isH2)
     .map((l) => l.slice(3).trim())
@@ -793,8 +575,7 @@ if (existsSync(README)) {
       }
     }
 
-    // Direction 2: every entry must resolve to a real heading. Named by entry, not by slug alone,
-    // so the failure reads as something a person wrote rather than a hash to decode.
+    // Direction 2: every entry must resolve to a real heading.
     const headingSlugs = new Set(trackedHeadings.map(githubSlug))
     for (const entry of entries) {
       if (!headingSlugs.has(entry.slug)) {

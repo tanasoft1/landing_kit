@@ -8,9 +8,7 @@ type RqLogin struct {
 	Password string `json:"password" validate:"required"`
 }
 
-// RsAuth is what login and refresh return. The refresh token is deliberately absent: it leaves as
-// an HttpOnly cookie (see internal/http/handlers/auth/cookie.go) so no script can read it, and
-// putting it here as well would hand back the very thing that design withholds.
+// RsAuth is what login and refresh return. The refresh token travels only as an HttpOnly cookie.
 type RsAuth struct {
 	AccessToken string         `json:"access_token"`
 	Admin       RsAdminProfile `json:"admin"`

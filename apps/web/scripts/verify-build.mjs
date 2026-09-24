@@ -2,15 +2,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 // --- build freshness, before anything else ------------------------------------
-// Every check here reads the CONTENT of `dist/`, and a failed build does not empty `dist/` — it
-// leaves the last good output in place. So "build failed, verify passed" is a real combination:
-// a corrupted `vite.config.ts` once broke the build while this script still printed `✓ 4 pages`
-// about files nobody had just produced. Two checks below (block-chunk preloads, and the `/docs`
-// prerender exclusion) only look at `dist/` and never compare it against source, so a stale
-// `dist/` passes them by construction.
-//
-// `emit-plugin.ts` deletes the stamp when a build starts and writes it again only when that
-// build finishes. So a missing stamp means one thing, and nothing below it would be meaningful.
+// A failed build leaves the last good output in dist/. The build writes this stamp only when it
+// finishes, so without it every check below would grade stale files.
 const STAMP_PATH = '.kit/build-stamp.json'
 if (!existsSync(STAMP_PATH)) {
   console.error(
@@ -32,9 +25,8 @@ const fail = (where, msg) => failures.push(`${where}: ${msg}`)
 const blocksDir = 'src/blocks'
 const registrySrc = readFileSync(join(blocksDir, 'registry.ts'), 'utf8')
 
-// Strip comments before searching, then search only inside the exported object literal.
-// A bare `\bhero\b` over the whole file is satisfied by `// TODO: register hero`, which
-// is exactly the half-done state this check exists to catch.
+// Strip comments first, then search only the registry object, so `// TODO: register hero`
+// doesn't count as registered.
 const registryCode = registrySrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
 const registryObject = extractObjectLiteral(registryCode, 'export const registry')
 if (!registryObject) fail('registry', 'could not locate the exported registry object literal')
@@ -47,11 +39,8 @@ for (const entry of readdirSync(blocksDir)) {
 }
 
 // --- the scaffold placeholder must be replaced -------------------------------
-// A wrong domain does not show on the page, but it poisons every canonical URL, hreflang tag
-// and sitemap entry: the site looks fine and ranks as a duplicate of a domain nobody owns.
-// One exact sentinel, not a "looks like a placeholder" guess. The kit's own site.config.ts uses
-// https://example.mn on purpose, and any heuristic wide enough to catch the sentinel would
-// catch that too. `.example` is reserved by IANA, so the sentinel can never become a real site.
+// A wrong domain breaks every canonical URL, hreflang tag and sitemap entry. The check matches
+// one exact sentinel; `.example` is reserved, so it can never be a real site.
 const URL_PLACEHOLDER = 'https://your-domain.example'
 if (site === URL_PLACEHOLDER) {
   fail(
@@ -62,54 +51,11 @@ if (site === URL_PLACEHOLDER) {
 }
 
 // --- route / config parity ----------------------------------------------------
-// Pages are defined ONLY in pages.config.ts, and prerendering works off that list
-// (autoStaticPathsDiscovery is off). So a stray route file is a page that gets served but is
-// never prerendered, never in the sitemap, and never checked by anything below.
-// `routeTree.gen.ts` is not listed here: it is generated into `src/app/`, not this directory,
-// so naming it would read as if it were expected here.
-//
-// `admin.tsx` and `admin/` are the panel, and everything this rule protects is about pages. The
-// panel is not a page: it is deliberately absent from pages.config.ts, deliberately absent from
-// the sitemap, and carries `noindex` instead (check-conventions.mjs enforces that half). Listing
-// the directory by name rather than its contents is on purpose — the routes inside it are an SPA
-// that grows, and a rule demanding a pages.config.ts entry per admin screen would be wrong for
-// every one of them.
-//
-// Both names are allowed only when the panel is really here. Without that test a project that
-// declined the panel would silently accept any hand-added route filed under `src/routes/admin/` —
-// the exact stray page this rule exists to catch.
-//
-// `.kit/scaffold.json` is the CLI's own record of the answers, written at scaffold time
-// (cli/generate.mjs) and explicitly un-ignored by the generated `.gitignore`, so it is present,
-// committed and stable in every project this kit generates. `answers.backend === 'admin'` is the
-// question, asked directly.
-//
-// This used to be `existsSync('src/admin')` alone, which asked a client's repo "did this team
-// ever create a directory called `src/admin`" and answered a question about the kit's panel with
-// it. Reproduced in a real `--backend=none` scaffold that had already passed cleanly: creating
-// `src/admin/` with one unrelated `.ts` file in it failed this script with "/admin: src/admin is
-// present but dist has no admin/index.html shell" — a machine build gate failing over a panel
-// they never asked for, with no way to satisfy it but deleting their directory.
-//
-// Three cases, decided deliberately:
-//
-//  1. The record is there and readable — it decides, full stop.
-//  2. The record is there and unreadable, or has no `answers.backend` — FAIL. This file decides
-//     which checks run; a build gate that cannot read its own input and guesses is the failure
-//     mode this whole script exists to remove. The message names the file and the fix.
-//  3. The record is absent — fall back to the directory test. This covers exactly two
-//     populations, and no project this kit generates today is in either: the kit's own
-//     `apps/web`, which has no scaffold record and must still check the panel it contains, and a
-//     project scaffolded before the record existed. Deleting the record by hand puts a project
-//     back in this case, and back to the old behaviour, which is the honest consequence of
-//     removing the only evidence of what was asked for.
-//
-// `&&` with the directory test, not instead of it: a project that answered `admin` and then
-// deleted the panel by hand has no panel, and the shell assertion below should not demand one.
-//
-// The same logic is in `scripts/check-conventions.mjs`, deliberately duplicated: both ship
-// verbatim into a flat generated project (COPY_FILES), and a third shared file would be a new
-// entry in cli/kit-manifest.mjs for fifteen lines. Change one, change the other.
+// Pages are defined only in pages.config.ts, and only those are prerendered. A stray route file
+// is a page nothing verifies. The panel's routes are allowed only when the project has the panel.
+// `.kit/scaffold.json` decides that; if it is missing, fall back to whether `src/admin` exists,
+// and if it is unreadable, fail. check-conventions.mjs has the same logic. Change one, change the
+// other.
 function scaffoldSaysPanel() {
   const RECORD = '.kit/scaffold.json'
   if (!existsSync(RECORD)) return true
@@ -157,17 +103,12 @@ const descriptions = new Map()
 
 const EXPECTED_HREFLANG = new Set(['mn', 'en', 'x-default'])
 
-// The site's default locale, inferred from `.kit/urls.json` itself rather than hardcoded:
-// `localePath` (src/lib/pages/enumerate.ts) never prefixes the default locale's own path
-// with its own locale code, while every other locale's path IS prefixed with its code. So the
-// first url whose own path doesn't start with `/${its locale}` belongs to the default locale.
+// The default locale is the one whose paths carry no locale prefix.
 const defaultLocale = urls.find((u) => !u.path.startsWith(`/${u.locale}`))?.locale
 if (!defaultLocale) fail('urls.json', 'could not infer the default locale from any url path')
 
-// The absolute URL a given hreflang code on a page sharing `pageId` MUST point at — the same
-// page, in that code's own locale (or, for 'x-default', the default locale's own path).
-// Derived from the manifest so it can't drift from what emit-plugin.ts / build-head.ts
-// actually compute; `undefined` means the page simply has no sibling in that locale.
+// Where an hreflang on this page must point: the same page in that locale. `undefined` means the
+// page has no sibling in that locale.
 function expectedAlternateHref(pageId, hreflang) {
   const locale = hreflang === 'x-default' ? defaultLocale : hreflang
   const sibling = urls.find((x) => x.pageId === pageId && x.locale === locale)
@@ -175,20 +116,9 @@ function expectedAlternateHref(pageId, hreflang) {
 }
 
 /**
- * Decode HTML entities, including numeric ones.
- *
- * This has to be general, not a list of the escapes we happen to have hit. React's SSR escapes
- * an apostrophe as `&#x27;`, while JSON-LD goes out through `dangerouslySetInnerHTML` with no
- * escaping. So any title with an apostrophe ("Mongolia's", "we're") would compare unequal and
- * fail a CORRECT build. A false failure in the only automatic gate is worse than a missing
- * check, because it teaches people to ignore the gate.
- *
- * `&amp;` is decoded LAST, so `&amp;lt;` gives `&lt;` and not `<`.
- *
- * A numeric reference above `0x10FFFF`, or a lone surrogate in `0xD800`–`0xDFFF`, is not a
- * codepoint `String.fromCodePoint` can make: it throws `RangeError`, which would end the whole
- * run with a stack trace instead of a `✗ verify-build: N failure(s)` line. A real HTML parser
- * leaves an invalid reference as plain text, so this does the same and returns it unchanged.
+ * Decode HTML entities, including numeric ones. React escapes `'` as `&#x27;` but JSON-LD is not
+ * escaped, so titles must be decoded before they are compared. `&amp;` goes last. An invalid
+ * code point is left as text instead of throwing.
  */
 const isValidCodePoint = (cp) => cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)
 const decodeCodePoint = (cp, original) =>
@@ -204,11 +134,7 @@ const decodeEntities = (s) =>
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
 
-/**
- * Reads to the matching brace. A non-greedy `\{([\s\S]*?)\}` stops at the first inner `}`, so a
- * single inline object in the registry would cut the captured text short and silently skip
- * every entry after it — reopening the exact hole this check was added to close.
- */
+/** Reads to the matching brace, so an inline object in the registry can't cut the match short. */
 function extractObjectLiteral(src, marker) {
   const start = src.indexOf(marker)
   if (start === -1) return null
@@ -234,16 +160,8 @@ for (const u of urls) {
   const h1s = html.match(/<h1[\s>]/g) ?? []
   if (h1s.length !== 1) fail(u.path, `expected exactly 1 <h1>, found ${h1s.length}`)
 
-  // Nothing in the static HTML may be invisible. An entrance animation that ships `opacity:0`
-  // leaves a visitor with no JS looking at a blank hero, and delays LCP until the bundle
-  // hydrates. See the FadeIn docstring.
-  //
-  // `transform: scale(0)` and `clip-path: inset(100%)` are checked too, because this scan
-  // matches by property name and `FadeIn`/`Reveal` already ship a legitimate
-  // `transform: translateY(12px)`. That makes `transform` an expected property here, so a
-  // future `initial={{ scale: 0 }}` would have slipped invisible content past a check looking
-  // straight at it. The `(?!\.\d*[1-9])` guard copies the opacity rule, so a real
-  // `scale(0.98)` entrance is not flagged.
+  // Nothing in the static HTML may be invisible: a no-JS visitor would see a blank hero, and LCP
+  // would wait for hydration. `scale(0.98)` and `opacity: 0.5` are fine; exactly 0 is not.
   const HIDDEN_PATTERNS = [
     /opacity:\s*0(?!\.\d*[1-9])/,
     /visibility:\s*hidden/,
@@ -269,9 +187,7 @@ for (const u of urls) {
     if (href !== expected) fail(u.path, `canonical is '${href}', expected '${expected}'`)
   }
 
-  // Full tags, not just the hreflang value: presence of the right codes says nothing about
-  // where they point, and a regression aiming every alternate at the same URL (or at the
-  // wrong locale's path) would still satisfy a check that only counts codes.
+  // Check where each alternate points, not only that the codes are present.
   const altTags = [...html.matchAll(/<link[^>]*rel="alternate"[^>]*>/g)].map((m) => ({
     hreflang: m[0].match(/hreflang="([^"]+)"/)?.[1],
     href: m[0].match(/href="([^"]+)"/)?.[1],
@@ -280,8 +196,7 @@ for (const u of urls) {
   for (const need of EXPECTED_HREFLANG) {
     if (!hreflangs.has(need)) fail(u.path, `missing hreflang '${need}'`)
   }
-  // Exactly the expected set, not merely a superset — a stray locale code is a claim
-  // about a page that does not exist.
+  // Exactly the expected set: a stray locale code claims a page that doesn't exist.
   for (const got of hreflangs) {
     if (!EXPECTED_HREFLANG.has(got)) fail(u.path, `unexpected hreflang '${got}'`)
   }
@@ -293,8 +208,7 @@ for (const u of urls) {
     }
   }
 
-  // Decoded, because it is compared against JSON-LD values that were never escaped.
-  // Comparing an escaped string to an unescaped one fails on the first apostrophe.
+  // Decoded, because it is compared with JSON-LD values that were never escaped.
   const title = decodeEntities(html.match(/<title>([^<]*)<\/title>/)?.[1] ?? '').trim()
   if (!title) fail(u.path, 'empty or missing <title>')
   else {
@@ -341,10 +255,8 @@ for (const u of urls) {
       fail(u.path, 'JSON-LD missing Organization or LocalBusiness')
     }
 
-    // Check that every @id reference resolves. A node with an @type DEFINES its @id; a bare
-    // { '@id': … } REFERENCES one. A dangling reference still parses and still has the right
-    // @types, but it is broken for anything that actually walks the graph, including Google's
-    // rich-results parser.
+    // Every @id reference must resolve. A node with @type defines an @id; a bare { '@id' }
+    // references one.
     const defined = new Set()
     const referenced = []
     const walk = (node) => {
@@ -364,9 +276,7 @@ for (const u of urls) {
       if (!defined.has(ref)) fail(u.path, `JSON-LD @id reference '${ref}' resolves to no node`)
     }
 
-    // The head and the graph must describe the same page. Two independent descriptions
-    // that disagree is worse than one — and only a comparison catches locale bleed,
-    // where e.g. the English copy leaks into the graph on a Mongolian page.
+    // The head and the graph must describe the same page, in the same language.
     const webPage = graph.find((n) => n['@type'] === 'WebPage')
     if (webPage) {
       if (typeof webPage.name === 'string' && title && !title.startsWith(webPage.name)) {
@@ -384,9 +294,7 @@ for (const u of urls) {
     }
   }
 
-  // Every page must preload the chunks for the blocks it renders. This depends on a fragile
-  // plugin ordering (see emit-plugin.ts) and it breaks silently: the build passes, the page
-  // works, and the only symptom is that chunks load one after another again instead of at once.
+  // Every page must preload its block chunks. This breaks silently if plugin order changes.
   const preloaded = [...html.matchAll(/rel="modulepreload"[^>]*href="([^"]+)"/g)].map(
     (m) => m[1] ?? '',
   )
@@ -397,20 +305,9 @@ for (const u of urls) {
 }
 
 // --- the split actually held --------------------------------------------------
-// The preload check above only asks "more than zero", so a build that preloads 1 of the home
-// page's 3 block chunks passes it. Counting exactly is the wrong fix, because Vite is allowed to
-// merge small chunks. So check the thing that actually matters: the contact form's form library
-// is NOT in the main entry chunk. That is the whole point of the split — 99 KB raw, 30 KB
-// gzipped of react-hook-form and zod, which every page used to download, form or no form.
-//
-// The markers are react-hook-form's own public option names, not the string 'react-hook-form'.
-// That string is already in the entry chunk, inside the contact manifest's
-// `requires: { npm: [...] }`, which registry.ts imports eagerly on purpose. Keying on the
-// package name would have failed a correct build on day one.
-//
-// This check also validates itself: the markers must be absent from the entry chunk AND present
-// somewhere else. Checking only for absence would quietly become a no-op the day react-hook-form
-// renames its internals, or the block stops shipping — an assertion that can never fail.
+// react-hook-form must not be in the entry chunk, or every page pays for the contact form. The
+// markers are option names, not the package name, which the entry chunk contains on purpose. They
+// must also appear in some other chunk, so this check can't pass by testing nothing.
 const RHF_MARKERS = ['shouldUnregister', 'criteriaMode', 'reValidateMode', 'shouldFocusError']
 if (existsSync(join(blocksDir, 'contact'))) {
   const assetsDir = join(outDir, 'assets')
@@ -474,29 +371,12 @@ else {
     if (!xml.includes(`<loc>${site}${u.path}</loc>`)) fail('sitemap.xml', `missing ${u.path}`)
   }
 
-  // Checks what must NOT be here, not only what must. The loop above proves every expected url
-  // is present, and would pass just as happily with a `/docs` entry beside them. A sitemap entry
-  // asks Google to index a URL, which is the opposite of what `/docs` is for: it has no
-  // localized copy, no `pages.config.ts` entry and no prerendered file, so listing it would ask
-  // Google to index a URL that 404s on a static deploy.
-  //
-  // Compared as PARSED PATHS, not with a `/\/docs\b/` regex over the raw XML. That regex matched
-  // the `//docs` inside any `site.url` on a host beginning `docs.` — `<loc>https://docs.example.mn/
-  // </loc>` tested true and failed a completely correct build — and it also matched legitimate
-  // paths like `/docs-guide` (`\b` sits between `s` and `-`). A false failure in the project's only
-  // machine gate is the failure mode this file's `decodeEntities` docstring warns about at length:
-  // it teaches people to distrust the gate, which is worse than the gap it was closing.
+  // `/docs` must never be listed. Paths are parsed, not regex-matched, so a host like
+  // `docs.example.mn` or a page like `/docs-guide` isn't a false failure.
   const forbiddenSitemapPaths = new Set([
     '/docs',
     ...new Set(urls.map((u) => `/${u.locale}/docs`)),
-    // The panel is prerendered, unlike /docs, so this is not merely belt and braces: there is a
-    // real file, and a sitemap entry would be a direct invitation to index it.
-    //
-    // Gated on the panel actually being here, by the same `HAS_PANEL` as ALLOWED_ROUTE_FILES, and
-    // for the reason the paragraph above this set spends ten lines on. A project that declined the
-    // panel has no /admin route and every right to slug a public page `admin`: a team page, an
-    // office page. Ungated, this entry fails that project's build over a sitemap URL that is
-    // correct for it, in the only machine gate it has. Do not simplify the spread away.
+    // Only when the panel exists. Without it, `admin` is a fine slug for a public page.
     ...(HAS_PANEL ? ['/admin'] : []),
   ])
   const locPaths = [...xml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => {
@@ -511,16 +391,13 @@ else {
     }
   }
 
-  // The sitemap's alternate set must match what the <head> declares, x-default included.
-  // Two different answers to "what are this page's alternates" is worse than one.
+  // The sitemap's alternates must match the <head>, x-default included.
   const perUrl = xml.split('<url>').slice(1)
   if (perUrl.length !== urls.length) {
     fail('sitemap.xml', `expected ${urls.length} <url> entries, found ${perUrl.length}`)
   }
   perUrl.forEach((entry, i) => {
     const u = urls[i]
-    // Full <xhtml:link> tags, not just hreflang codes — see the matching comment on the
-    // <head> check above for why presence-only is not enough.
     const links = [...entry.matchAll(/<xhtml:link[^>]*>/g)].map((m) => ({
       hreflang: m[0].match(/hreflang="([^"]+)"/)?.[1],
       href: m[0].match(/href="([^"]+)"/)?.[1],
@@ -547,19 +424,14 @@ if (!existsSync(robotsPath)) {
   fail('robots.txt', 'not emitted')
 } else {
   const robots = readFileSync(robotsPath, 'utf8')
-  // A bare `Disallow: /` — as opposed to a scoped one like `Disallow: /private` — deindexes the
-  // entire site. Existence-only checking would pass that silently.
+  // A bare `Disallow: /` deindexes the whole site.
   if (!/^Allow: \/[ \t]*$/m.test(robots)) fail('robots.txt', "missing 'Allow: /'")
   if (/^Disallow: \/[ \t]*$/m.test(robots)) {
     fail('robots.txt', "bare 'Disallow: /' would deindex the entire site")
   }
 
-  // `/docs` must stay CRAWLABLE. This looks backwards and is not: `Disallow` and the
-  // `noindex, nofollow` meta on `src/routes/docs.tsx` do not layer, they cancel. A crawler that
-  // obeys a `Disallow` never fetches /docs, so it never reads the `noindex` — and a URL linked
-  // from anywhere else is then indexed URL-only, which is the exact outcome the `noindex` exists
-  // to prevent. This assertion turns a future well-meaning "let's block /docs too" edit into a
-  // build failure that explains itself, instead of a silent SEO regression.
+  // `/docs` must stay crawlable. A crawler that obeys Disallow never reads the page's noindex, and
+  // a linked URL then gets indexed anyway.
   const docsDisallow = robots.split('\n').find((line) => /^[ \t]*Disallow:[ \t]*\/docs/i.test(line))
   if (docsDisallow) {
     fail(
@@ -579,14 +451,8 @@ if (existsSync(join(outDir, 'docs/index.html'))) {
 }
 
 // --- the admin shell --------------------------------------------------------------
-// internal/static/static.go in the Go service falls back to admin/index.html for every /admin
-// URL. If it is missing, that fallback finds nothing and every hard load of an admin page
-// answers with the prerendered home page instead — a flash of the wrong site that nothing else
-// here would catch, because the file it falls back to does exist and is perfectly valid.
-//
-// Keyed off the same `HAS_PANEL` as ALLOWED_ROUTE_FILES above, not off a second test of its own.
-// Two ways to ask "is the panel here" can disagree, and the disagreement would show up as this
-// check quietly never running.
+// The Go service serves admin/index.html for every /admin URL. Without it, a hard load of an
+// admin page shows the home page instead.
 if (HAS_PANEL) {
   const shell = join(outDir, 'admin', 'index.html')
   if (!existsSync(shell)) {

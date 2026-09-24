@@ -1,5 +1,4 @@
-// Package utils holds small, generic HTTP-layer helpers. It carries no domain knowledge of its
-// own; see internal/http/models for what each field name means.
+// Package utils holds small, generic helpers.
 package utils
 
 import (
@@ -29,13 +28,7 @@ func newValidator() *validator.Validate {
 }
 
 // fieldNames maps a JSON field name to the Mongolian label ValidateStruct reports it under.
-//
-// honeypot_url maps to the empty string on purpose: a filled honeypot must never produce a
-// message naming the field, because that tells a bot author exactly which field to leave alone.
-// In this service that entry is presently unreachable: models.CreateLeadRequest gives both
-// HoneypotURL and ElapsedMs validate:"-" so the anti-spam checks in the lead handler are the only
-// thing that ever rejects them, and both share one generic message (see that handler). The
-// mapping stays here so the rule holds automatically if either field ever gains a validate tag.
+// honeypot_url is blank on purpose, so a message never tells a bot which field tripped.
 var fieldNames = map[string]string{ //nolint:gochecknoglobals // static lookup table
 	"name":         "Нэр",
 	"email":        "Имэйл",

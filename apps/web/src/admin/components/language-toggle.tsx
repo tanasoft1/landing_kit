@@ -1,10 +1,6 @@
 import { getLanguage, setLanguage, useLanguage } from '@/admin/lib/language'
 import { Button } from '@/admin/ui/button'
 
-/**
- * Two states, so a switch rather than a dropdown: a select for a binary choice costs a click and
- * a popover to do what one button does.
- */
 export function LanguageToggle() {
   const language = useLanguage()
   return (

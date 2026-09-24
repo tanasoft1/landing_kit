@@ -38,9 +38,7 @@ export function HeroSplit({
             </div>
           </FadeIn>
           {copy.image ? (
-            // FadeIn, not Reveal: this image is above the fold and carries fetchPriority="high",
-            // so it is this variant's LCP candidate. Reveal only animates once an intersection
-            // callback fires, and the largest element on screen should not wait on that.
+            // FadeIn, not Reveal: this image is the LCP element and must not wait on scroll.
             <FadeIn>
               <img
                 src={copy.image.src}

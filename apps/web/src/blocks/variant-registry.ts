@@ -14,8 +14,6 @@ export function registerVariants(id: BlockId, variants: VariantMap) {
 export function getVariants(id: BlockId): VariantMap {
   const v = loaded.get(id)
   if (!v) {
-    // Getting here means a block rendered before its module loaded. That is a wiring bug, not
-    // something a visitor can cause, so fail loudly instead of rendering an empty section.
     throw new Error(
       `Variants for block '${id}' were never registered. The entry point must load and register a block's module before rendering it.`,
     )

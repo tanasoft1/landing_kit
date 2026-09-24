@@ -24,19 +24,14 @@ const CHOICES = {
   pages: ['multi', 'one'],
   theme: ['both', 'light', 'dark'],
   preset: ['editorial', 'warm'],
-  // 'none' first: `pickChoice` opens on DEFAULTS, and the default must be the first option shown.
-  // 'admin' last because the three are a ladder, not three peers: the panel authenticates against
-  // /api/auth/login and reads /api/admin/leads, so it cannot exist without the API. Modelling it
-  // as a level rather than a separate question is what makes "panel with no backend"
-  // unrepresentable instead of merely rejected.
+  // 'none' first because it is the default. 'admin' last: the panel needs the API, so the
+  // options are levels, not peers.
   backend: ['none', 'api', 'admin'],
 }
 const DEFAULTS = { pages: 'multi', theme: 'both', preset: 'editorial', backend: 'none' }
 const LABELS = { pages: 'Pages', theme: 'Theme', preset: 'Preset', backend: 'Backend' }
 
-// One short line per choice, shown beside it in the arrow-key picker. Someone scaffolding their
-// first site has no idea what `editorial` or `alternating` looks like, and the whole point of a
-// picker over a typed answer is that the options can explain themselves.
+// One short line per choice, shown beside it in the picker.
 const HINTS = {
   multi: 'Home and Contact as separate pages',
   one: 'Everything on a single page',
@@ -64,14 +59,7 @@ const BLOCK_HINTS = {
 }
 
 // --- blocks of your own ---------------------------------------------------------------------------
-//
-// The four above are the ones the kit ships copy and layouts for. A site that needs a pricing table
-// or an FAQ needs a block that does not exist yet, and the answer used to be "scaffold first, then
-// run add-block" — a second command, in a second place, that nobody reads about until later.
-//
-// So the block question takes new names too, as many as you like. Each one becomes a real block
-// folder in the scaffold: same four files `add-block` writes, registered the same way, already on
-// the home page — with placeholder copy, waiting for its text.
+// New names typed at the block question become real block folders with placeholder copy.
 
 const ADD_ITEM = {
   label: 'add your own',
@@ -110,8 +98,7 @@ const withHints = (values, hints) => values.map((value) => ({ value, hint: hints
 
 export function parseArgs(argv) {
   const args = argv.slice(2)
-  // Null prototype on purpose: with a plain `{}`, `--toString=x` and `--__proto__=x` are inherited
-  // or special, so an `in` check says they are known flags and the typo is silently accepted.
+  // Null prototype, so `--toString` or `--__proto__` isn't mistaken for a known flag.
   const flags = Object.create(null)
   let dir = null
   const set = (name, value) => {
@@ -127,8 +114,7 @@ export function parseArgs(argv) {
       if (eq === -1) throw new Error(`Flag needs a value: ${a} (use ${a}=value)`)
       const name = a.slice(2, eq)
       if (name === '') throw new Error(`Missing flag name: ${a} (options look like --preset=warm)`)
-      // `--yes=true` would otherwise leave `yes` as the string 'true', so `yes === true` is false
-      // and the CLI starts prompting — a flag-spelling mistake reported as a stdin problem.
+      // `--yes=true` would otherwise be the string 'true', and the CLI would start prompting.
       if (name === 'yes' || name === 'help') {
         throw new Error(`Flag --${name} takes no value: ${a} (write --${name} on its own)`)
       }
@@ -142,8 +128,7 @@ export function parseArgs(argv) {
   return { dir, flags, yes: flags.yes === true, help: flags.help === true }
 }
 
-// A misspelled flag NAME is the same failure as a misspelled flag value: the answer is silently a
-// default and nothing says so. Both are errors.
+// A misspelled flag name is an error, like a misspelled value.
 function checkFlagNames(flags) {
   for (const name of Object.keys(flags)) {
     if (name === 'yes' || name === 'help' || Object.hasOwn(CHOICES, name)) continue
@@ -163,8 +148,7 @@ function checkChoice(name, value) {
   return value
 }
 
-// Returns the list re-sorted into BLOCK_ORDER, so no caller downstream has to sort or dedupe.
-// `label` only changes the wording: the same parser serves the flag and the prompt.
+// Returns the list sorted into BLOCK_ORDER. `label` only changes the error wording.
 function parseBlocks(raw, label = '--blocks') {
   const given = raw.split(',').map((s) => s.trim())
   if (given.length === 1 && given[0] === '') {
@@ -219,8 +203,7 @@ function checkVariantFlagsMatchBlocks(flags, blocks) {
   }
 }
 
-// `rl.question()` never settles if stdin ends first — the process would then exit 0 having asked
-// nothing and written nothing. Reject on close instead, so a truncated answer stream is an error.
+// `rl.question()` never settles if stdin ends first. Reject on close so that is an error.
 function ask(rl, query) {
   return new Promise((resolve, reject) => {
     const onClose = () => reject(new Error('Input ended before every question was answered'))
@@ -256,16 +239,8 @@ const pickChoice = (label, choices, fallback, hints) =>
   })
 
 // --- block dependencies at the prompt ------------------------------------------------------------
-//
-// Blocks are NOT freely combinable: hero's and cta's copy link to other blocks by id, and a link to
-// an unselected block throws during server rendering (see `assertBlockLinksResolve` in
-// generate.mjs). `assertBlockLinksResolve` is the backstop and stays exactly as it is for the flag
-// path — a wrong `--blocks` is a wrong command and deserves an error.
-//
-// A prompt is different. Accepting an answer and then failing four questions later is a worse
-// experience than not accepting it, and the developer is right there to fix it. So the same fact,
-// declared in the manifests as `requires.blocks` and reconciled against the copy by `readBlockDeps`,
-// is enforced here: an unbuildable selection is refused at the question and the question re-asked.
+// Some blocks' copy links to other blocks. The flag path errors on a bad set; the prompt refuses
+// it and asks again.
 
 /** The `[selected block, block it needs]` pairs the selection is missing. Empty means buildable. */
 function missingBlockDeps(blocks, blockDeps) {
@@ -278,17 +253,9 @@ function missingBlockDeps(blocks, blockDeps) {
   return missing
 }
 
-/**
- * The same rule as `askBlocks`, enforced live instead of after the fact.
- *
- * `runCheckbox` refuses to submit while this returns lines, so an unbuildable set cannot be
- * confirmed at all — and the reason sits under the list the whole time you are choosing, rather
- * than appearing once the question has already closed.
- */
+/** Same rule as `askBlocks`, checked live so an unbuildable set can't be confirmed. */
 const blockValidator = (blockDeps) => (selected) => {
-  // At least one BUILT-IN, not just at least one block. Blocks of your own are born with
-  // placeholder copy and no nav entry, so a site made only of them is a page of lorem ipsum —
-  // and the header would have nothing to link to.
+  // At least one built-in block: your own blocks have placeholder copy and no nav entry.
   if (!selected.some((id) => BLOCK_ORDER.includes(id))) {
     return ['Pick at least one of the blocks the kit ships.']
   }
@@ -303,8 +270,7 @@ const pickBlocks = (blockDeps, offerAdd = true) =>
     options: withHints(BLOCK_ORDER, BLOCK_HINTS),
     initialChecked: [...BLOCK_ORDER],
     validate: blockValidator(blockDeps),
-    // Hidden when `--add-blocks` already answered it, so the row cannot collect names that are
-    // then thrown away.
+    // Hidden when `--add-blocks` already answered it.
     addItem: offerAdd ? ADD_ITEM : null,
   })
 
@@ -327,8 +293,7 @@ async function askBlocks(rl, blockDeps) {
     }
     const missing = missingBlockDeps(blocks, blockDeps)
     if (missing.length === 0) return blocks
-    // Named per pair, not as one lumped list: "hero and cta need contact and features" does not
-    // say which to drop if you only wanted one of them.
+    // One line per pair, so it's clear which block to drop.
     for (const [id, dep] of missing) {
       console.log(`  '${id}' links to '${dep}', so '${dep}' must be selected too.`)
     }
@@ -354,15 +319,8 @@ async function askCustomBlocks(rl) {
 }
 
 /**
- * `blockDeps` is `readBlockDeps(KIT_ROOT)` from generate.mjs — the dependency graph the manifests
- * declare, already reconciled against the copy files.
- *
- * Checked for a COMPLETE map, not merely for an object. `missingBlockDeps` reads `blockDeps[id] ??
- * []`, so any block the map omits silently has no dependencies and the guard is off for it — and
- * `{}` turns it off for every block while passing a `typeof === 'object'` test. That test was what
- * this function shipped with, and it admitted `{}`: the exact value this paragraph claimed to
- * reject. So the check now enforces what is actually required, which is what the caller is
- * promising: an array for every id in `BLOCK_ORDER`.
+ * `blockDeps` is `readBlockDeps(KIT_ROOT)`. It needs an array for every id in BLOCK_ORDER: a
+ * missing id would silently turn the dependency check off for that block.
  */
 export async function resolveAnswers(argv, blockDeps) {
   const badDeps = BLOCK_ORDER.filter((id) => !Array.isArray(blockDeps?.[id]))
@@ -373,14 +331,12 @@ export async function resolveAnswers(argv, blockDeps) {
     )
   }
   const { dir, flags, yes } = parseArgs(argv)
-  // An unset shell variable makes this `''`, which would scaffold over the repo root instead of
-  // into `frontend/`. Missing and empty are the same mistake and get the same message.
+  // An unset shell variable gives `''`, which would scaffold over the repo root.
   if (dir === null || dir.trim() === '') {
     throw new Error('A target directory is required. Usage: landing-kit <dir> [options]')
   }
 
-  // Everything a flag can be wrong about is checked before a single question is asked, so a typo
-  // is reported immediately rather than after four prompts.
+  // Check every flag before asking anything, so a typo shows up at once.
   checkFlagNames(flags)
   for (const name of Object.keys(CHOICES)) {
     if (flags[name] !== undefined) checkChoice(name, flags[name])
@@ -389,10 +345,8 @@ export async function resolveAnswers(argv, blockDeps) {
   if (flags['add-blocks'] !== undefined) parseCustomBlocks(flags['add-blocks'])
   checkVariantFlags(flags)
 
-  // One input mode for the whole run, decided once. Readline and the raw-mode picker both own
-  // stdin while they are open, so alternating between them mid-run would have two readers racing
-  // for the same keypress. Not a TTY — piped stdin, CI, `--yes` — means typed prompts, which is
-  // also what keeps every scripted invocation behaving exactly as it did before.
+  // One input mode per run: readline and the raw-mode picker can't share stdin. Without a TTY
+  // (pipes, CI, `--yes`) the prompts are typed.
   const interactive = isInteractive()
 
   let rl = null
@@ -402,8 +356,7 @@ export async function resolveAnswers(argv, blockDeps) {
   }
 
   try {
-    // Trimmed, not just tested for emptiness: `landing-kit "  frontend  "` is a shell quoting slip,
-    // and storing it untrimmed creates a directory whose name really does have the spaces in it.
+    // Trimmed: `"  frontend  "` is a quoting slip, not a folder name with spaces.
     const answers = { dir: dir.trim() }
     for (const name of Object.keys(CHOICES)) {
       if (flags[name] !== undefined) answers[name] = flags[name]
@@ -418,8 +371,7 @@ export async function resolveAnswers(argv, blockDeps) {
     const customFlag =
       flags['add-blocks'] === undefined ? null : parseCustomBlocks(flags['add-blocks'])
 
-    // One picker answers both — ticking the kit's blocks and typing your own are the same question
-    // in a terminal. Everywhere else they are two, because a flag or a piped line cannot be one.
+    // In a terminal, one picker takes both built-in and new blocks. Flags and pipes ask twice.
     if (interactive && flags.blocks === undefined && !yes) {
       const picked = splitBlocks(await pickBlocks(blockDeps, customFlag === null))
       answers.blocks = picked.blocks
@@ -463,8 +415,7 @@ export async function resolveAnswers(argv, blockDeps) {
         )
       }
     }
-    // Not asked: a block that does not exist yet has exactly one layout, and naming it here means
-    // every block in `answers` has a variant, so nothing downstream needs a special case.
+    // Not asked: a new block has one layout.
     for (const block of answers.custom) answers.variants[block] = CUSTOM_VARIANT
 
     return answers

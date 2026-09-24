@@ -10,16 +10,13 @@ import (
 	"landing-api/internal/utils/secure"
 )
 
-// ContextKeyAdminID and ContextKeyEmail are where AuthMiddleware stores the token's claims, read
-// back by any handler behind it that needs the caller's identity.
+// ContextKeyAdminID and ContextKeyEmail are where AuthMiddleware stores the token's claims.
 const (
 	ContextKeyAdminID = "admin_id"
 	ContextKeyEmail   = "email"
 )
 
 // AuthMiddleware requires "Authorization: Bearer <access token>" and rejects anything else.
-// Three failure shapes (missing header, malformed header, invalid token), each with its own
-// Mongolian message, so an operator reading a 401 can tell which one tripped.
 func AuthMiddleware(tokenService *secure.TokenService) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
@@ -40,8 +37,6 @@ func AuthMiddleware(tokenService *secure.TokenService) fiber.Handler {
 			})
 		}
 
-		// Never logged: the bearer token itself, only the error parsing or validating it
-		// produces.
 		claims, err := tokenService.ValidateAccessToken(parts[1])
 		if err != nil {
 			slog.Warn("authentication failed - invalid token", slog.Any("err", err), slog.String("path", c.Path()))

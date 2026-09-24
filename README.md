@@ -38,7 +38,7 @@ everything `api` gets, and on top of it a React admin panel at `/admin`: a login
 of the leads the form has collected, in `src/routes/admin` and `src/admin`. The panel is served by
 the same build as the marketing pages and reads the same API, so there is no third process to run.
 
-It is also the only answer that adds to what the frontend installs. The panel pulls in fourteen
+It is also the only answer that adds to what the frontend installs. The panel pulls in thirteen
 packages: Radix primitives, TanStack Table, `lucide-react` and the rest of the shadcn base, one of
 which a site with the contact block already had. They land in the panel's own route chunks, so a
 visitor reading the marketing pages downloads none of them; what grows is `node_modules`. A project
