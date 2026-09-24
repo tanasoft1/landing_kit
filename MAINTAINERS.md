@@ -487,7 +487,7 @@ so five per window is five guesses at the admin password as readily as five cont
 `login_attempts` adds a backoff on top, in `internal/service/auth`, that counts failures against one
 email from one source. `Login` reads the row before `GetAdminByEmail`, `noteFailure` writes one on
 both credential-failure branches, and from the fifth failure that pair is refused for a minute,
-doubling with each further failure to a fifteen-minute cap (`lockDuration`). A refused attempt gets
+doubling with each further failure to a one-hour cap (`lockDuration`). A refused attempt gets
 the same `rate limited` 429 the limiter returns, so a client needs one case rather than two. An
 attacker spread across a thousand source addresses is charged the backoff a thousand times over
 rather than once, which is a real weakening compared with a lock that spanned the account, and the
@@ -532,11 +532,21 @@ unresolvable caller a key of their own: one shared bucket for everyone without a
 account-wide lock under another name. The audit rows are written either way.
 
 The decay sits on top of that. `RecordLoginFailure` resets the count to one when the previous
-failure for that pair is older than `loginFailureDecay`, ten minutes, instead of incrementing it.
-Ten is deliberately **shorter** than the fifteen-minute cap, which is the direction that matters: a
-source that served a full-length lock comes back with its count reset and has to climb the curve
-again, rather than re-locking on its next failure forever. A constant assertion beside the two
-values fails the build if the decay is ever raised to or past the cap. The window is a timestamp
+failure for that pair is older than `loginFailureDecay`, thirty minutes, instead of incrementing
+it. Thirty has a wall on each side and satisfying one by breaking the other is the easy mistake.
+
+It is **shorter** than the one-hour cap, so a source that served a full-length lock comes back with
+its count reset and has to climb the curve again rather than re-locking on its next failure
+forever. A constant assertion beside the two values fails the build if the decay is ever raised to
+or past the cap.
+
+It is also **longer** than `loginLimiter`'s fifteen-minute window, and nothing in the code can
+enforce that half. A decay shorter than the limiter's window is spent before the limiter lets the
+next attempt through, so the count resets between every window and the curve never climbs past its
+first step — the backoff then costs an attacker nothing the limiter was not already costing them.
+Measured over ten hours against the limiter, a ten-minute decay let one source have 200 guesses
+evaluated with the count never passing five; thirty minutes against the hour cap cuts that to 80.
+Change either constant and check both walls, not just the one the build tests. The window is a timestamp
 computed in Go and passed as `decay_before`, not an interval literal in the SQL, for the same reason
 the curve is in Go: it is policy, and storage only compares.
 
@@ -551,14 +561,14 @@ the threshold, next to the ~200ms of bcrypt that request has already spent.
 
 What that does not buy is a burst costing one guess. A request already past the lock check when the
 lock lands is not refused retroactively, so N simultaneous guesses still get N answers: twenty at
-once measure as twenty 401s, after which the address is locked for fifteen minutes and the next
-twenty are all refused. The bound is N guesses per window, not one. Closing that needs the check and
+once measure as twenty 401s, after which the address is locked for an hour and the next twenty
+are all refused. The bound is N guesses per window, not one. Closing that needs the check and
 the increment to happen in the same statement, which is a larger change than the backoff itself.
 
 `lockDuration` shifts `time.Minute` left by `failures - lockAfterFailures`, not by the failure
 count, and both of its guards are load bearing for different reasons. `d > maxLockDuration` does
-most of its work on ordinary values: only failures 5 through 8 return a window below the cap, so
-that test is what clamps every count from 9 to 32. Past 32 the shift runs off the end of an int64.
+most of its work on ordinary values: only failures 5 through 10 return a window below the cap,
+so that test is what clamps every count from 11 to 32. Past 32 the shift runs off the end of an int64.
 Between 33 and 57 the result is negative for fifteen of those counts and, for the other ten, a
 positive value far above the cap, and from 58 up it is exactly zero. Only `d <= 0` catches the
 negatives and the zeros, and without it an attacker who kept failing would reach a lock that had

@@ -44,19 +44,35 @@ const (
 	// maxLockDuration caps the curve. Backoff, never a permanent lockout, because a lock is a
 	// refusal to evaluate the password and so refuses the real admin exactly as firmly as it
 	// refuses a guess.
-	maxLockDuration = 15 * time.Minute
+	//
+	// An hour, and it can be an hour because the lock is keyed on the source address: the only
+	// person it costs an hour is whoever spent eleven failures earning it. A cap this long against
+	// an account-wide lock would have been a denial of service against any admin whose address is
+	// known.
+	maxLockDuration = 60 * time.Minute
 	// loginFailureDecay is how long a failure counts towards the curve. A failure older than this
 	// resets the count to one instead of adding to it, which is what lets a source climb back down
-	// the curve on its own; without it the count only grew, and anything past nine failures sat at
-	// maxLockDuration for good.
+	// the curve on its own; without it the count only grew and a source past eleven failures sat
+	// at maxLockDuration for good.
 	//
-	// It is deliberately SHORTER than maxLockDuration, and the guard below keeps it that way.
-	// Serving a full-length lock has to be enough to decay the count, otherwise whoever earned the
-	// lock can hold it at its cap forever by sending one failure each time it lapses and never
-	// waiting longer than the lock itself. Ten minutes against a fifteen-minute cap leaves five
-	// minutes of margin. The person this recovers is the admin who fumbled their password nine
-	// times from their own laptop.
-	loginFailureDecay = 10 * time.Minute
+	// It has to sit between two walls, and it is easy to satisfy one by breaking the other.
+	//
+	// SHORTER than maxLockDuration, which the guard below enforces. Serving a full-length lock has
+	// to be enough to decay the count, otherwise whoever earned the lock holds it at the cap
+	// forever by sending one failure each time it lapses and never waiting longer than the lock
+	// itself.
+	//
+	// LONGER than loginLimiter's window, which nothing can enforce from here. The limiter allows
+	// five attempts per fifteen minutes from one address, so a decay shorter than that window is
+	// already spent by the time the limiter lets the next attempt through: the count resets
+	// between every window, the curve never climbs past its first step, and the backoff does
+	// nothing the limiter was not doing alone. Measured against the limiter over ten hours, a
+	// ten-minute decay let one source have 200 guesses evaluated with the count never passing
+	// five; thirty minutes against the hour cap cuts that to 80 and the count reaches ten.
+	//
+	// The admin who fumbles their password pays almost nothing for the longer window, because the
+	// curve only diverges past nine failures and the limiter has already answered 429 by then.
+	loginFailureDecay = 30 * time.Minute
 	// loginAttemptStale is how old the last failure must be before PruneLoginAttempts deletes the
 	// row. Well past loginFailureDecay, so the prune can never remove a row a live decision would
 	// still have read.
