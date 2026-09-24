@@ -550,12 +550,28 @@ Measured against a server configured with `PROXY_HEADER=X-Forwarded-For` and
 | `203.0.113.9, 198.51.100.50` | `198.51.100.50` |
 | `203.0.113.9, 127.0.0.1, 127.0.0.1, 198.51.100.50` | `198.51.100.50` |
 | `not-an-ip, 203.0.113.9, 198.51.100.50` | `198.51.100.50` |
+| two lines: `9.9.9.9` then `198.51.100.50` | `198.51.100.50` |
+| two lines: `9.9.9.9, 8.8.8.8` then `198.51.100.50` | `198.51.100.50` |
+| two lines: `127.0.0.1` then `198.51.100.50` | `198.51.100.50` |
+| `203.0.113.9, 198.51.100.50:53422` | `198.51.100.50` |
+| `203.0.113.9, [2001:db8::50]:443` | `2001:db8::50` |
+| `203.0.113.9, ::ffff:198.51.100.50` | `198.51.100.50` |
+| `203.0.113.9, 2001:db8::7%eth0` | `2001:db8::7` |
 | header absent | the socket peer |
 | `127.0.0.1, 127.0.0.1` (all trusted) | the socket peer |
 
+The three duplicate-line rows are the reason this reads the header with `PeekAll` rather than
+`c.Get`. A repeated field is one comma-joined list, `c.Get` returns only the first line, and
+HAProxy's `option forwardfor` adds its own line instead of editing the caller's -- so reading one
+line means reading the caller's line and never the proxy's. The four rows after them are the reason
+fields are parsed with `parseForwardedIP` rather than `net.ParseIP`: each of those forms is written
+by some real proxy, each failed `net.ParseIP`, and each one broke the walk and put every caller
+behind that proxy on the proxy's own address.
+
 The one case it cannot help with is a proxy that does not append the address it observed. If yours
-replaces `X-Forwarded-For` wholesale with the caller's value, no amount of parsing recovers the
-truth, and the setting to reach for is a header your proxy writes itself, such as `X-Real-IP`.
+passes the caller's `X-Forwarded-For` through untouched, every field in it is the caller's, no
+amount of parsing recovers the truth, and the setting to reach for is a header your proxy writes
+itself, such as `X-Real-IP`.
 
 `ip` is `text` and not `inet` because the key needs a value for "no resolvable client address", and
 `inet` has none. `Login` never writes that value. With no address it skips the lockout entirely, reading

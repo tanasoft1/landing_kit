@@ -14,14 +14,19 @@ import (
 // clientKeyGenerator is shared by every rate limiter below. It never collapses every caller into
 // one bucket.
 //
-// Fiber's c.IP() returns "" whenever ProxyHeader is configured and that header does not arrive,
-// and a limiter that keys on the raw result puts every such caller in ONE bucket.
-// On a public contact form that means a single spammer locks out every real visitor; on a login
-// endpoint it means one attacker's guesses lock out every admin trying to sign in.
+// A limiter that keys on an empty address puts every such caller in ONE bucket. On a public
+// contact form that means a single spammer locks out every real visitor; on a login endpoint it
+// means one attacker's guesses lock out every admin trying to sign in.
 //
-// So an unresolvable IP gets a unique key instead of a shared one: the request goes unlimited
+// So an unresolvable address gets a unique key instead of a shared one: the request goes unlimited
 // rather than joining everyone else's bucket. That fails open for one request and never locks out
-// a real caller. The honeypot and the timing floor are the contact form's primary defences, and
+// a real caller.
+//
+// Belt and braces as this app is configured. c.IP() returns "" only when it reads ProxyHeader and
+// finds nothing usable, and EnableIPValidation makes it fall back to the socket peer instead, so
+// the branch below is unreachable today. It stays because what makes it unreachable is a field in
+// cmd/main.go that reads like a validation preference rather than the thing standing between this
+// service and one shared bucket. The honeypot and the timing floor are the contact form's primary defences, and
 // bcrypt plus the identical error message are the login endpoint's; this is depth for both, and
 // depth that can deny service is worse than none.
 func clientKeyGenerator(c *fiber.Ctx) string {
