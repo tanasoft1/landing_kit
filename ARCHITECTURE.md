@@ -424,10 +424,10 @@ sequenceDiagram
     A-->>OP: success true, data is an RsLeadPage: items plus the whole table's total
     OP->>A: POST /api/auth/refresh, refresh cookie plus X-Requested-With
     A->>A: no X-Requested-With is a 403, before the limiter counts it
-    A->>DB: GetRefreshToken by jti; already revoked means replay, unless it is a lost rotation
+    A->>DB: GetRefreshToken by jti. Already revoked means replay, unless it is a lost rotation
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
     A->>DB: RevokeRefreshToken then CreateRefreshToken, one transaction under the family lock
-    A-->>OP: a fresh access_token and a replacement cookie; the presented token is now dead
+    A-->>OP: a fresh access_token and a replacement cookie, and the presented token is now dead
     OP->>A: POST /api/auth/logout, refresh cookie plus X-Requested-With
     A->>DB: revoke every unrevoked row in the family, under the family lock
     A-->>OP: 200 and an expired cookie, whatever the cookie was worth

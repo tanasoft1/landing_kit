@@ -29,12 +29,13 @@ lint-fix:
 sqlc:
 	sqlc generate
 
+# Forward-only: the service runs up migrations at startup and never rolls back, so there is no
+# .down.sql to write.
 migrate-create:
 	@test -n "$(name)" || (echo "usage: make migrate-create name=add_something" && exit 1)
 	@ts=$$(date +%Y%m%d%H%M%S); \
-	  touch internal/db/migrations/$${ts}_$(name).up.sql \
-	        internal/db/migrations/$${ts}_$(name).down.sql; \
-	  echo "created internal/db/migrations/$${ts}_$(name).{up,down}.sql"
+	  touch internal/db/migrations/$${ts}_$(name).up.sql; \
+	  echo "created internal/db/migrations/$${ts}_$(name).up.sql"
 
 # Prompts for the password with echo off and pipes it in, so it never lands in shell history or `ps`.
 seed-admin:

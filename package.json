@@ -1,6 +1,6 @@
 {
   "name": "@tanasoftllc/landing-kit",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Scaffolds a bilingual (Mongolian + English) landing site: prerendered static HTML, per-locale SEO, and swappable blocks.",
   "keywords": [
     "landing-page",
@@ -44,6 +44,7 @@
     "apps/web/package.json",
     "apps/web/README.md",
     "apps/api",
+    "!apps/api/.env",
     "LICENSE"
   ],
   "devDependencies": {

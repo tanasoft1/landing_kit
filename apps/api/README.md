@@ -12,7 +12,8 @@ docker compose up -d db        # Postgres, on host port 5433
 cd api && make run             # on PORT (default 3000). `make dev` hot-reloads if you have air.
 ```
 
-Migrations run at startup.
+Migrations run at startup, forward only. To change the schema, add a new migration with
+`make migrate-create name=add_something` and write its `.up.sql`.
 
 Postgres uses host port 5433 so it doesn't clash with one already on your machine. If you change
 `DB_USER`, `DB_PASSWORD` or `DB_NAME`, change `POSTGRES_USER`, `POSTGRES_PASSWORD` and
