@@ -44,6 +44,7 @@ type LoginAttempt struct {
 	FailedCount   int32      `json:"failed_count"`
 	LockedUntil   *time.Time `json:"locked_until"`
 	LastFailureAt time.Time  `json:"last_failure_at"`
+	Ip            string     `json:"ip"`
 }
 
 type RefreshToken struct {

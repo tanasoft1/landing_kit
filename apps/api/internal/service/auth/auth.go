@@ -65,6 +65,7 @@ const (
 	rotationGrace = 30 * time.Second
 )
 
+
 // lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
 // minute, capped. failures is the count AFTER the failure being recorded.
 func lockDuration(failures int32) time.Duration {
@@ -155,28 +156,54 @@ func New(pool *pgxpool.Pool, queries *sqlc.Queries, tokenService *secure.TokenSe
 	return &Service{pool: pool, queries: queries, tokenService: tokenService, audit: audit}
 }
 
-// Login checks req's credentials and, on success, issues a fresh access/refresh token pair. ip
-// and userAgent are recorded against the attempt, successful or not, and are never used to decide
-// whether it succeeds.
+// Login checks req's credentials and, on success, issues a fresh access/refresh token pair. ip and
+// userAgent are recorded against the attempt, successful or not. Neither has any say in whether
+// the credentials are accepted; ip does decide whose backoff this attempt counts against, which is
+// a separate question and the subject of the comment below.
 func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent string) (*LoginResult, error) {
 	// Read the lock before anything else, and read it for every email rather than only for
 	// registered ones: rows exist for any address that has failed, registered or not, so a
 	// lockout can never reveal that an account exists.
-	attempt, attemptErr := s.queries.GetLoginAttempt(ctx, req.Email)
-	if attemptErr != nil && !errors.Is(attemptErr, pgx.ErrNoRows) {
-		slog.Error("reading login attempts failed", slog.Any("err", attemptErr))
-		return nil, fmt.Errorf("get login attempt: %w", attemptErr)
-	}
-	if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
-		slog.Warn("login attempt against a locked email")
-		// Recorded, not merely logged. This branch returns before every other audit write in
-		// Login, so an attacker hammering a locked address used to leave nothing in
-		// admin_audit_log at all -- the table an operator reads to find out they are under
-		// attack stayed empty for exactly the attack it should have shown. No admin id: the row
-		// is not looked up on this path, deliberately, since doing so would make the lock a
-		// probe for whether the address is registered.
-		s.audit.Record(ctx, auditsvc.EventLoginLocked, nil, ip, userAgent)
-		return nil, errAccountLocked
+	//
+	// The lock is keyed on the email AND the address the attempt came from, and skipped entirely
+	// when there is no address. Both halves matter.
+	//
+	// Keyed on the pair, because an account-wide lock is a denial of service against anyone whose
+	// email is known. It cannot be anything else: deciding whether the real admin or a stranger is
+	// knocking means checking the password, and refusing to check the password is what the lock
+	// is. So a stranger who sent one failed login each time the lock lapsed kept the address shut
+	// and kept the admin out with it. Per source, that stranger locks out their own source and
+	// nobody else. The cost is that a throttle spanning many source addresses is gone; it is the
+	// same property, so it could not be kept. Guessing is still charged per source on top of
+	// loginLimiter, which allows five attempts per fifteen minutes from one address.
+	//
+	// Skipped without an address, because an empty ip is not an address, it is every caller who
+	// arrived without one, and a lock on that shared bucket is the account-wide lock again under
+	// another name. The rate limiters make the same call for the same reason -- see
+	// clientKeyGenerator in internal/http/routes, which hands an unresolvable caller a key of
+	// their own rather than letting them join everyone else's. Failing open for one request beats
+	// a defence that can lock out a real admin. The audit rows below are written either way: a
+	// failed login is a fact worth recording whether or not it can be counted against a source.
+	if ip != "" {
+		attempt, attemptErr := s.queries.GetLoginAttempt(ctx, sqlc.GetLoginAttemptParams{
+			Email: req.Email,
+			Ip:    ip,
+		})
+		if attemptErr != nil && !errors.Is(attemptErr, pgx.ErrNoRows) {
+			slog.Error("reading login attempts failed", slog.Any("err", attemptErr))
+			return nil, fmt.Errorf("get login attempt: %w", attemptErr)
+		}
+		if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
+			slog.Warn("login attempt against a locked email")
+			// Recorded, not merely logged. This branch returns before every other audit write in
+			// Login, so an attacker hammering a locked address used to leave nothing in
+			// admin_audit_log at all -- the table an operator reads to find out they are under
+			// attack stayed empty for exactly the attack it should have shown. No admin id: the
+			// row is not looked up on this path, deliberately, since doing so would make the lock
+			// a probe for whether the address is registered.
+			s.audit.Record(ctx, auditsvc.EventLoginLocked, nil, ip, userAgent)
+			return nil, errAccountLocked
+		}
 	}
 
 	admin, err := s.queries.GetAdminByEmail(ctx, req.Email)
@@ -188,7 +215,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 			utils.CheckPasswordHash(req.Password, dummyPasswordHash)
 			slog.Warn("login attempt with unknown email")
 			s.audit.Record(ctx, auditsvc.EventLoginFailed, nil, ip, userAgent)
-			return nil, s.noteFailure(ctx, req.Email)
+			return nil, s.noteFailure(ctx, req.Email, ip)
 		}
 		slog.Error("failed to query admin during login", slog.Any("err", err))
 		return nil, fmt.Errorf("get admin by email: %w", err)
@@ -197,11 +224,18 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	if !utils.CheckPasswordHash(req.Password, admin.PasswordHash) {
 		slog.Warn("login attempt with invalid password", slog.String("admin_id", admin.ID.String()))
 		s.audit.Record(ctx, auditsvc.EventLoginFailed, &admin.ID, ip, userAgent)
-		return nil, s.noteFailure(ctx, req.Email)
+		return nil, s.noteFailure(ctx, req.Email, ip)
 	}
 
-	if err := s.queries.ClearLoginAttempts(ctx, req.Email); err != nil {
-		slog.Warn("clearing login attempts failed", slog.Any("err", err))
+	// Only this pair, never every row for the email. A successful sign-in from the office should
+	// not wipe the backoff a stranger elsewhere has been accumulating against the same address.
+	if ip != "" {
+		if err := s.queries.ClearLoginAttempts(ctx, sqlc.ClearLoginAttemptsParams{
+			Email: req.Email,
+			Ip:    ip,
+		}); err != nil {
+			slog.Warn("clearing login attempts failed", slog.Any("err", err))
+		}
 	}
 
 	// Upgrade a hash written at an older cost. Deliberately not fatal: the caller supplied the
@@ -228,8 +262,9 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	}
 
 	// The same bargain for login_attempts, which ClearLoginAttempts above only ever empties for
-	// the email that just succeeded. A row for an address that failed and was never tried again
-	// would otherwise live forever, so a spray across a million addresses leaves a million rows.
+	// the one email and source that just succeeded. A row for an address that failed and was never
+	// tried again would otherwise live forever, so a spray across a million addresses leaves a
+	// million rows, and now one per source that tried each of them.
 	//
 	// The prune keys on staleness, not on the lock. Keying on locked_until only reached rows that
 	// had failed five times, and the million-address sprayer stops at four.
@@ -265,12 +300,22 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 // write failure is logged, not returned: the caller supplied bad credentials either way, and
 // refusing to answer would hand an attacker a way to tell a bookkeeping error from a wrong
 // password.
+//
 // The count the write returns is a decayed one, not a running total: a previous failure older than
 // loginFailureDecay resets it to one instead of adding to it, in the same statement, so two
 // concurrent failures cannot disagree about whether the window had lapsed.
-func (s *Service) noteFailure(ctx context.Context, email string) error {
+//
+// The count belongs to the pair (email, ip), and a caller with no resolvable address gets no count
+// at all. Both follow from the lock Login reads; the reasoning is written there. The audit row for
+// this failure is already written by the time we are called, so nothing about the attempt goes
+// unrecorded when the counting is skipped.
+func (s *Service) noteFailure(ctx context.Context, email, ip string) error {
+	if ip == "" {
+		return errInvalidCredentials
+	}
 	attempt, err := s.queries.RecordLoginFailure(ctx, sqlc.RecordLoginFailureParams{
 		Email:       email,
+		Ip:          ip,
 		DecayBefore: time.Now().Add(-loginFailureDecay),
 	})
 	if err != nil {
@@ -281,6 +326,7 @@ func (s *Service) noteFailure(ctx context.Context, email string) error {
 		until := time.Now().Add(d)
 		if err := s.queries.ExtendLoginLock(ctx, sqlc.ExtendLoginLockParams{
 			Email:       email,
+			Ip:          ip,
 			LockedUntil: &until,
 		}); err != nil {
 			slog.Error("locking an email after repeated failures failed", slog.Any("err", err))
