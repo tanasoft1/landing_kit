@@ -1,5 +1,5 @@
 -- name: GetLoginAttempt :one
-SELECT * FROM login_attempts WHERE email = $1;
+SELECT * FROM login_attempts WHERE email = @email AND ip = @ip;
 
 -- name: RecordLoginFailure :one
 -- One statement so two concurrent failures cannot both read 2 and both write 3. The returned row
@@ -7,17 +7,21 @@ SELECT * FROM login_attempts WHERE email = $1;
 -- the lock itself is written by ExtendLoginLock afterwards. The curve stays in Go because it is
 -- policy, not storage.
 --
--- The count decays. A failure older than decay_before resets it to one instead of adding to it,
--- which is what stops the backoff from becoming a permanent lockout: without it the curve pinned
--- at its cap after nine failures and stayed there, so one request every fifteen minutes held a
--- known admin email shut forever. An attacker now has to sustain more than one failure per decay
--- window to keep the lock on, and the per-IP limiter bounds how fast a single host can do that.
+-- Keyed on the pair, not on the email. A lock that spanned every source address was a denial of
+-- service against any admin whose address is known: it refused the real admin's correct password
+-- along with the guesses, and one stranger sending a failure each time the lock lapsed held it on
+-- indefinitely. Per source, a stranger locks out only themselves.
+--
+-- The count decays on top of that. A failure older than decay_before resets it to one instead of
+-- adding to it, so a source that served a full-length lock starts again from the bottom of the
+-- curve rather than staying pinned at its cap. That is what lets an admin who fumbled their
+-- password nine times from their own machine recover without waiting for the prune.
 --
 -- decay_before is a timestamp computed in Go rather than an interval literal here, for the same
 -- reason the curve is in Go: the window is policy. Storage only compares.
-INSERT INTO login_attempts (email, failed_count)
-VALUES (@email, 1)
-ON CONFLICT (email) DO UPDATE
+INSERT INTO login_attempts (email, ip, failed_count)
+VALUES (@email, @ip, 1)
+ON CONFLICT (email, ip) DO UPDATE
     SET failed_count = CASE
             WHEN login_attempts.last_failure_at < @decay_before THEN 1
             ELSE login_attempts.failed_count + 1
@@ -31,10 +35,13 @@ RETURNING *;
 -- that incremented to 5 shorten a lock a request that incremented to 20 had already set.
 UPDATE login_attempts
 SET locked_until = GREATEST(COALESCE(locked_until, @locked_until), @locked_until)
-WHERE email = @email;
+WHERE email = @email AND ip = @ip;
 
 -- name: ClearLoginAttempts :exec
-DELETE FROM login_attempts WHERE email = $1;
+-- Clears the pair that just succeeded, not every row for the email. Clearing them all would let
+-- one successful sign-in wipe the backoff another source had accumulated, which hands an attacker
+-- a free reset every time the real admin signs in.
+DELETE FROM login_attempts WHERE email = @email AND ip = @ip;
 
 -- name: PruneLoginAttempts :exec
 -- Prunes on staleness, not on the lock. The previous version required locked_until IS NOT NULL,
@@ -44,6 +51,13 @@ DELETE FROM login_attempts WHERE email = $1;
 --
 -- The locked_until half stays as a guard, not as the selector: a row still inside its lock window
 -- is evidence of something current no matter how old its last failure looks.
+--
+-- Rows now multiply by distinct source addresses per email rather than being one per email, so
+-- this deletes more than it was written to. It still bounds the table, because the bound was never
+-- the number of rows: every row needs a failed login to create it and a fresh failure every day to
+-- survive, and the per-client rate limit caps how many of those one source can send. A sprayer
+-- across many addresses and many sources writes more rows and still has to keep every one of them
+-- warm.
 DELETE FROM login_attempts
 WHERE last_failure_at < @stale_before
   AND (locked_until IS NULL OR locked_until < now());

@@ -11,45 +11,60 @@ import (
 )
 
 const clearLoginAttempts = `-- name: ClearLoginAttempts :exec
-DELETE FROM login_attempts WHERE email = $1
+DELETE FROM login_attempts WHERE email = $1 AND ip = $2
 `
 
-func (q *Queries) ClearLoginAttempts(ctx context.Context, email string) error {
-	_, err := q.db.Exec(ctx, clearLoginAttempts, email)
+type ClearLoginAttemptsParams struct {
+	Email string `json:"email"`
+	Ip    string `json:"ip"`
+}
+
+// Clears the pair that just succeeded, not every row for the email. Clearing them all would let
+// one successful sign-in wipe the backoff another source had accumulated, which hands an attacker
+// a free reset every time the real admin signs in.
+func (q *Queries) ClearLoginAttempts(ctx context.Context, arg ClearLoginAttemptsParams) error {
+	_, err := q.db.Exec(ctx, clearLoginAttempts, arg.Email, arg.Ip)
 	return err
 }
 
 const extendLoginLock = `-- name: ExtendLoginLock :exec
 UPDATE login_attempts
 SET locked_until = GREATEST(COALESCE(locked_until, $1), $1)
-WHERE email = $2
+WHERE email = $2 AND ip = $3
 `
 
 type ExtendLoginLockParams struct {
 	LockedUntil *time.Time `json:"locked_until"`
 	Email       string     `json:"email"`
+	Ip          string     `json:"ip"`
 }
 
 // Only ever extends. Concurrent failures compute different windows from different counts, and the
 // longest one is the one that should stand: taking the last writer instead would let a request
 // that incremented to 5 shorten a lock a request that incremented to 20 had already set.
 func (q *Queries) ExtendLoginLock(ctx context.Context, arg ExtendLoginLockParams) error {
-	_, err := q.db.Exec(ctx, extendLoginLock, arg.LockedUntil, arg.Email)
+	_, err := q.db.Exec(ctx, extendLoginLock, arg.LockedUntil, arg.Email, arg.Ip)
 	return err
 }
 
 const getLoginAttempt = `-- name: GetLoginAttempt :one
-SELECT email, failed_count, locked_until, last_failure_at FROM login_attempts WHERE email = $1
+SELECT email, failed_count, locked_until, last_failure_at, ip FROM login_attempts WHERE email = $1 AND ip = $2
 `
 
-func (q *Queries) GetLoginAttempt(ctx context.Context, email string) (LoginAttempt, error) {
-	row := q.db.QueryRow(ctx, getLoginAttempt, email)
+type GetLoginAttemptParams struct {
+	Email string `json:"email"`
+	Ip    string `json:"ip"`
+}
+
+func (q *Queries) GetLoginAttempt(ctx context.Context, arg GetLoginAttemptParams) (LoginAttempt, error) {
+	row := q.db.QueryRow(ctx, getLoginAttempt, arg.Email, arg.Ip)
 	var i LoginAttempt
 	err := row.Scan(
 		&i.Email,
 		&i.FailedCount,
 		&i.LockedUntil,
 		&i.LastFailureAt,
+		&i.Ip,
 	)
 	return i, err
 }
@@ -67,25 +82,33 @@ WHERE last_failure_at < $1
 //
 // The locked_until half stays as a guard, not as the selector: a row still inside its lock window
 // is evidence of something current no matter how old its last failure looks.
+//
+// Rows now multiply by distinct source addresses per email rather than being one per email, so
+// this deletes more than it was written to. It still bounds the table, because the bound was never
+// the number of rows: every row needs a failed login to create it and a fresh failure every day to
+// survive, and the per-client rate limit caps how many of those one source can send. A sprayer
+// across many addresses and many sources writes more rows and still has to keep every one of them
+// warm.
 func (q *Queries) PruneLoginAttempts(ctx context.Context, staleBefore time.Time) error {
 	_, err := q.db.Exec(ctx, pruneLoginAttempts, staleBefore)
 	return err
 }
 
 const recordLoginFailure = `-- name: RecordLoginFailure :one
-INSERT INTO login_attempts (email, failed_count)
-VALUES ($1, 1)
-ON CONFLICT (email) DO UPDATE
+INSERT INTO login_attempts (email, ip, failed_count)
+VALUES ($1, $2, 1)
+ON CONFLICT (email, ip) DO UPDATE
     SET failed_count = CASE
-            WHEN login_attempts.last_failure_at < $2 THEN 1
+            WHEN login_attempts.last_failure_at < $3 THEN 1
             ELSE login_attempts.failed_count + 1
         END,
         last_failure_at = now()
-RETURNING email, failed_count, locked_until, last_failure_at
+RETURNING email, failed_count, locked_until, last_failure_at, ip
 `
 
 type RecordLoginFailureParams struct {
 	Email       string    `json:"email"`
+	Ip          string    `json:"ip"`
 	DecayBefore time.Time `json:"decay_before"`
 }
 
@@ -94,22 +117,27 @@ type RecordLoginFailureParams struct {
 // the lock itself is written by ExtendLoginLock afterwards. The curve stays in Go because it is
 // policy, not storage.
 //
-// The count decays. A failure older than decay_before resets it to one instead of adding to it,
-// which is what stops the backoff from becoming a permanent lockout: without it the curve pinned
-// at its cap after nine failures and stayed there, so one request every fifteen minutes held a
-// known admin email shut forever. An attacker now has to sustain more than one failure per decay
-// window to keep the lock on, and the per-IP limiter bounds how fast a single host can do that.
+// Keyed on the pair, not on the email. A lock that spanned every source address was a denial of
+// service against any admin whose address is known: it refused the real admin's correct password
+// along with the guesses, and one stranger sending a failure each time the lock lapsed held it on
+// indefinitely. Per source, a stranger locks out only themselves.
+//
+// The count decays on top of that. A failure older than decay_before resets it to one instead of
+// adding to it, so a source that served a full-length lock starts again from the bottom of the
+// curve rather than staying pinned at its cap. That is what lets an admin who fumbled their
+// password nine times from their own machine recover without waiting for the prune.
 //
 // decay_before is a timestamp computed in Go rather than an interval literal here, for the same
 // reason the curve is in Go: the window is policy. Storage only compares.
 func (q *Queries) RecordLoginFailure(ctx context.Context, arg RecordLoginFailureParams) (LoginAttempt, error) {
-	row := q.db.QueryRow(ctx, recordLoginFailure, arg.Email, arg.DecayBefore)
+	row := q.db.QueryRow(ctx, recordLoginFailure, arg.Email, arg.Ip, arg.DecayBefore)
 	var i LoginAttempt
 	err := row.Scan(
 		&i.Email,
 		&i.FailedCount,
 		&i.LockedUntil,
 		&i.LastFailureAt,
+		&i.Ip,
 	)
 	return i, err
 }
