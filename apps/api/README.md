@@ -212,8 +212,8 @@ reload, which a five-request budget turned into a trip back to the login form af
 morning's work.
 
 Login also backs off per email, which the per-client limit alone cannot do: that limit counts
-requests and does not care what they are for, so from the fifth failed login the email is refused
-for a minute, doubling with each further failure up to fifteen. It is a bound rather than a wall:
+requests and does not care what they are for, so from the fifth failed login that email is refused
+for a minute from that address, doubling with each further failure up to an hour. It is a bound rather than a wall:
 guesses already in flight when the lock lands still get an answer, so a burst of twenty costs twenty
 guesses before it goes quiet for the window. Both limits answer with the same 429.
 `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would leave
@@ -229,9 +229,14 @@ attacker spread across a thousand of them pays it a thousand times over rather t
 is the same property as the denial of service, so it could not be kept. The per-client limit still
 covers each of those addresses.
 
-One case remains: someone sharing a source address with you, on office NAT or a shared VPN, or
-behind a proxy where `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, which makes every request
-look like it came from the proxy. They can still lock that address out.
+One case remains: someone who genuinely shares a source address with you, on office NAT or a
+shared VPN egress. They can still lock that address out. So can everybody behind a proxy where
+`PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, because then every request looks like it came
+from the proxy and they all share one address.
+
+What is deliberately not on that list is a caller who simply claims to be you. Set both variables
+and the service takes the address your proxy observed, not the one the request asked to be filed
+under. See the note on `PROXY_HEADER` below.
 
 A successful login clears the counter for the address it came from, so the doubling starts from
 nothing next time. So does half an hour of quiet: a failure older than that no longer counts
@@ -248,7 +253,12 @@ limit above is keyed on the client address, and `PROXY_HEADER` alone used to mea
 believed whatever the caller wrote in that header: a fresh value per request is a fresh bucket per
 request, which is no limit at all, and the same value lands in `admin_audit_log.ip`.
 `TRUSTED_PROXIES` is a comma-separated list of IPs or CIDR ranges — `10.0.0.0/8,172.16.0.0/12` —
-and the header is read only when the connection actually came from one of them. Leaving it empty
+and the header is read only when the connection actually came from one of them. It is also what
+lets the server pick the right field out of that header: proxies append to `X-Forwarded-For`
+instead of replacing it, so its leftmost entry is whatever the caller sent, and the server takes
+the rightmost entry that is not one of these trusted addresses. Without the list there is nothing
+to measure that against. If your proxy replaces the header rather than appending to it, name one it
+writes itself, such as `X-Real-IP`. Leaving it empty
 while `PROXY_HEADER` is set means the header is ignored entirely and every request behind the proxy
 shares one bucket, which is a real cost and still the safer default. An entry that will not parse
 stops startup rather than being silently dropped.

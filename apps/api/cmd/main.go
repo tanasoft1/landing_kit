@@ -169,7 +169,8 @@ func run() error {
 		EnableIPValidation: true,
 	})
 
-	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService, !cfg.IsDevelopment())
+	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService, !cfg.IsDevelopment(),
+		cfg.Server.ProxyHeader, cfg.Server.TrustedProxyList())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

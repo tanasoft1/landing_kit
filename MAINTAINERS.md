@@ -525,6 +525,38 @@ behind a proxy where `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, which c
 caller onto the proxy's own address. That case is real and much narrower than an address anyone on
 the internet can shut down.
 
+Keying on the address is only worth anything if the caller cannot choose it, and out of the box
+they could. Fiber's `c.IP()` returns the first valid address in `PROXY_HEADER`, reading left to
+right, while every common proxy appends to `X-Forwarded-For` rather than replacing it -- an ALB
+does, and so does nginx's `$proxy_add_x_forwarded_for`. The leftmost field is therefore whatever
+the caller sent. A caller who sent the admin's address was filed as that admin and could lock them
+out, which is the original denial of service wearing the fix's clothes; a caller who sent a
+different value every time got a fresh limiter bucket and a fresh backoff row per request and never
+reached a threshold at all.
+
+`normalizeClientIP` in `internal/http/routes/clientip.go` closes both. It runs ahead of every
+limiter, walks `PROXY_HEADER` from the right, and stops at the first field that is not itself a
+trusted proxy -- everything to the right of that was written by infrastructure, everything to the
+left could have been written by anyone. It then rewrites the header to that single value, so
+`c.IP()` answers correctly everywhere rather than each call site having to remember which of the
+two answers it wanted. It is a no-op with no `PROXY_HEADER`, and a no-op when the request did not
+arrive from a trusted proxy, because Fiber ignores the header in both cases.
+
+Measured against a server configured with `PROXY_HEADER=X-Forwarded-For` and
+`TRUSTED_PROXIES=127.0.0.1`, filing the row the login backoff writes:
+
+| `X-Forwarded-For` sent | address recorded |
+| --- | --- |
+| `203.0.113.9, 198.51.100.50` | `198.51.100.50` |
+| `203.0.113.9, 127.0.0.1, 127.0.0.1, 198.51.100.50` | `198.51.100.50` |
+| `not-an-ip, 203.0.113.9, 198.51.100.50` | `198.51.100.50` |
+| header absent | the socket peer |
+| `127.0.0.1, 127.0.0.1` (all trusted) | the socket peer |
+
+The one case it cannot help with is a proxy that does not append the address it observed. If yours
+replaces `X-Forwarded-For` wholesale with the caller's value, no amount of parsing recovers the
+truth, and the setting to reach for is a header your proxy writes itself, such as `X-Real-IP`.
+
 `ip` is `text` and not `inet` because the key needs a value for "no resolvable client address", and
 `inet` has none. `Login` never writes that value. With no address it skips the lockout entirely, reading
 nothing, recording nothing and locking nothing, for the reason `clientKeyGenerator` gives an

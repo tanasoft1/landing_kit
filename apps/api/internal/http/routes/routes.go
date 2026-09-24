@@ -19,8 +19,12 @@ import (
 // No global rate limiter. The limited routes are POST /api/leads and the two /api/auth routes,
 // and each needs a key generator that cannot collapse callers into one bucket (see
 // internal/http/routes/public.go).
-func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService, isProduction bool) {
+func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService, isProduction bool, proxyHeader string, trustedProxies []string) {
 	app.Use(recover.New())
+	// Before the logger, and well before the limiters: everything downstream that asks who the
+	// caller is reads ProxyHeader through c.IP(), and this is what makes that answer the caller
+	// rather than a field the caller wrote. See clientip.go.
+	app.Use(normalizeClientIP(proxyHeader, trustedProxies))
 	app.Use(logger.New())
 	app.Use(helmet.New(helmet.Config{
 		// Both default to values that break a served site, and the breakage is browser-side with
