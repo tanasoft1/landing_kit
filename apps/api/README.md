@@ -234,9 +234,11 @@ shared VPN egress. They can still lock that address out. So can everybody behind
 `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, because then every request looks like it came
 from the proxy and they all share one address.
 
-What is deliberately not on that list is a caller who simply claims to be you. Set both variables
-and the service takes the address your proxy observed, not the one the request asked to be filed
-under. See the note on `PROXY_HEADER` below.
+What is deliberately not on that list is a caller who simply claims to be you, as long as your
+proxy appends the address it observed and you have set both variables. The service reads that
+header from the right and stops at the first field that is not one of your trusted proxies. The
+case it cannot save you from is a proxy that passes the caller's header through untouched, because
+then every field in it is the caller's. See the note on `PROXY_HEADER` below.
 
 A successful login clears the counter for the address it came from, so the doubling starts from
 nothing next time. So does half an hour of quiet: a failure older than that no longer counts

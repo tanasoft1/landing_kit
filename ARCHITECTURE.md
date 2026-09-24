@@ -440,7 +440,7 @@ sequenceDiagram
 | `POST /api/auth/logout` | the refresh cookie, plus any `X-Requested-With` | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Eleven properties of this path are deliberate and easy to undo by accident:
+Fourteen properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
