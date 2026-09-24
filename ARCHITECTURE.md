@@ -435,7 +435,7 @@ sequenceDiagram
 
 | Endpoint | Auth | Limits |
 |---|---|---|
-| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email and client address together: from the 5th failure, one minute doubling to a 15-minute cap, decaying after 10 minutes without a failure |
+| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email and client address together: from the 5th failure, one minute doubling to a 60-minute cap, decaying after 30 minutes without a failure |
 | `POST /api/auth/refresh` | the refresh cookie, plus any `X-Requested-With` | 30 per 15 minutes per client |
 | `POST /api/auth/logout` | the refresh cookie, plus any `X-Requested-With` | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
@@ -463,10 +463,17 @@ Eleven properties of this path are deliberate and easy to undo by accident:
   Per source, a stranger locks out their own source and nobody else. The cost is that the backoff
   no longer spans source addresses, which is the same property, so it could not be kept; each of
   those addresses still gets only five attempts per fifteen minutes from the limiter. What remains
-  is an attacker who shares an address with the admin, on office NAT, a shared VPN, or a deployment
-  with `PROXY_HEADER` set and `TRUSTED_PROXIES` empty. They can still lock that address out. A caller with no resolvable
-  address is not counted at all, for the reason the limiter gives such a caller a key of their own:
-  one shared bucket for everyone without an address is the account-wide lock again.
+  is an attacker who really does share an address with the admin, on office NAT, a shared VPN, or a
+  deployment with `PROXY_HEADER` set and `TRUSTED_PROXIES` empty, which puts every caller on the
+  proxy's own address. A caller with no resolvable address is not counted at all, for the reason the
+  limiter gives such a caller a key of their own: one shared bucket for everyone without an address
+  is the account-wide lock again.
+- **The address every limit is keyed on is the one the proxy observed, not the one the caller
+  claimed.** Fiber reads `PROXY_HEADER` from the left, and every common proxy appends to
+  `X-Forwarded-For` rather than replacing it, so the leftmost field is written by the caller. Left
+  alone, that lets a caller be filed under an admin's address and lock them out, or under a fresh
+  address per request and never reach any threshold at all. `normalizeClientIP` runs before the
+  limiters and rewrites the header to the rightmost field that is not itself a trusted proxy.
 - **The decay window sits between two walls.** A failure older than `loginFailureDecay`, thirty
   minutes, resets the count to one instead of adding to it. It is shorter than the one-hour cap, so
   a source that serves a full-length lock comes back at the bottom of the curve instead of

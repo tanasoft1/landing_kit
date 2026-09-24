@@ -84,14 +84,16 @@ const (
 
 // This is an assertion, not a value: it fails the build if loginFailureDecay is ever raised to or
 // past maxLockDuration. The subtraction is a compile-time constant, and a negative one does not
-// convert to uint, so the inversion cannot land quietly. It is written as a constant rather than
+// convert to an unsigned type, so the inversion cannot land quietly. uint64 rather than uint,
+// because uint is the platform word: on a 32-bit build the correct configuration would be the one
+// that failed to compile, since a 60-minute duration in nanoseconds does not fit in 32 bits. It is written as a constant rather than
 // as a test because the property is about two constants and nothing else, and a build that cannot
 // produce the inversion is stronger than a test run that catches it.
 //
 // The extra nanosecond makes equal windows fail too: a decay exactly as long as the longest lock
 // still leaves the count one nanosecond short of resetting, which is the same trap one minute
 // wider would be.
-const _ = uint(maxLockDuration - loginFailureDecay - time.Nanosecond)
+const _ = uint64(maxLockDuration - loginFailureDecay - time.Nanosecond)
 
 // lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
 // minute, capped. failures is the count AFTER the failure being recorded.
