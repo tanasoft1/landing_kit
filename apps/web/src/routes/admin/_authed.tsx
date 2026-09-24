@@ -6,76 +6,33 @@ import { refreshSession } from '@/admin/lib/api'
 import { ApiError } from '@/admin/lib/errors'
 import { getSession } from '@/admin/lib/session'
 
-/**
- * Pathless (`_authed`), so `/admin/leads` keeps its URL while `/admin/login` stays a sibling
- * rather than a child. A guard on `admin.tsx` would also run for the login route, redirect an
- * unauthenticated visitor to it, and loop.
- *
- * This is a convenience, not the security boundary. Every /api/admin/* route is behind the Go
- * service's AuthMiddleware, and that is what actually refuses data. All this decides is which
- * screen to paint.
- */
+// Pathless, so /admin/login is a sibling. A guard on admin.tsx would also guard login and loop.
+// Not the security boundary: the API refuses data without a valid token.
 export const Route = createFileRoute('/admin/_authed')({
-  // Client-only, and load-bearing rather than a preference. Rendered where there is no browser,
-  // this subtree has no session to check and no origin to resolve `/api` against: `beforeLoad`
-  // would wave every visitor through for want of anything to ask, and the leads loader would
-  // hand Node's fetch the relative URL `/api/admin/leads`. Node rejects a relative URL,
-  // `apiFetch` turns that rejection into ApiError(0, 'network'), and a signed-in admin gets an
-  // error page where the table should be. Measured: without this line the dev server answered
-  // `GET /admin/leads?page=1` with a 500 whose body was the shell wrapped around "0 network".
-  // With it, the server emits a pending match for this route and no match at all for its child,
-  // so `beforeLoad` and the loader below it each run once, on the client, where the session and
-  // the origin both exist.
+  // Required. On the server there is no session and no origin for the relative `/api` URL,
+  // so the guard and loaders must run in the browser.
   ssr: false,
-  // Without this the server emitted a body of `<!--$--><!--$--><!--/$-->` and nothing else, so
-  // `pnpm dev` and /admin/leads was a white page until the bundle booted. That reads as broken
-  // software on the first run of a freshly scaffolded project, which is the one impression this
-  // kit exists to get right.
-  //
-  // `PanelSkeleton`, not `AdminShell`. This frame is painted BEFORE the guard below has run, so
-  // whoever is looking at it may have no session and may be about to be sent to the login screen.
-  // The reasoning for keeping the shell out of it is on the component.
+  // Without it, the server sends an empty body and the page is white until JS loads.
+  // Not AdminShell: this paints before the guard runs, so the visitor may not be signed in.
   pendingComponent: PanelSkeleton,
   beforeLoad: async () => {
     if (getSession().accessToken !== null) return
-    // A reload starts with an empty session by design, so this is the ordinary path, not the
-    // exceptional one: the refresh cookie is the only thing that survived, and one round trip
-    // turns it back into an access token.
+    // The normal path after a reload: the session lives in memory only.
     const outcome = await refreshSession()
     if (outcome === 'refreshed') return
 
-    // A refresh the API could not answer is not a session ending, so it does not get the login
-    // screen. The cookie is untouched and very probably still good; what failed is the server, or
-    // something in front of it. Throwing sends this to the boundary below, which says so. A
-    // password prompt here would tell an admin their session expired when it did not, and teach
-    // them to retype the admin password whenever the panel misbehaves — the one habit worth not
-    // teaching the person who holds the only credential.
+    // The server failed, not the session. Show an error, not a password prompt.
     if (outcome === 'unavailable') throw new ApiError(503, 'unavailable', '')
 
-    // No `next` parameter. Carrying a redirect target through the login screen is an
-    // open-redirect waiting to be built wrong, and the panel has one destination worth landing
-    // on anyway.
+    // No `next` parameter on purpose. It invites an open redirect.
     throw redirect({ to: '/admin/login' })
   },
   component: AuthedLayout,
   errorComponent: PanelError,
 })
 
-/**
- * What the panel shows when the guard above, or anything below it, throws.
- *
- * Without one, the router's built-in component renders `error.message` — "503 unavailable" — over
- * a stack trace toggle, which tells an operator nothing they can act on. This renders the panel's
- * own translated string instead, in whichever language they have set.
- *
- * Not wrapped in `AdminShell`, for the same reason `PanelSkeleton` is not: the guard may have
- * thrown before anyone was known to be signed in, and the shell's nav and sign-out button are
- * chrome for someone who is.
- */
-// `unknown`, not `Error`: @tanstack/react-router widened ErrorComponentProps.error from Error to
-// unknown in a patch release. A generated project has no lockfile and resolves `^` to whatever is
-// current, so a narrower annotation here typechecks in the kit and fails in every project the kit
-// writes. `unknown` satisfies both, and the instanceof below already narrows it.
+// Not in AdminShell: the guard may throw before anyone is known to be signed in.
+// `error: unknown`, not Error. Some router versions type it as unknown, and Error fails there.
 function PanelError({ error }: { error: unknown }) {
   const t = useT()
   return (

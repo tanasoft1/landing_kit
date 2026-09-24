@@ -1,5 +1,5 @@
-// The copy layer: kit files in, project files out. Everything here is verbatim or a named,
-// exact-match edit — nothing is generated. Generation is the next layer's job.
+// The copy layer: kit files in, project files out. Everything is verbatim or a named, exact-match
+// edit. Generation is the next layer's job.
 import {
   copyFileSync,
   existsSync,
@@ -35,75 +35,24 @@ import {
   TRANSFORMED_FILES,
 } from './kit-manifest.mjs'
 
-// --- the three README sections a generated project must not claim to have --------------------
-// Each is named once and used three times over: removed from the body, from the `## Contents`
-// list, and from /docs' RECIPES array. `check-conventions.mjs` ships to the generated project and
-// checks all three against each other, so a partial removal fails the project's own `pnpm
-// conventions` rather than shipping a dangling anchor.
-// Empty, and by design. Every section that a generated project must not claim to have is now
-// either absent from README.md entirely — the maintainer-only material lives in MAINTAINERS.md,
-// which is not in `package.json`'s `files` — or listed in DROPPED_SECTIONS_README_ONLY below.
-//
-// This list is the one whose entries must ALSO be `RECIPES` entries in
-// `src/components/docs/config-reference.tsx`: `transformConfigReference` iterates it and throws
-// when a heading has no matching RECIPES line. Kept as the seam for the next section that is both
-// a README section and a /docs recipe.
-const DROPPED_SECTIONS = []
-
-// Dropped from the README exactly like the list above, but NOT from `RECIPES`, because they were
-// never in it. `transformConfigReference` iterates `DROPPED_SECTIONS` and throws when an entry has
-// no matching RECIPES line, so adding either of these there would make every scaffold fail on a
-// heading that was correctly never listed. Two lists, one difference: RECIPES membership.
-const DROPPED_SECTIONS_README_ONLY = [
-  // How to create a project, aimed at someone who has not created one yet. A generated project
-  // already exists, so its README opens on `## Running it` instead.
+// --- README sections a generated project must not have -----------------------------------------
+// Dropped from the README and its Contents list. None of them are /docs RECIPES entries.
+const DROPPED_SECTIONS = [
+  // A generated project already exists.
   'Create your site',
-  // The remaining CLI flags, for a project that does not contain the CLI.
   'Scaffolding options',
-  // Points at MAINTAINERS.md, which is not in `files` — so in a generated project the link would
-  // be dead and the subject irrelevant.
+  // Points at MAINTAINERS.md, which doesn't ship.
   'Working on the kit itself',
 ]
 
-// Scripts that do not exist in a generated `package.json`, so their rows describe nothing.
-//
-// Empty since `smoke:*` and `lighthouse*` moved out of `package.json` into `tools/kit.mjs`: the
-// kit's README no longer documents them as `pnpm` scripts, so there is no row left to remove.
-// Kept as the seam rather than deleted, because the next kit-only script added to the Scripts
-// table needs exactly this list — and `dropRowIn` throws when a named row is absent, so a stale
-// entry here would fail every scaffold rather than pass one quietly.
-const DROPPED_SCRIPTS = []
-
-// Kit-only prose that is NOT a whole section, and so survives the section drops above.
-//
-// Empty, and that is the design rather than an accident. Every kit-only claim in the README lives
-// inside one of the five dropped sections, so removing those sections is the whole job. The list
-// was long when kit-only facts were scattered through surviving prose — each one an exact string
-// that broke whenever anyone reworded a sentence near it.
-//
-// Kept as the seam: `replaceExactText` throws on a miss AND on an ambiguity, so a stale entry
-// fails every scaffold loudly instead of passing one quietly. Add here only when a kit-only fact
-// genuinely cannot be moved into a dropped section.
-const README_EDITS = []
-
-// The one README section whose removal depends on an ANSWER rather than on the kit/project
-// difference. Everything in the two lists above is dropped from every scaffold, because a
-// generated project of any shape lacks what those sections describe. This one is true of a
-// `--backend=admin` project and false of the other two, so it is dropped for those two and kept
-// for that one — the same rule `transformThemeCss` and `ADMIN_COPY_DIRS` follow, applied to prose.
-//
-// A README telling a `--backend=none` project's owner to sign in to a panel it does not have is
-// the same defect as shipping the panel's files, and a likelier one to survive: nothing type-checks
-// a paragraph. `dropContentsEntry` and `dropSection` both throw on a miss, so renaming the heading
-// without renaming it here fails every non-admin scaffold rather than shipping the section back.
+// Dropped unless the project chose `--backend=admin`. Renaming the heading without renaming it
+// here fails every non-admin scaffold.
 const ADMIN_README_SECTION = 'The admin panel'
 
 // --- guards -----------------------------------------------------------------------------------
 
-// Overwriting a developer's work silently is the worst thing this tool could do, so "exists" is
-// not the test — "has anything in it" is. Dotfiles count: a `.git` in there means it is someone's
-// repository, not an empty slot. A non-directory gets its own message rather than the raw
-// `ENOTDIR` `readdirSync` would otherwise surface: it is the same do-not-clobber case.
+// Never write into a directory that has anything in it, dotfiles included: a `.git` means it is
+// someone's repository.
 function assertEmptyTarget(outDir, label) {
   if (!existsSync(outDir)) return
   if (!statSync(outDir).isDirectory()) {
@@ -114,14 +63,8 @@ function assertEmptyTarget(outDir, label) {
   }
 }
 
-// The manifest says what to copy; this says what may never be copied whatever the manifest says.
-// NEVER_COPY is anchored at the root and NEVER_COPY_ANYWHERE matches any segment — see the
-// manifest for why the two cannot be one list.
-//
-// API_STATIC_DIST and API_STATIC_PLACEHOLDER are checked first and by exact match, not by segment:
-// the walk needs to descend into internal/static/dist (so the directory path itself must clear this
-// check) and then copy exactly one file out of it. Everything else in that directory still falls
-// through to the NEVER_COPY_ANYWHERE loop below and is refused, same as any other stray `dist`.
+// What may never be copied, whatever the manifest says. The API's static dist directory and its
+// placeholder are matched exactly first; every other `dist` path is refused below.
 function assertCopyable(rel) {
   if (rel === API_STATIC_DIST || rel === API_STATIC_PLACEHOLDER) return
   const segments = rel.split('/')
@@ -136,26 +79,12 @@ function assertCopyable(rel) {
 }
 
 // --- the panel's boundary, asserted rather than assumed -----------------------------------------
-//
-// Every other exclusion mechanism on this branch throws when its target is absent: `dropSection`,
-// `dropContentsEntry`, `replaceExactText` (on a miss AND on an ambiguity), `copyTree`'s missing
-// directory, `assertRouteTreeMatchesKit`. `isAdminPath` was the one that did not. It is a prefix
-// test over `src/routes/admin`, nothing proved the prefix matched anything on disk, and nothing
-// bounded panel content to that prefix at all — so a panel file under `src/components` or
-// `public` reached every non-admin scaffold past no gate whatsoever. Verified: a
-// `src/components/panel-badge.tsx` and a `public/admin/logo.svg` shipped to all five non-admin
-// profiles with no error and no warning.
-//
-// Two assertions, in the order the problem has: does the prefix name anything, and does anything
-// panel-shaped live outside it.
+// Two checks: every admin prefix names something real, and nothing panel-shaped lives outside the
+// declared roots. Without them, a stray panel file shipped to every non-admin project silently.
 
 /**
- * Every declared admin path names something real in the kit.
- *
- * Without this, renaming `src/admin` to `src/panel` costs nothing at scaffold time: ADMIN_COPY_DIRS
- * stops copying a directory that is no longer there (for an `admin` project, `copyTree` does throw
- * — but only for that one answer), and `isAdminPath`'s prefix stops matching, so the routes it was
- * filtering out ship to every project instead. The quiet direction is the dangerous one.
+ * Every declared admin path names something real in the kit. Otherwise renaming `src/admin` would
+ * quietly ship the panel's routes to every project.
  */
 function assertAdminPathsExist(kitRoot) {
   for (const rel of ADMIN_COPY_DIRS) {
@@ -178,24 +107,9 @@ function assertAdminPathsExist(kitRoot) {
   }
 }
 
-// What "looks like panel content" means here, chosen deliberately and stated so the next reader
-// knows what it does NOT mean.
-//
-// Two signals, both cheap and both about evidence rather than a guess at intent:
-//
-//  1. NAME. A path segment `admin`, or a basename starting with `admin`, outside the roots.
-//     `public/admin/logo.svg` and `src/components/admin-nav.tsx` are caught by this and by
-//     nothing else, because neither has imports to read.
-//  2. IMPORT. The file imports out of `src/admin`, whether through the `@/admin` alias or through
-//     a relative path that lands there. A file importing the panel's own components or API client
-//     is panel content wherever it is filed, and it is also the case that BREAKS a non-admin
-//     project rather than merely bloating it — the import resolves to nothing.
-//
-// What it does not catch: a panel file with a neutral name and no panel imports. The reviewer's
-// own `src/components/panel-badge.tsx` is exactly that, and it is still caught only by the
-// snapshot diff that `record` now prints. That is the honest division of labour — this assertion
-// catches panel content that says what it is, and the snapshot catches the rest by making a file
-// appearing in five profiles at once something a human reads.
+// Panel content means a path segment or basename starting with `admin`, or a file that imports
+// from `src/admin`. A neutrally named file with no panel imports isn't caught here; the snapshot
+// diff catches that.
 const ADMIN_NAMED = (rel) =>
   rel
     .split('/')
@@ -203,10 +117,8 @@ const ADMIN_NAMED = (rel) =>
 
 const PANEL_IMPORT_ALIAS = '@/admin'
 
-// Same shape as `assertShippedImportsAreDeclared`'s scan in cli/generate.mjs, and the same reason
-// for being a regex rather than a parser: no new dependency. Comment-only lines go first, because
-// this kit's prose quotes import statements often enough that a scan which believes them is a
-// scan that cries wolf.
+// A regex, not a parser, to avoid a dependency. Comment lines are skipped because the kit's
+// comments often quote imports.
 const IMPORT_FROM =
   /^[ \t]*(?:import|export)[ \t][^'"\n]*(?:\n[^'"\n]*)*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm
 const BARE_IMPORT = /^[ \t]*import[ \t]*['"]([^'"\n]+)['"]/gm
@@ -227,11 +139,8 @@ function panelImport(rel, spec) {
 }
 
 /**
- * Nothing outside the panel's declared roots looks like panel content.
- *
- * Walks only the trees COPY_DIRS and the block folders take WHOLE, because those are the ones a
- * stray file can hide in. COPY_FILES, BOUNDARY_FILES and TRANSFORMED_FILES are named one by one,
- * so a file that is not on the list is simply never copied and needs no predicate.
+ * Nothing outside the panel's roots looks like panel content. Only the trees copied whole are
+ * walked; files copied by name need no check.
  */
 function assertPanelStaysInItsRoots(kitRoot) {
   const problems = []
@@ -305,8 +214,7 @@ function copyOne(kitRoot, outDir, rel, written) {
   written.push(rel)
 }
 
-// `keep` is per-file, so a directory is never pruned wholesale by accident — `src/styles/presets`
-// is the only filtered entry and it has no subdirectories.
+// `keep` is per-file, so a directory is never pruned wholesale by accident.
 function copyTree(kitRoot, outDir, rel, written, keep) {
   assertCopyable(rel)
   const src = kitPath(kitRoot, rel)
@@ -323,12 +231,7 @@ function copyTree(kitRoot, outDir, rel, written, keep) {
 }
 
 // --- the API tree -------------------------------------------------------------------------------
-//
-// Mirrors copyOne/copyTree above, with two differences: the source root is apiPath, not kitPath,
-// and every destination is joined under API_DEST. Kept as separate functions rather than an extra
-// parameter on copyOne/copyTree, because those two are also called for the web tree with `rel`
-// used unmodified as the destination — threading a dest-prefix through them would make every call
-// site carry a value that is empty except here.
+// Like copyOne/copyTree, but the source is apiPath and every destination is under API_DEST.
 
 function copyOneApi(kitRoot, outDir, rel, written) {
   assertCopyable(rel)
@@ -339,7 +242,7 @@ function copyOneApi(kitRoot, outDir, rel, written) {
   const destRel = `${API_DEST}/${rel}`
   const dest = join(outDir, destRel)
   mkdirSync(dirname(dest), { recursive: true })
-  // Byte copy, not a read-and-write: matches copyOne, and nothing in the API tree is transformed.
+  // Byte copy, like copyOne. Nothing in the API tree is transformed.
   copyFileSync(src, dest)
   written.push(destRel)
 }
@@ -372,11 +275,8 @@ function copyApiTree(kitRoot, outDir, written) {
 
 // --- README.md --------------------------------------------------------------------------------
 
-// Line indices of the real '## ' headings. Fence-aware, because a section's extent is decided by
-// where the *next* heading is: a fenced block containing a line like '## Contents' would otherwise
-// end the section early and leave the rest of it behind as orphan prose — and that failure is
-// silent, since the heading being removed was found. Everything else in this file throws on a
-// miss; this was the one path that could quietly do the wrong thing instead.
+// Line indices of the real '## ' headings. Fence-aware, so a '## ' line inside a code block
+// doesn't end a section early.
 function headingIndices(lines) {
   const out = []
   let inFence = false
@@ -398,8 +298,7 @@ function sectionRange(lines, heading, why) {
   return [headings[at], at + 1 < headings.length ? headings[at + 1] : lines.length]
 }
 
-// Exact heading match, never a fuzzy one, and a miss throws. A silent no-op here ships a README
-// describing features the project does not have, and nothing downstream would notice.
+// Exact heading match, and a miss throws.
 function dropSection(lines, heading) {
   const [start, end] = sectionRange(
     lines,
@@ -410,18 +309,7 @@ function dropSection(lines, heading) {
   lines.splice(start, end - start)
 }
 
-// Every row removal is scoped to the section holding its table. Searching the whole file would
-// find the first line that happens to start the same way, and a table-row removal that hits the
-// wrong table is exactly the silent wrong result the fence handling above exists to prevent.
-function dropRowIn(lines, heading, prefix, why) {
-  const [start, end] = sectionRange(lines, heading, `cannot find the table to edit (${why})`)
-  const at = lines.findIndex((l, i) => i > start && i < end && l.startsWith(prefix))
-  if (at === -1) throw new Error(`README.md: no '${prefix}…' row under '## ${heading}' — ${why}`)
-  lines.splice(at, 1)
-}
-
-// Scoped to the Contents block on purpose: the same bracketed text appears as an inline link in
-// the body, and removing that would leave a sentence with a hole in it.
+// Scoped to the Contents block: the same link text can appear in the body.
 function dropContentsEntry(lines, heading) {
   const [start, end] = sectionRange(lines, 'Contents', 'cannot trim its list')
   const prefix = `- [${heading}](#`
@@ -435,14 +323,10 @@ function dropContentsEntry(lines, heading) {
   lines.splice(at, 1)
 }
 
-// A miss throws, and so does a second match: an edit that could land in either of two places is
-// not the exact replacement this file claims to make.
+// A miss throws, and so does a second match.
 function replaceExactText(text, file, from, to) {
   const at = text.indexOf(from)
-  // The first NON-EMPTY line, truncated: an edit whose match starts at a line break (removing a
-  // list item takes the newline before it, so the whole item goes and no blank line is left) has
-  // an empty first line, and reported `expected text not found:` with nothing after it — a throw
-  // that fires but says nothing is barely better than one that does not fire.
+  // The first non-empty line, so a match that starts with a line break still has a useful message.
   const first = from.split('\n').find((l) => l !== '') ?? from
   const shown = first.length > 90 ? `${first.slice(0, 90)}…` : first
   if (at === -1) throw new Error(`${file}: expected text not found: ${shown}`)
@@ -454,39 +338,23 @@ function replaceExactText(text, file, from, to) {
 
 function transformReadme(text, answers) {
   const lines = text.split('\n')
-  for (const heading of [...DROPPED_SECTIONS, ...DROPPED_SECTIONS_README_ONLY]) {
+  for (const heading of DROPPED_SECTIONS) {
     dropContentsEntry(lines, heading)
     dropSection(lines, heading)
   }
-  // See ADMIN_README_SECTION for why this one is conditional and the lists above are not.
+  // Conditional on the answer, unlike the lists above.
   if (answers.backend !== 'admin') {
     dropContentsEntry(lines, ADMIN_README_SECTION)
     dropSection(lines, ADMIN_README_SECTION)
   }
-  for (const script of DROPPED_SCRIPTS) {
-    dropRowIn(
-      lines,
-      'Scripts',
-      `| \`pnpm ${script}\` |`,
-      `a generated package.json has no '${script}' script`,
-    )
-  }
-  // No row drops here any more: the README's own tables describe only directories a generated
-  // project actually has. `configs/` and `tools/` used to appear in an architecture table and
-  // each needed removing by hand.
-
-  // Prose edits run last, over the joined text, so the structural removals above cannot disturb
-  // them. Currently a no-op — see README_EDITS.
-  let out = lines.join('\n')
-  for (const [from, to] of README_EDITS) out = replaceExactText(out, 'README.md', from, to)
+  const out = lines.join('\n')
   // Cutting the final section leaves the blank line that separated it; one trailing newline.
   return `${out.replace(/\n+$/, '')}\n`
 }
 
 // --- src/styles/theme.css ---------------------------------------------------------------------
 
-// `replacement === null` deletes the line. Either way a miss throws: a preset import left pointing
-// at `editorial.css` when the answer was `warm` is a build that succeeds and looks wrong.
+// `replacement === null` deletes the line. A miss throws, so a wrong preset import can't slip by.
 function replaceExactLine(lines, file, needle, replacement) {
   const at = lines.findIndex((l) => l.trim() === needle)
   if (at === -1) throw new Error(`${file}: expected line not found: ${needle}`)
@@ -503,187 +371,40 @@ function transformThemeCss(text, answers) {
     '@import "./presets/editorial.css";',
     `@import "./presets/${answers.preset}.css";`,
   )
-  // `configs/` is never copied, and Tailwind's `@source` scan of a path that does not exist is a
-  // silent no-op — the kind of leftover that survives for years.
+  // `configs/` is never copied, so its `@source` line goes.
   replaceExactLine(lines, file, '@source "../../configs/**/*.{ts,tsx}";', null)
-  // And the paragraph justifying that line goes with it. A comment explaining code that is not
-  // there is worse than no comment: the next reader looks for the `@source` it describes, does not
-  // find it, and has to work out which of the two is wrong.
-  let out = replaceExactText(
-    lines.join('\n'),
-    file,
-    '   here: `.css` is outside the globs below.)\n\n' +
-      '   Both source trees are listed: `KIT_CONFIG=onepage` is a supported build and must not ' +
-      'lose\n   styles from a config that renders a class. */',
-    '   here: `.css` is outside the globs below.) */',
-  )
-  // Same rule again for the shadcn token block: this file ships to every project, and the
-  // paragraph above those nine aliases explains them by reference to an admin panel a project on
-  // `none` or `api` does not have. The aliases themselves stay — they cost nothing, which is what
-  // the shortened version says — but a reader should not have to work out what panel they are
-  // being told about.
+  let out = lines.join('\n')
   if (answers.backend !== 'admin') {
-    // The panel's animation utilities, and the paragraph explaining them, removed together. Only
-    // `sheet.tsx` and `dropdown-menu.tsx` render these classes and both live in `src/admin/`, so
-    // a project without the panel would carry an `@import` of a package `cli/generate.mjs`
-    // deliberately leaves out of its `package.json` — a build that fails on a missing module.
-    //
-    // Taken out of the joined text rather than by line, because the comment above the import is
-    // as much a part of the removal as the import itself. `@import` has to precede every other
-    // at-rule, so the blank line that separated this from `@source` goes with it and the file's
-    // import block closes up exactly as it did before the panel existed.
-    //
-    // The kit's copy of this paragraph deliberately does NOT mention this function. It would be
-    // describing machinery a generated project does not have, which is the same rule the README
-    // and the shadcn block below follow. The coupling only needs saying on this side: change the
-    // wording in theme.css without changing it here and `replaceExactText` throws by name.
+    // The panel's animation import and its comment, removed together. Without the panel the
+    // package isn't in `package.json`, so the import would break the build. Change the wording in
+    // theme.css and this throws by name.
     out = replaceExactText(
       out,
       `${file} (tw-animate-css)`,
       `
-/* The \`animate-in\`, \`zoom-in-95\` and \`slide-in-from-*\` utilities the panel's sheet and dropdown
-   are written against. Tailwind v4 dropped them and nothing here defines them, so without this
-   both components appear and vanish with no transition and no error.
-
-   Imported HERE, inside Tailwind's own graph, rather than from a stylesheet of the panel's own.
-   A separate file outside the graph ships the library whole: 14,880 bytes, every utility,
-   used or not. From here Tailwind treats it like any other utility source and emits only what
-   the @source glob finds a file rendering — 4,187 bytes today. */
+/* Animation utilities for the panel's sheet and dropdown. Import it here, inside Tailwind, so
+   only used classes ship. Imported from any other stylesheet, the whole library ships. */
 @import "tw-animate-css";
 `,
       '',
-    )
-    out = replaceExactText(
-      out,
-      `${file} (shadcn token block)`,
-      `  /* Names shadcn/ui's components use, aliased onto tokens the presets already define rather than
-     given values of their own. A new colour would need its own contrast measurement in both
-     presets and both themes, and the panel has no surface the existing palette does not cover.
-     Aliasing here rather than in each preset also leaves the preset files, and the conventions
-     rule that checks their token surface is complete, untouched.
-
-     These cost a non-admin project nothing at build time: with \`source(none)\` and the @source
-     glob above, Tailwind only emits a utility some file actually uses, and a project with no
-     panel has no file using them. */`,
-      `  /* Names shadcn/ui's components use, aliased onto tokens the presets already define rather than
-     given values of their own, so adding a shadcn component needs no palette work first.
-
-     Nothing in this project uses them yet, and that costs nothing: with \`source(none)\` and the
-     @source glob above, Tailwind only emits a utility some file actually renders. */`,
     )
   }
   return out
 }
 
-// --- src/components/docs/config-reference.tsx ---------------------------------------------------
-
-function transformConfigReference(text) {
-  const file = 'src/components/docs/config-reference.tsx'
-  const lines = text.split('\n')
-  for (const entry of DROPPED_SECTIONS) {
-    // The array elements are one string literal per line; matching the trailing comma too keeps
-    // this from hitting a prefix of some other entry.
-    const at = lines.findIndex((l) => l.trim() === `'${entry}',`)
-    if (at === -1) {
-      throw new Error(
-        `${file}: no RECIPES entry '${entry}' — /docs would keep pointing readers at a README ` +
-          'section this project does not have',
-      )
-    }
-    lines.splice(at, 1)
-  }
-  return lines.join('\n')
-}
-
-// --- the surviving half of each boundary pair ---------------------------------------------------
-
-// The kit ships two implementations behind each of `@/motion`, `@/theme` and `@/submit`, and
-// `vite.config.ts` swaps between them on an env flag. A generated project gets exactly one, chosen
-// at scaffold time and baked into `vite.config.ts` and `tsconfig.json` — there is no flag left to
-// flip. So every sentence in the surviving half that explains itself by reference to the other one
-// describes machinery that is not there, which is the rule Task 4 applied to the README.
-//
-// Each edit is exact-match and throws on a miss or an ambiguity, via `replaceExactText`. The
-// `file` label is per-EDIT rather than per-file wherever one file has two edits whose first line
-// could be confused, because the thrown message quotes that first line to say what failed.
-
-function transformMotionAnimated(text) {
-  // Only the module-contract note needs rewriting. The LCP note above it used to point at the
-  // `## Lighthouse budget` README section; it now says "measure LCP first", which is true in a
-  // generated project too, so there is nothing left to edit there.
-  return replaceExactText(
-    text,
-    'src/integrations/motion.animated.tsx (module contract)',
-    '// Type-checks this file against the shared `@/motion` surface, so the two variants cannot drift\n' +
-      '// apart. `tsconfig` points `@/motion` at this file only, which is why motion.noop.tsx needs the\n' +
-      '// same line: without it, `KIT_ANIMATION=off` is the one setup nothing type-checks.',
-    '// Type-checks this file against the shared `@/motion` surface. Nothing else does: a caller\n' +
-      '// only checks the exports it imports, so a missing export would compile until something\n' +
-      '// reached for it.',
-  )
-}
-
-function transformSubmitEndpoint(text) {
-  const file = 'src/integrations/submit.endpoint.ts'
-  const out = replaceExactText(
-    text,
-    `${file} (schema note)`,
-    '  // Same schema the RPC variant validates, so neither mode is the weaker one.',
-    '  // Validated before anything is sent, so a malformed submission never reaches the endpoint.',
-  )
-  return replaceExactText(
-    out,
-    `${file} (module contract)`,
-    '// Type-checks this file against the shared `@/submit` surface, so the two variants cannot drift\n' +
-      '// apart. `tsconfig` points `@/submit` at one variant only, so without this line the other one\n' +
-      '// (`KIT_SUBMIT=server`) is the setup nothing type-checks.',
-    '// Type-checks this file against the shared `@/submit` surface. Nothing else does: a caller\n' +
-      '// only checks the exports it imports, so a missing export would compile until something\n' +
-      '// reached for it.',
-  )
-}
-
-function transformSubmitSchema(text) {
-  const file = 'src/integrations/submit-schema.ts'
-  const out = replaceExactText(
-    text,
-    `${file} (wire note)`,
-    ' * What goes over the wire, validated by both submit variants.',
-    ' * What goes over the wire.',
-  )
-  return replaceExactText(
-    out,
-    `${file} (module contract)`,
-    ' * The exact surface every `@/submit` variant must have. `tsconfig` names only one variant, so\n' +
-      ' * without this the other is never type-checked. Same rule as `@/motion` and `@/theme`.',
-    ' * The exact surface `@/submit` must have. Same rule as `@/motion` and `@/theme`.',
-  )
-}
-
 // --- biome.json ---------------------------------------------------------------------------------
 
-// `noRestrictedImports` is a live rule, not inert configuration, which is exactly why the dead
-// entries matter: an entry naming a module that resolves to no file can never fire, because
-// `import … from '@/motion.noop'` is already a "cannot find module" type error before Biome sees
-// it. What it does do is tell a developer reading the lint config that this project has a
-// `motion.noop` and a `submit.rpc`. It has neither. Both theme entries stay: a generated project
-// really does contain both halves, so those two bans are live.
-//
-// The entries naming files that DID ship are kept, and they are the valuable ones: those imports
-// resolve, so without the rule a direct import would silently bypass the alias.
-//
-// The theme pair is kept verbatim. Only `@/submit.rpc` goes, and it is not the last entry in its
-// object, so removing it cannot leave a dangling comma.
+// Drops the `noRestrictedImports` entries for `@/motion.noop` and `@/submit.rpc`, which a
+// generated project doesn't have. Entries for files that did ship stay: they stop direct imports
+// bypassing the alias.
 const BIOME_INDENT = ' '.repeat(18)
 const themeRule = (half) =>
   `${BIOME_INDENT}"@/integrations/theme.${half}": "Import '@/theme' — the alias selects the implementation."`
 
 function transformBiomeJson(text) {
   const file = 'biome.json'
-  // `vcs.root` points Biome at the repo root, where the kit keeps its `.gitignore`, two levels up
-  // from `apps/web/biome.json`. A generated project is flat, so its `.gitignore` sits beside this
-  // file and the same key would send Biome outside the project. Removed rather than rewritten:
-  // the default is already correct once the two files are siblings.
+  // The kit's `vcs.root` points two levels up to the repo's `.gitignore`. A generated project is
+  // flat, so the key is removed and the default is right.
   let out = replaceExactText(
     text,
     `${file} (vcs root)`,
@@ -696,8 +417,7 @@ function transformBiomeJson(text) {
     `${BIOME_INDENT}"@/integrations/motion.noop": "Import '@/motion' — the alias selects the implementation.",\n`,
     '',
   )
-  // Anchored on the theme pair, which appears in both overrides: `@/submit.rpc` follows only
-  // here, so the three lines together are unique while the submit line alone is not.
+  // Anchored on the theme pair: the three lines together are unique, the submit line alone isn't.
   out = replaceExactText(
     out,
     `${file} (blocks override)`,
@@ -706,10 +426,7 @@ function transformBiomeJson(text) {
     `${themeRule('both')},\n${themeRule('single')},\n`,
   )
 
-  // The edits above are line surgery on a file whose last-entry-has-no-comma rule they have to
-  // respect. Getting that wrong ships a `biome.json` that Biome cannot parse, which fails the
-  // generated project's `pnpm lint` with a message about syntax rather than about this. Cheap to
-  // rule out here, and it also catches a kit whose biome.json was already broken by hand.
+  // Line surgery can break the JSON, so parse it here instead of failing the project's lint.
   try {
     JSON.parse(out)
   } catch (err) {
@@ -722,20 +439,9 @@ function transformBiomeJson(text) {
   return out
 }
 
-// shadcn's aliases point at `src/admin`, because in this kit that is where the panel's primitives
-// live and pointing them anywhere else would scatter the panel across two trees. A project without
-// the panel has no `src/admin`, so shipping those aliases unchanged would hand it a config whose
-// every path is a directory it does not have: `pnpm dlx shadcn add button` there writes
-// `src/admin/ui/button.tsx`, building an admin-shaped tree in a project that never asked for one.
-//
-// Reverted to shadcn's own defaults rather than dropped, which restores exactly what shipped
-// before the panel existed. Be aware of what that destination is: `check-conventions.mjs` walks
-// `src/components`, and shadcn's components fail it -- every `cn('...', className)` call trips the
-// "inline the classes or use a literal" rule, and `sheet.tsx` also uses a bracket value. So a
-// non-admin project that adds a component has to either inline those classes or widen the
-// checker. That is this kit's pre-existing stance on `src/components`, not something the panel
-// introduced, and quietly relocating the aliases somewhere the checker does not look would hide
-// it rather than settle it.
+// shadcn's aliases point at `src/admin` in the kit. Without the panel they go back to shadcn's
+// defaults, so `shadcn add` doesn't build an admin tree. Note that shadcn components in
+// `src/components` fail check-conventions (the `cn(...)` and bracket rules).
 function transformComponentsJson(text, answers) {
   if (answers.backend === 'admin') return text
   return replaceExactText(
@@ -762,10 +468,6 @@ const TRANSFORMS = {
   'README.md': transformReadme,
   'components.json': transformComponentsJson,
   'src/styles/theme.css': transformThemeCss,
-  'src/components/docs/config-reference.tsx': transformConfigReference,
-  'src/integrations/motion.animated.tsx': transformMotionAnimated,
-  'src/integrations/submit.endpoint.ts': transformSubmitEndpoint,
-  'src/integrations/submit-schema.ts': transformSubmitSchema,
   'biome.json': transformBiomeJson,
 }
 
@@ -777,8 +479,7 @@ const TRANSFORMS = {
  * @returns every path written, relative to `outDir`.
  */
 export function copyKit(kitRoot, outDir, answers) {
-  // Outside the try below on purpose: this is the one failure where the contents of `outDir` are
-  // the developer's, and cleaning up after it would delete exactly what it exists to protect.
+  // Outside the try on purpose: here the directory's contents are the developer's, not ours.
   assertEmptyTarget(outDir, answers.dir)
   const preexisting = existsSync(outDir)
   try {
@@ -789,21 +490,9 @@ export function copyKit(kitRoot, outDir, answers) {
   }
 }
 
-// A half-written target is worse than no target: the next run hits `assertEmptyTarget` and reports
-// that the developer's directory already has contents, blaming them for the tool's own debris and
-// never mentioning the `rm -rf` that recovery needs. Any mid-copy failure reaches this — a
-// truncated tarball, ENOSPC, EACCES on one file.
-//
-// Exported because the generate layer writes into the same directory afterwards, and a failure
-// there leaves exactly the same debris with exactly the same misleading message on the next run.
-// `cli/index.mjs` owns one rollback spanning both phases; this is it.
-//
-// The target's contents are cleared wholesale rather than by replaying the written list, because
-// the written list is not the full record: `mkdirSync(…, { recursive: true })` creates directories
-// nobody logged, and a `copyFileSync` that dies part-way leaves a truncated file that was never
-// pushed. `assertEmptyTarget` proved the directory empty before the first write, so everything in
-// it now is ours and clearing it is exact. The directory itself goes only if this tool created it:
-// an empty directory the developer made is theirs to keep.
+// Clears a half-written target, so the next run doesn't blame the developer for the tool's debris.
+// Exported because `cli/index.mjs` uses one rollback for both phases. The target was proved empty
+// first, so everything in it is ours. The directory itself goes only if this tool created it.
 export function rollbackTarget(outDir, preexisting, cause) {
   try {
     if (!existsSync(outDir)) return
@@ -814,38 +503,108 @@ export function rollbackTarget(outDir, preexisting, cause) {
       }
     }
   } catch (err) {
-    // Reported alongside the real failure, never instead of it — the original error is the one
-    // worth acting on, and a cleanup that failed is only a footnote telling you to finish by hand.
+    // Reported next to the real failure, never instead of it.
     cause.message += `\n  (cleaning up '${outDir}' also failed: ${err.message} — remove it by hand)`
   }
 }
 
+// --- one layout per block -----------------------------------------------------------------------
+
+// Assets only one layout uses. Without that layout, the asset and the copy lines that point at it
+// are left out.
+const LAYOUT_ASSETS = [
+  {
+    block: 'hero',
+    layout: 'split',
+    asset: 'public/hero.jpg',
+    copyLine: /^ {2}image: \{ src: '\/hero\.jpg',.*\n/gm,
+  },
+]
+
+/** The layout-only assets this project doesn't use. Throws if one is missing from the kit. */
+function unusedAssets(kitRoot, answers) {
+  const unused = new Set()
+  for (const a of LAYOUT_ASSETS) {
+    if (!existsSync(kitPath(kitRoot, a.asset))) throw new Error(`Kit is missing '${a.asset}'`)
+    if (!answers.blocks.includes(a.block) || answers.variants?.[a.block] !== a.layout) {
+      unused.add(a.asset)
+    }
+  }
+  return unused
+}
+
+// A project gets only the layout it picked. `block.ts` and `variants.ts` are rewritten to name that
+// one layout, which also becomes the default, and the other layouts' files are not copied.
+function pickVariant(kitRoot, id, chosen) {
+  const dir = blockDir(id)
+  const blockRel = `${dir}/block.ts`
+  const variantsRel = `${dir}/variants.ts`
+  let block = readKitFile(kitRoot, blockRel)
+  let variants = readKitFile(kitRoot, variantsRel)
+
+  const names = block.match(/^const variantNames = \[[^\]]*\] as const$/gm)
+  const def = block.match(/^ {2}defaultVariant: '(\w+)',$/gm)
+  if (names?.length !== 1 || def?.length !== 1) {
+    throw new Error(
+      `${blockRel}: expected one \`variantNames\` line and one \`defaultVariant\` line`,
+    )
+  }
+  const variant = chosen ?? def[0].match(/'(\w+)'/)[1]
+
+  const entries = [...variants.matchAll(/^ {2}(\w+): (\w+),$/gm)]
+  if (!entries.some((m) => m[1] === variant)) {
+    throw new Error(`${variantsRel}: no '${variant}' entry in the variants object`)
+  }
+  const skip = new Set([blockRel, variantsRel])
+  for (const [line, name, component] of entries) {
+    if (name === variant) continue
+    const imp = variants.match(
+      new RegExp(`^import \\{ ${component} \\} from '\\./([\\w-]+)'\\n`, 'm'),
+    )
+    if (!imp) throw new Error(`${variantsRel}: no import line for ${component}`)
+    variants = replaceExactText(variants, variantsRel, imp[0], '')
+    variants = replaceExactText(variants, variantsRel, `${line}\n`, '')
+    skip.add(`${dir}/${imp[1]}.tsx`)
+  }
+
+  const files = {}
+  for (const a of LAYOUT_ASSETS) {
+    if (a.block !== id || a.layout === variant) continue
+    const copyRel = `${dir}/copy.ts`
+    const copy = readKitFile(kitRoot, copyRel)
+    if (!copy.match(a.copyLine)) throw new Error(`${copyRel}: no line pointing at ${a.asset}`)
+    files[copyRel] = copy.replace(a.copyLine, '')
+    skip.add(copyRel)
+  }
+
+  block = block
+    .replace(names[0], `const variantNames = ['${variant}'] as const`)
+    .replace(def[0], `  defaultVariant: '${variant}',`)
+  files[blockRel] = block
+  files[variantsRel] = variants
+  return { skip, files }
+}
+
 function copyInto(kitRoot, outDir, answers) {
-  // Before `mkdirSync` below, so a kit whose panel has moved fails with nothing created. Both run
-  // on every answer, not only on `admin`: the failure these catch is panel content reaching a
-  // project that said NO, so the non-admin scaffolds are the ones that need them most.
+  // Before anything is created, and for every answer: the leak these catch hurts non-admin
+  // projects most.
   assertAdminPathsExist(kitRoot)
   assertPanelStaysInItsRoots(kitRoot)
 
   const written = []
   const presetFile = `${PRESET_DIR}/${answers.preset}.css`
-  // A transformed file also lives inside a copied tree; taking it here would mean writing it twice
-  // and depending on the order of the two writes for correctness.
-  //
-  // `isAdminPath` is the mirror of the ADMIN_COPY_DIRS gate below: `src/admin` is a directory of
-  // its own and is simply not walked, but the panel's routes sit inside `src/routes`, which
-  // COPY_DIRS copies whole — so they have to be filtered out on the way past rather than added on
-  // purpose. Folded into `keep` rather than passed as a second filter, because every copy path in
-  // this function already composes `keep` and a parallel filter would only be applied to the one
-  // that remembered it.
+  // A transformed file also sits in a copied tree; skipping it here avoids writing it twice.
+  // `isAdminPath` filters the panel's routes out of `src/routes`. Both live in `keep`, so every
+  // copy path gets them.
   const wantsAdmin = answers.backend === 'admin'
-  const keep = (rel) => !TRANSFORMED_FILES.includes(rel) && (wantsAdmin || !isAdminPath(rel))
+  const unused = unusedAssets(kitRoot, answers)
+  const keep = (rel) =>
+    !TRANSFORMED_FILES.includes(rel) && !unused.has(rel) && (wantsAdmin || !isAdminPath(rel))
 
   mkdirSync(outDir, { recursive: true })
 
   for (const dir of COPY_DIRS) {
-    // Composed, not replaced: an un-composed filter here is the same double-write hazard `keep`
-    // exists to remove, kept alive in one branch.
+    // Composed with `keep`, not replacing it.
     if (dir === PRESET_DIR) {
       copyTree(kitRoot, outDir, dir, written, (rel) => keep(rel) && rel === presetFile)
     } else copyTree(kitRoot, outDir, dir, written, keep)
@@ -855,28 +614,21 @@ function copyInto(kitRoot, outDir, answers) {
     throw new Error(`Kit has no preset '${answers.preset}' — ${presetFile} is missing`)
   }
 
-  // The panel's own tree, and only for the answer that asked for it. A project on `api` or `none`
-  // gets no `src/admin` at all — not an empty one, and not one whose imports resolve to packages
-  // `cli/generate.mjs` deliberately left out of its `package.json`.
-  //
-  // This gate and the package gate fail differently, and only this one is fatal. Without it a
-  // non-admin project carries `src/admin` importing thirteen packages its `package.json` does not
-  // list, and both `tsc` and `vite build` stop. Without the package gate it installs thirteen
-  // packages nothing imports, which is waste the list in `cli/generate.mjs` argues against but
-  // still builds and runs.
+  // The panel's own tree, only for `admin`. Without this gate a non-admin project would import
+  // packages its `package.json` doesn't list, and the build would fail.
   if (answers.backend === 'admin') {
     for (const dir of ADMIN_COPY_DIRS) copyTree(kitRoot, outDir, dir, written, keep)
   }
 
-  // Every copy path is composed with `keep`, not just the tree walk. A transformed file reached
-  // through any of them would be copied verbatim and then rewritten a moment later, leaving
-  // correctness to depend on which write lands last. `src/integrations/submit.endpoint.ts`
-  // arrives via BOUNDARY_FILES, so this is not hypothetical. (`biome.json` is TRANSFORMED_FILES
-  // only, never COPY_FILES, so it never reaches this loop at all.)
+  // Every copy path is composed with `keep`, so a transformed file is never also copied verbatim.
   for (const rel of COPY_FILES) {
     if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
   }
-  for (const id of answers.blocks) copyTree(kitRoot, outDir, blockDir(id), written, keep)
+  for (const id of answers.blocks) {
+    const { skip, files } = pickVariant(kitRoot, id, answers.variants?.[id])
+    copyTree(kitRoot, outDir, blockDir(id), written, (rel) => keep(rel) && !skip.has(rel))
+    for (const [rel, text] of Object.entries(files)) writeOut(outDir, rel, text, written)
+  }
   for (const choice of Object.values(BOUNDARY_FILES)) {
     const rel = typeof choice === 'function' ? choice(answers) : choice
     if (keep(rel)) copyOne(kitRoot, outDir, rel, written)
@@ -889,11 +641,7 @@ function copyInto(kitRoot, outDir, answers) {
     writeOut(outDir, rel, transform(readKitFile(kitRoot, rel), answers), written)
   }
 
-  // Only when a backend was asked for: with no backend, this whole tree is absent rather than
-  // filtered down to nothing. `?? 'none'` is belt-and-braces: `cli/prompts.mjs` always sets
-  // `answers.backend` now, so this only matters for a caller that builds an `answers` object by
-  // hand rather than through `resolveAnswers` — which is exactly how this function's own tests do
-  // it, and how a future one might too.
+  // Only when a backend was chosen. `?? 'none'` covers callers that build `answers` by hand.
   if ((answers.backend ?? 'none') !== 'none') copyApiTree(kitRoot, outDir, written)
 
   return written

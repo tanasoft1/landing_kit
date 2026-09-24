@@ -13,8 +13,7 @@ import {
 } from './generate.mjs'
 import { parseArgs, resolveAnswers } from './prompts.mjs'
 
-// The package root, one level up from `cli/`. Under `pnpm dlx` that is the unpacked tarball, so
-// the kit being copied is always the published one — never anything in the user's own tree.
+// The package root. Under `pnpm dlx` this is the unpacked tarball, never the user's own tree.
 const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const HELP = `landing-kit — scaffold a bilingual landing site
@@ -86,11 +85,7 @@ const list = (v) =>
         .map((s) => s.trim())
         .filter(Boolean)
 
-/**
- * `pnpm fix` is only in the next steps when the new files were NOT formatted — which is the
- * pre-`pnpm install` case. Printing it unconditionally trains people to run a fix step that has
- * nothing to do, and hides the one time it matters.
- */
+/** `pnpm fix` is listed only when the new files were not formatted (before `pnpm install`). */
 const verifyStep = (formatted) =>
   formatted.ran ? 'pnpm verify' : `pnpm fix && pnpm verify   (${formatted.why})`
 
@@ -158,22 +153,9 @@ function runSubcommand(cmd, argv) {
 }
 
 /**
- * The last thing a developer reads, and for two of the three answers it used to be wrong.
- *
- * Every scaffold got the same four lines: `cd`, `pnpm install`, `pnpm dev`, set `url`. An `admin`
- * project needs Postgres running, an `.env`, the API process up and an account seeded before
- * `/admin` does anything, so the first screen its developer saw was a login form with no
- * credentials that work. All of it is in the generated READMEs; this contradicted them by omission.
- *
- * Read off the generated tree as it stands, not from memory:
- *
- *  - migrations are NOT a command. `api/README.md` says they run at startup, and `api/makefile`
- *    has no `migrate-up` target — only `migrate-create`, which writes a new pair of files.
- *  - `make seed-admin` takes `email=` and NOTHING ELSE. There is no `password=` any more: one on
- *    the command line put the only credential guarding the panel into the shell history, the
- *    scrollback and the process table. It prompts with echo off instead.
- *  - `make run` rather than `make dev`: `dev` is `air`, which the developer may not have
- *    installed, and `api/README.md` lists it as optional.
+ * The steps printed at the end. For `admin` they cover Postgres, `.env`, the API and
+ * `make seed-admin`, which prompts for the password. Migrations run at startup, so there is no
+ * migrate step. `make run`, not `make dev`, because `air` is optional.
  */
 function nextSteps(answers) {
   const backend = answers.backend ?? 'none'
@@ -203,10 +185,7 @@ function nextSteps(answers) {
     )
   }
   if (backend !== 'none') {
-    // Absolute for `api`, relative for `admin`, and the difference is the dev proxy. An `admin`
-    // project's vite.config.ts proxies `/api` to :3000 and its production binary serves the site
-    // and the API together, so a relative value is same-origin at both ends. An `api` project has
-    // neither and reaches Fiber through CORS, which needs the origin spelled out.
+    // Absolute for `api`, which goes through CORS. Relative for `admin`, which is same-origin.
     const admin = backend === 'admin'
     notes.push(
       '',
@@ -247,27 +226,18 @@ async function main() {
     console.log(HELP)
     return
   }
-  // Before the first question, not just before the first write. This reconciles each block's
-  // `requires.blocks` against the `target`s in its own copy files and throws if they disagree —
-  // the prompt is about to offer or refuse combinations on the strength of that declaration, and a
-  // declaration that has drifted from the copy would make it offer one the CLI then rejects.
-  // Unconditional, so `--yes` and the flag path prove it too; those are the only paths CI runs.
+  // Check each block's `requires.blocks` against its copy before asking anything, so the prompt
+  // never offers a combination the CLI then rejects.
   const blockDeps = readBlockDeps(KIT_ROOT)
 
   const answers = await resolveAnswers(process.argv, blockDeps)
   const outDir = resolve(process.cwd(), answers.dir)
   const kitVersion = readKitVersion(KIT_ROOT)
 
-  // Before the copy layer, not inside the generate layer: this rejects the ANSWERS, and answers
-  // that cannot produce a working site should never reach the point of creating a directory. With
-  // this inside `generateFiles` the target held 60-odd copied files before the throw, and only the
-  // rollback made that invisible — correct, but not what "refuses before anything is written" says.
+  // Reject answers that can't build before anything is written.
   assertBlockLinksResolve(KIT_ROOT, answers)
 
-  // Read BEFORE the first write, and shared by both phases. `copyKit` proves the target empty and
-  // rolls its own failures back; a failure in `generateFiles` would otherwise leave a target that
-  // is complete enough to look finished and non-empty enough to block the next run — the same
-  // wedge the copy layer's rollback exists to prevent, one layer up.
+  // Checked before the first write, so a failure in `generateFiles` can roll the target back.
   const preexisting = existsSync(outDir)
   const written = copyKit(KIT_ROOT, outDir, answers)
   try {
@@ -277,16 +247,13 @@ async function main() {
     throw err
   }
 
-  // Last, after every other write has succeeded: this is the one edit outside the target
-  // directory, so it must never happen for a run that then fails. It is deliberately outside the
-  // rollback above — that is what "last" buys.
+  // Last, and outside the rollback: this is the only edit outside the target directory.
   const workspace = registerInWorkspace(outDir)
 
   console.log(`\n✓ Created ${answers.dir}/ — ${written.length} files`)
   if (workspace.message) console.log(workspace.message)
   console.log(nextSteps(answers))
-  // Named one per line, because these are the only files in the whole scaffold that hold text
-  // nobody wrote. Left unsaid, the placeholder headings ship.
+  // Listed one per line: these are the only files holding placeholder text nobody wrote.
   if (answers.custom.length > 0) {
     console.log(
       `  Your own blocks are on the home page with placeholder text. Write their copy in:`,

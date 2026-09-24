@@ -9,9 +9,7 @@ import type { Locale, PageConfig, SiteConfig } from '@/lib/types'
 import { blockPreloadHrefs } from './block-preloads'
 import { buildJsonLd } from './json-ld'
 
-// The hero can't paint until its fonts arrive, and the browser only finds `@font-face` after it
-// has fetched AND parsed the stylesheet. Preloading fetches the font in parallel instead.
-// Mongolian needs cyrillic (`ө`/`ү` are outside Latin), English needs latin.
+// Preload hero fonts so they load with the CSS, not after it. Mongolian needs the Cyrillic subset.
 const CRITICAL_FONTS_BY_LOCALE: Partial<Record<Locale, string[]>> = {
   mn: [manropeCyrillic, interCyrillic],
   en: [manropeLatin, interLatin],
@@ -26,14 +24,10 @@ export function buildHead(
   const seo = page.seo[locale]
   const canonical = `${site.url}${localePath(page.path, locale, site)}`
   const ogImage = `${site.url}${seo.ogImage ?? site.ogImageDefault}`
-  // One separator for every page, so titles stay visually consistent across the site.
   const title = `${seo.title} · ${site.name}`
 
-  // Lowercase `hreflang`, not React's `hrefLang`. These attrs are spread straight onto a React
-  // element, and React rewrites some attribute names on the way out (`htmlFor` becomes `for`)
-  // but not this one, so `hrefLang` would ship as wrong-case markup. React does log an "Invalid
-  // DOM property" warning in dev — that is expected, do not rename it to silence it.
-  // `verify-build.mjs` checks the built HTML for lowercase `hreflang`.
+  // Lowercase `hreflang` on purpose. React's dev warning is expected; `hrefLang` would ship
+  // wrong-case markup. verify-build checks for it.
   const alternates = site.locales.map((l) => ({
     rel: 'alternate',
     hreflang: l,
@@ -48,9 +42,6 @@ export function buildHead(
     crossOrigin: '',
   }))
 
-  // This page's own block ids, derived the same way as `blocksForCurrentUrl` in
-  // `src/app/client.tsx`. Preloading lets the browser fetch these chunks in parallel with the
-  // main chunk, instead of finding them only after it has run.
   const blockIds = page.blocks.map((b) => (typeof b === 'string' ? b : b.id))
   const modulePreloads = blockPreloadHrefs(blockIds).map((href) => ({
     rel: 'modulepreload',

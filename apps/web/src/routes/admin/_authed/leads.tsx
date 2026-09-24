@@ -9,14 +9,24 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ChevronsUpDown, MoreHorizontal } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Copy,
+  Inbox,
+  Mail,
+  MoreHorizontal,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { useT } from '@/admin/i18n/use-t'
 import { apiFetch } from '@/admin/lib/api'
 import { ApiError } from '@/admin/lib/errors'
-import { useLanguage } from '@/admin/lib/language'
+import { type PanelLanguage, useLanguage } from '@/admin/lib/language'
 import { Badge } from '@/admin/ui/badge'
 import { Button } from '@/admin/ui/button'
 import {
@@ -25,10 +35,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/admin/ui/dropdown-menu'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/admin/ui/sheet'
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/admin/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/admin/ui/table'
 
-/** Matches models.RsLead in the Go service. snake_case, because that is what the API sends. */
+// Matches the API's lead JSON, so snake_case.
 type Lead = {
   id: string
   name: string
@@ -43,64 +53,40 @@ type Lead = {
 
 type LeadPage = { items: Lead[]; total: number }
 
-// The API's own default. Its ceiling is 200; asking for more is silently clamped, so there is no
-// value in going higher here than a person can scan.
+// The API clamps limit to 200.
 const PAGE_SIZE = 50
 
 const searchSchema = z.object({
-  // `.catch(1)` rather than a validation error: ?page=banana in a pasted URL should show the
-  // first page, not an error screen.
-  //
-  // `.default(1)` on top of it, and the two are not the same guard. `.catch` handles a value that
-  // will not parse; `.default` handles the key not being there at all, which is what makes `page`
-  // optional in this route's INPUT type. Without it the router counts `page` as a required search
-  // param, and then `to: '/admin/leads'` is a type error everywhere it appears -- the nav <Link>
-  // in admin-shell.tsx and the redirect in admin/index.tsx both have to start carrying
-  // `search: { page: 1 }`. Optional in, always a number out, is the shape the rest of this file
-  // is written against.
+  // `.catch` turns ?page=banana into page 1. `.default` makes `page` optional, so links to
+  // '/admin/leads' need no `search`. Keep both.
   page: z.coerce.number().int().min(1).catch(1).default(1),
 })
 
 export const Route = createFileRoute('/admin/_authed/leads')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ page: search.page }),
-  // The loader owns this data, not a module or a store. It reloads when `page` changes and
-  // invalidates with the route, which is exactly the behaviour a hand-written cache would have
-  // to reimplement.
   loader: async ({ deps }) => {
     try {
       return await apiFetch<LeadPage>(
         `/admin/leads?limit=${PAGE_SIZE}&offset=${(deps.page - 1) * PAGE_SIZE}`,
       )
     } catch (err) {
-      // A 401 here means the session is really gone, not that it merely needed refreshing:
-      // `_authed.beforeLoad` has already put a token in place, and `apiFetch` has already spent
-      // its one retry through `refreshSession`. What is left is a revoked token family, a deleted
-      // admin, or a refresh token past its seven days. The answer to all three is the login
-      // screen. Without this the panel paints its error boundary and leaves the URL bar as the
-      // only way back.
+      // apiFetch already tried a refresh, so a 401 means the session is gone.
       if (err instanceof ApiError && err.status === 401) throw redirect({ to: '/admin/login' })
-      // Everything else goes to the boundary untouched. A 500 is not a reason to ask someone to
-      // sign in again, and sending them to the login screen would hide the failure behind a form
-      // that will work first time.
+      // Other errors go to the error boundary. A 500 is no reason to ask for a password.
       throw err
     }
   },
   component: LeadsPage,
 })
 
-// v9 registers features explicitly instead of bundling them: only what is named here ships in
-// the bundle, and only what is named here is available on the table. `stockFeatures` would turn
-// everything on at once, which is the v8 shape and not what this table wants -- it sorts, and
-// pages on the server.
+// Only sorting is registered. Paging happens on the server, so don't add rowPaginationFeature.
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   sortFns,
 })
 
-// The feature set is part of the type, so the helper knows which column options exist. Getting
-// this wrong surfaces as an unknown-property error on a column, not as a runtime surprise.
 const columnHelper = createColumnHelper<typeof features, Lead>()
 
 function LeadsPage() {
@@ -113,49 +99,57 @@ function LeadsPage() {
   const [sorting, setSorting] = useState<SortingState>([])
   const [selected, setSelected] = useState<Lead | null>(null)
 
-  const dateFormat = useMemo(
-    () =>
-      new Intl.DateTimeFormat(language === 'mn' ? 'mn-MN' : 'en-GB', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }),
-    [language],
-  )
+  const formatDate = useMemo(() => dateFormatter(language), [language])
 
-  // `columnHelper.columns([...])`, not a bare array literal. `ColumnDef` is invariant in its
-  // value type, so a plain array of these seven widens to a union that `useTable` will not
-  // accept: the date column is `ColumnDef<…, Lead, string>` and the actions column is
-  // `ColumnDef<…, Lead, unknown>`, and neither is assignable to the other. `columns()` is the v9
-  // helper for exactly this -- it keeps each entry's own value type and still types the whole as
-  // one array.
+  // columnHelper.columns(), not a plain array. A plain array of mixed value types fails to type.
   const columns = useMemo(
     () =>
       columnHelper.columns([
-        columnHelper.accessor('created_at', {
-          header: t.colDate,
-          // Compared as instants, not as text. `created_at` is ISO 8601 carrying an offset, and
-          // lexical order agrees with chronological order only while every row carries the SAME
-          // offset. That is a property of one server's rows today, not of the format, and the
-          // default string comparison would quietly disagree with the header the day it stops
-          // holding.
-          sortFn: (a, b) => Date.parse(a.original.created_at) - Date.parse(b.original.created_at),
-          cell: (info) => dateFormat.format(new Date(info.getValue())),
+        columnHelper.accessor('name', {
+          header: t.colName,
+          // The name button stretches over the whole row: click anywhere, one tab stop per row.
+          cell: (info) => {
+            const lead = info.row.original
+            return (
+              <div className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setSelected(lead)}
+                  className="block max-w-full truncate text-left font-medium after:absolute after:inset-0 focus-visible:outline-none"
+                >
+                  {lead.name}
+                </button>
+                <span className="text-muted-foreground block truncate">{lead.email}</span>
+              </div>
+            )
+          },
         }),
-        columnHelper.accessor('name', { header: t.colName }),
-        columnHelper.accessor('email', { header: t.colEmail }),
-        columnHelper.accessor('locale', {
-          header: t.colLocale,
-          cell: (info) => <Badge variant="secondary">{info.getValue()}</Badge>,
+        columnHelper.accessor('message', {
+          header: t.colMessage,
+          cell: (info) => (
+            <span className="text-muted-foreground line-clamp-2 whitespace-normal">
+              {info.getValue()}
+            </span>
+          ),
         }),
         columnHelper.accessor((row) => row.source_page ?? '', {
           id: 'source_page',
           header: t.colSource,
+          cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
         }),
-        columnHelper.accessor('message', {
-          header: t.colMessage,
-          // One line, truncated. Messages run to 4000 characters; the Sheet is where the whole
-          // thing goes.
-          cell: (info) => <span className="block max-w-xs truncate">{info.getValue()}</span>,
+        columnHelper.accessor('locale', {
+          header: t.colLocale,
+          cell: (info) => <Badge variant="outline">{info.getValue()}</Badge>,
+        }),
+        columnHelper.accessor('created_at', {
+          header: t.colDate,
+          // Compare as times, not strings. String order breaks when rows carry different offsets.
+          sortFn: (a, b) => Date.parse(a.original.created_at) - Date.parse(b.original.created_at),
+          cell: (info) => (
+            <span className="text-muted-foreground tabular-nums">
+              {formatDate(info.getValue())}
+            </span>
+          ),
         }),
         columnHelper.display({
           id: 'actions',
@@ -163,7 +157,7 @@ function LeadsPage() {
           cell: (info) => <RowActions lead={info.row.original} onView={setSelected} />,
         }),
       ]),
-    [t, dateFormat],
+    [t, formatDate],
   )
 
   const table = useTable({
@@ -174,125 +168,182 @@ function LeadsPage() {
     onSortingChange: setSorting,
   })
 
-  // No pagination options, and that is the whole of the server-side paging story here. v8 needed
-  // `manualPagination: true` to stop the client paginator slicing rows the server had already
-  // paged; v9 has no client paginator unless `rowPaginationFeature` is registered, and it is not.
-  // Passing `manualPagination` or `pageCount` is a type error rather than a no-op. The page
-  // arithmetic below is this component's own.
-
-  // Counted from the rows that came back, not from the page number. `?page=5` against ten leads
-  // asks for an offset past the end, the API answers with an empty `items` and the real `total`,
-  // and arithmetic done on `page` alone reads `201-10 / 10` over an empty table with Next still
-  // live. Deriving `last` from `items.length` also fixes a short final page, which the old
-  // `Math.min(page * PAGE_SIZE, total)` only got right by accident.
+  // Count from the rows that came back, not the page number. A ?page= past the end returns
+  // empty `items` with the real `total`.
   const first = items.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
   const last = first === 0 ? 0 : first + items.length - 1
   const goTo = (next: number) => navigate({ to: '/admin/leads', search: { page: next } })
+  const rows = table.getRowModel().rows
 
   return (
-    <section>
-      <h1 className="text-h3 font-semibold">{t.leadsTitle}</h1>
+    <section className="mx-auto max-w-6xl">
+      <div className="flex items-baseline gap-3">
+        <h1 className="text-h3 font-bold">{t.leadsTitle}</h1>
+        <span className="text-muted-foreground tabular-nums">{total}</span>
+      </div>
 
-      <div className="border-border rounded-base mt-4 overflow-x-auto border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((group) => (
-              <TableRow key={group.id}>
-                {group.headers.map((header) => {
-                  const sorted = header.column.getIsSorted()
-                  // False for the actions column, which has no accessor and so nothing to sort
-                  // by. That is what keeps it a plain <th> with no button and no aria-sort.
-                  const canSort = header.column.getCanSort()
-                  const label = header.isPlaceholder
-                    ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())
-                  return (
-                    <TableHead key={header.id} aria-sort={canSort ? ariaSort(sorted) : undefined}>
-                      {canSort ? (
-                        // A real <button>, not an onClick on the <th>. The header has to be
-                        // reachable by keyboard and announced as pressable, and `aria-sort` on
-                        // the cell above says which way it is currently pointing.
-                        <button
-                          type="button"
-                          onClick={header.column.getToggleSortingHandler()}
-                          className="flex items-center gap-1"
+      {rows.length === 0 ? (
+        <div className="border-border rounded-base mt-6 flex flex-col items-center border border-dashed px-6 py-16 text-center">
+          <Inbox className="text-muted-foreground size-8" aria-hidden />
+          <p className="mt-4 font-medium">{t.noLeads}</p>
+          <p className="text-muted-foreground mt-1 max-w-sm text-sm">{t.noLeadsHint}</p>
+        </div>
+      ) : (
+        <>
+          <ul className="border-border rounded-base mt-6 divide-border divide-y border md:hidden">
+            {rows.map((row) => {
+              const lead = row.original
+              return (
+                <li key={row.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(lead)}
+                    className="hover:bg-muted block w-full px-4 py-3 text-left transition-colors"
+                  >
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">{lead.name}</span>
+                      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                        {formatDate(lead.created_at)}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground mt-1 line-clamp-2 text-sm">
+                      {lead.message}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+
+          <div className="border-border rounded-base mt-6 hidden overflow-hidden border md:block">
+            <Table className="table-fixed">
+              <colgroup>
+                <col className="w-[24%]" />
+                <col />
+                <col className="w-32" />
+                <col className="w-20" />
+                <col className="w-44" />
+                <col className="w-14" />
+              </colgroup>
+              <TableHeader className="bg-muted">
+                {table.getHeaderGroups().map((group) => (
+                  <TableRow key={group.id} className="hover:bg-transparent">
+                    {group.headers.map((header) => {
+                      const sorted = header.column.getIsSorted()
+                      const canSort = header.column.getCanSort()
+                      const label = header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())
+                      return (
+                        <TableHead
+                          key={header.id}
+                          aria-sort={canSort ? ariaSort(sorted) : undefined}
+                          className="text-muted-foreground h-10 px-4 text-xs font-medium"
                         >
-                          {label}
-                          <SortIcon sorted={sorted} />
-                        </button>
-                      ) : (
-                        label
-                      )}
-                    </TableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="text-muted-foreground text-center">
-                  {t.noLeads}
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
-                  {/* getAllCells, not v8's getVisibleCells. Column visibility is its own
-                      registered feature in v9 and this table does not register it, so the
-                      "visible" variant does not exist on the row at all. */}
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                          {canSort ? (
+                            // A real <button>, not onClick on the <th>, so keyboards reach it.
+                            <button
+                              type="button"
+                              onClick={header.column.getToggleSortingHandler()}
+                              className="hover:text-foreground flex items-center gap-1 transition-colors"
+                            >
+                              {label}
+                              <SortIcon sorted={sorted} />
+                            </button>
+                          ) : (
+                            label
+                          )}
+                        </TableHead>
+                      )
+                    })}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  // `relative` holds the name button's stretched hit area inside this row.
+                  <TableRow
+                    key={row.id}
+                    className="has-focus-visible:ring-ring relative cursor-pointer has-focus-visible:ring-2 has-focus-visible:ring-inset"
+                  >
+                    {row.getAllCells().map((cell) => (
+                      <TableCell key={cell.id} className="px-4 py-3 align-top">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
 
-      <div className="mt-4 flex items-center gap-3">
-        {/* Numerals and an en dash, no prose. A range label needs no dictionary entry and reads
-            the same in both languages. */}
-        <span className="text-muted-foreground text-sm">
-          {first}–{last} / {total}
-        </span>
-        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goTo(page - 1)}>
-          {t.previous}
-        </Button>
-        {/* `items.length === 0` as well as `last >= total`, because an empty page is past the end
-            whatever the totals say, and only the first test disables Next on an out-of-range
-            ?page= that a bookmark or a hand-edited URL can still reach. */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={items.length === 0 || last >= total}
-          onClick={() => goTo(page + 1)}
-        >
-          {t.next}
-        </Button>
-      </div>
+      {/* Shown on an empty page past the end too, so Previous can lead back. */}
+      {total > 0 ? (
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <span className="text-muted-foreground mr-2 text-sm tabular-nums">
+            {first}–{last} / {total}
+          </span>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goTo(page - 1)}>
+            <ChevronLeft aria-hidden />
+            {t.previous}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={items.length === 0 || last >= total}
+            onClick={() => goTo(page + 1)}
+          >
+            {t.next}
+            <ChevronRight aria-hidden />
+          </Button>
+        </div>
+      ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>{selected?.name}</SheetTitle>
-          </SheetHeader>
+        <SheetContent className="w-full gap-0 sm:max-w-lg" closeLabel={t.close}>
           {selected !== null ? (
-            <dl className="mt-4 grid gap-3 text-sm">
-              <Field label={t.colEmail} value={selected.email} />
-              <Field label={t.colDate} value={dateFormat.format(new Date(selected.created_at))} />
-              <Field label={t.colSource} value={selected.source_page ?? '—'} />
-              <div>
-                <dt className="text-muted-foreground">{t.colMessage}</dt>
-                {/* whitespace-pre-wrap, never dangerouslySetInnerHTML. This string came from a
-                    public form. check-conventions.mjs enforces that. */}
-                <dd className="mt-1 whitespace-pre-wrap">{selected.message}</dd>
+            <>
+              <SheetHeader className="border-border border-b px-6 pt-6 pb-5">
+                <SheetTitle className="font-display pr-8 text-xl font-bold">
+                  {selected.name}
+                </SheetTitle>
+                <a
+                  href={`mailto:${selected.email}`}
+                  className="text-primary w-fit text-sm break-all underline-offset-4 hover:underline"
+                >
+                  {selected.email}
+                </a>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                <dl className="flex flex-wrap gap-x-10 gap-y-4 text-sm">
+                  <Field label={t.colDate} value={formatDate(selected.created_at)} />
+                  <Field label={t.colSource} value={selected.source_page || '—'} />
+                  <Field label={t.colLocale} value={selected.locale} />
+                </dl>
+
+                <h2 className="text-muted-foreground mt-6 text-sm">{t.colMessage}</h2>
+                {/* Never dangerouslySetInnerHTML. This text came from a public form. */}
+                <p className="bg-muted rounded-base mt-2 p-4 text-sm leading-relaxed break-words whitespace-pre-wrap">
+                  {selected.message}
+                </p>
               </div>
-            </dl>
+
+              <SheetFooter className="border-border flex-row border-t px-6 py-4">
+                <Button asChild className="flex-1">
+                  <a href={`mailto:${selected.email}`}>
+                    <Mail aria-hidden />
+                    {t.openMail}
+                  </a>
+                </Button>
+                <Button variant="outline" onClick={() => copyEmail(selected.email, t)}>
+                  <Copy aria-hidden />
+                  {t.copyEmail}
+                </Button>
+              </SheetFooter>
+            </>
           ) : null}
         </SheetContent>
       </Sheet>
@@ -300,7 +351,27 @@ function LeadsPage() {
   )
 }
 
-/** What `column.getIsSorted()` returns: a direction, or `false` for a column nobody has sorted. */
+// Browsers ship no Mongolian date names (`mn-MN` falls back to English), so Mongolian gets a
+// numeric date instead: 2026.09.24 14:05.
+function dateFormatter(language: PanelLanguage): (iso: string) => string {
+  if (language === 'en') {
+    const f = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+    return (iso) => f.format(new Date(iso))
+  }
+  const f = new Intl.DateTimeFormat('en-GB', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  return (iso) => {
+    const p = Object.fromEntries(f.formatToParts(new Date(iso)).map((x) => [x.type, x.value]))
+    return `${p.year}.${p.month}.${p.day} ${p.hour}:${p.minute}`
+  }
+}
+
 type SortDir = false | 'asc' | 'desc'
 
 function ariaSort(sorted: SortDir): 'ascending' | 'descending' | 'none' {
@@ -312,47 +383,47 @@ function ariaSort(sorted: SortDir): 'ascending' | 'descending' | 'none' {
 function SortIcon({ sorted }: { sorted: SortDir }) {
   if (sorted === 'asc') return <ArrowUp className="size-3.5" />
   if (sorted === 'desc') return <ArrowDown className="size-3.5" />
-  // Drawn on every sortable header, not only the active one, so a column says it can be sorted
-  // before anyone has clicked it.
   return <ChevronsUpDown className="text-muted-foreground size-3.5" />
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="mt-1 break-words">{value}</dd>
     </div>
   )
 }
 
+// Clipboard can be refused. Show an error, or the click looks like it missed.
+function copyEmail(email: string, t: ReturnType<typeof useT>) {
+  navigator.clipboard.writeText(email).then(
+    () => toast.success(t.emailCopied),
+    () => toast.error(t.errUnknown),
+  )
+}
+
 function RowActions({ lead, onView }: { lead: Lead; onView: (lead: Lead) => void }) {
   const t = useT()
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label={t.rowActions}>
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => onView(lead)}>{t.viewLead}</DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => {
-            // Clipboard access can be refused (insecure origin, denied permission). A silent
-            // no-op would look like the click missed, so failure gets the same feedback path.
-            navigator.clipboard.writeText(lead.email).then(
-              () => toast.success(t.emailCopied),
-              () => toast.error(t.errUnknown),
-            )
-          }}
-        >
-          {t.copyEmail}
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href={`mailto:${lead.email}`}>{t.openMail}</a>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    // Above the name button's stretched hit area, so the menu opens instead of the lead.
+    <div className="relative z-10 flex justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label={t.rowActions}>
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => onView(lead)}>{t.viewLead}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => copyEmail(lead.email, t)}>
+            {t.copyEmail}
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={`mailto:${lead.email}`}>{t.openMail}</a>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   )
 }

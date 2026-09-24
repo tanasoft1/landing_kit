@@ -26,8 +26,6 @@ export function RenderBlocks({
       {blocks.map((ref, index) => {
         const { id, variant, surface } = normalize(ref)
 
-        // `registry` is typed `Record<BlockId, BlockManifest<any, any>>` at its export, so no
-        // per-call-site widening is needed here.
         const manifest = registry[id]
         if (!manifest) {
           throw new Error(
@@ -36,9 +34,6 @@ export function RenderBlocks({
         }
 
         const variantName = variant ?? manifest.defaultVariant
-        // `getVariants` throws its own error when this block's module was never loaded. That is
-        // a different problem from the one below, which is an unknown variant name on a block
-        // that did load. Both are wiring bugs, not something a visitor can cause.
         const variants = getVariants(id)
         const Component = variants[variantName]
         if (!Component) {
@@ -47,7 +42,6 @@ export function RenderBlocks({
           )
         }
 
-        // De-duplicate anchor ids: first 'cta' is #cta, a second becomes #cta-2.
         const occurrence = (seen.get(id) ?? 0) + 1
         seen.set(id, occurrence)
         const anchorId = occurrence === 1 ? id : `${id}-${occurrence}`
@@ -59,13 +53,8 @@ export function RenderBlocks({
             copy={manifest.copy[locale]}
             site={site}
             resolve={resolve}
-            // The trailing 'default' is only there to satisfy noUncheckedIndexedAccess. A
-            // modulo index into ALTERNATION can never actually miss.
             surface={surface ?? ALTERNATION[index % ALTERNATION.length] ?? 'default'}
             anchorId={anchorId}
-            // The first block on the page owns the page's single <h1>. Every later block gets
-            // an <h2>. A block cannot know its own position, so this is set here, not by the
-            // block — same reason as `surface` and `anchorId` above.
             headingLevel={index === 0 ? 1 : 2}
           />
         )

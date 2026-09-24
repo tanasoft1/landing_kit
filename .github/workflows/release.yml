@@ -18,8 +18,8 @@ env:
   # Pinned to the version stamped in the generated code's header
   # (apps/api/internal/db/sqlc/*.go). `sqlc diff` compares byte for byte, so a
   # newer sqlc fails the check on regenerated formatting alone.
-  SQLC_VERSION: "1.30.0"
-  GOLANGCI_LINT_VERSION: v2.13.1
+  SQLC_VERSION: "1.31.1"
+  GOLANGCI_LINT_VERSION: v2.13.2
 
 jobs:
   verify:

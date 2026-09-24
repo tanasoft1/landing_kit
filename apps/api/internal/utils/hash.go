@@ -6,15 +6,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// bcryptCost is the cost every new hash is written at. bcrypt.DefaultCost is 10; 12 is the
-// current OWASP floor. The cost is encoded inside the hash itself, so raising this does not
-// invalidate anything already stored -- CheckPasswordHash reads each hash's own cost. Accounts
-// move up through NeedsRehash below, on their next successful login.
+// bcryptCost is the OWASP floor. Each hash stores its own cost, so raising this breaks nothing;
+// old hashes upgrade on the next login through NeedsRehash.
 const bcryptCost = 12
 
-// HashPassword hashes password at bcryptCost. Named and exported rather than hashed ad hoc at
-// each call site: seed-admin needs this directly, and one shared function is what keeps the hash
-// it writes and the one CheckPasswordHash verifies from drifting apart.
+// HashPassword hashes password at bcryptCost.
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
@@ -28,11 +24,8 @@ func CheckPasswordHash(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-// NeedsRehash reports whether hash was written at a cost below the current one.
-//
-// An unreadable hash returns false, not true. A hash bcrypt cannot parse is not a stale hash, it
-// is a corrupt row, and rewriting it on the strength of a successful password check would replace
-// a broken record with a working one that nobody knows changed.
+// NeedsRehash reports whether hash was written at a cost below the current one. An unreadable
+// hash returns false: it is a corrupt row, and should not be silently replaced.
 func NeedsRehash(hash string) bool {
 	cost, err := bcrypt.Cost([]byte(hash))
 	if err != nil {
@@ -41,17 +34,8 @@ func NeedsRehash(hash string) bool {
 	return cost < bcryptCost
 }
 
-// HashCostIsCurrent reports whether hash is a bcrypt hash written at exactly the current cost.
-//
-// This is not the negation of NeedsRehash, and the two answer different questions. NeedsRehash
-// asks whether a stored password should be rewritten, so it forgives everything that is not a
-// hash below the current cost. This asks whether a hash takes the same time to compare as one
-// this package would write today, so it forgives nothing: a cost above the current one fails,
-// and so does anything bcrypt cannot parse.
-//
-// Callers that need a comparison to take a predictable amount of time want this one. An
-// unparseable value is the worst case for them, not a harmless one, because
-// CompareHashAndPassword rejects it on the parse rather than doing any work at all.
+// HashCostIsCurrent reports whether hash is a bcrypt hash at exactly the current cost, so it
+// compares in the same time as a real one. It is not the negation of NeedsRehash.
 func HashCostIsCurrent(hash string) bool {
 	cost, err := bcrypt.Cost([]byte(hash))
 	return err == nil && cost == bcryptCost

@@ -31,14 +31,11 @@ const (
 	testJWTSecret  = "auth-handler-test-secret-32-bytes!!"
 	testPassword   = "correct-horse-battery-staple"
 	testAdminEmail = "admin@example.mn"
-	// csrfHeader is what routes.requireNonSimpleRequest demands on /api/auth/refresh and
-	// /api/auth/logout. A request without it is refused before the handler runs, so every refresh
-	// below sends it, the way the panel's own fetch does.
+	// csrfHeader is required on refresh and logout, as the panel's fetch sends it.
 	csrfHeader = "X-Requested-With"
 )
 
-// newApp builds the real middleware chain (routes.Setup), so the login rate limiter, CORS and
-// the rest of production wiring are exercised too, not just Handler.Login/Refresh in isolation.
+// newApp builds the real middleware chain, so the limiters and CORS are tested too.
 func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	t.Helper()
 
@@ -46,8 +43,7 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	tokenService := secure.NewTokenService(testJWTSecret, 15, 7, 30)
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(lead.New(db.Queries, notify.NewLogger())),
-		// cookieSecure is false here for the same reason it is false in development: these
-		// requests never travel over TLS, and a Secure cookie would not be stored.
+		// No TLS in tests, so a Secure cookie would not be stored.
 		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries)), false),
 	}
 
@@ -74,15 +70,13 @@ func seedAdmin(t *testing.T, db *testsupport.DB) {
 	}
 }
 
-// authData mirrors models.SuccessResponse with Data typed as models.RsAuth, so a test can decode
-// straight into the access token instead of re-decoding an `any`.
+// authData is models.SuccessResponse with Data typed as models.RsAuth.
 type authData struct {
 	Success bool          `json:"success"`
 	Data    models.RsAuth `json:"data"`
 }
 
-// refreshCookie pulls the refresh cookie out of a response, so the next request can present it
-// the way a browser would. Fails the test if the response set no such cookie.
+// refreshCookie pulls the refresh cookie out of a response, or fails the test.
 func refreshCookie(t *testing.T, res *testkit.Response) *http.Cookie {
 	t.Helper()
 
@@ -96,10 +90,7 @@ func refreshCookie(t *testing.T, res *testkit.Response) *http.Cookie {
 	return nil
 }
 
-// refreshCookieHeader renders a token as a request Cookie header. Only the name and value go
-// back: a browser sends those and nothing else, and replaying the full Set-Cookie line would
-// test a request shape no client ever makes. No escaping, because a JWT is base64url and dots,
-// every one of which is legal in a cookie value.
+// refreshCookieHeader renders a token as a request Cookie header, name and value only, like a browser.
 func refreshCookieHeader(token string) string {
 	return authhandler.RefreshCookieName + "=" + token
 }
@@ -126,8 +117,7 @@ func TestLoginSucceedsAndSetsRefreshCookie(t *testing.T) {
 		t.Fatalf("access token invalid: %v", err)
 	}
 
-	// The whole point of the cookie is that the refresh token never reaches a script. A copy in
-	// the response body would give it back.
+	// The refresh token must never appear in the body, where a script could read it.
 	if bytes.Contains(res.Body, []byte("refresh_token")) {
 		t.Fatalf("login body still carries a refresh token: %s", res.Body)
 	}
@@ -147,9 +137,7 @@ func TestLoginSucceedsAndSetsRefreshCookie(t *testing.T) {
 	}
 }
 
-// The property under test: a caller who tries a registered email with the wrong password, and a
-// caller who tries an email that was never registered, get the SAME status and the SAME body.
-// Either differing would let an attacker enumerate registered emails.
+// A wrong password and an unknown email must get the same status and body.
 func TestLoginWrongPasswordAndUnknownEmailReturnTheSameMessage(t *testing.T) {
 	t.Parallel()
 
@@ -206,9 +194,6 @@ func TestRefreshHappyPath(t *testing.T) {
 	}
 }
 
-// An access token must not be usable where a refresh token is required -- the reverse of
-// AuthMiddleware rejecting a refresh token as an access token, and the same reason: each token
-// type is scoped to its own, different, lifetime.
 func TestRefreshRejectsAccessTokenAsRefreshToken(t *testing.T) {
 	t.Parallel()
 

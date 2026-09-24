@@ -1,12 +1,13 @@
 import { Link, useNavigate } from '@tanstack/react-router'
+import { Inbox, LogOut } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { LanguageToggle } from '@/admin/components/language-toggle'
 import { useT } from '@/admin/i18n/use-t'
 import { logout } from '@/admin/lib/api'
 import { useSession } from '@/admin/lib/session'
 import { Button } from '@/admin/ui/button'
-import { Separator } from '@/admin/ui/separator'
 import { Toaster } from '@/admin/ui/sonner'
+import { site } from '@/config/site.config'
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const t = useT()
@@ -19,43 +20,53 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="bg-background text-foreground min-h-screen md:grid md:grid-cols-[14rem_1fr]">
-      <aside className="border-border bg-muted/40 border-b p-4 md:border-r md:border-b-0">
-        <p className="text-sm font-semibold">{t.panelTitle}</p>
-        <Separator className="my-3" />
-        <nav className="grid gap-1">
-          {/* <Link>, not <a href>. The panel is a real SPA and the rule banning client-side links
-              elsewhere does not apply here -- see the exemption in scripts/check-conventions.mjs
-              and the reasoning above it. */}
+    <div className="bg-background text-foreground min-h-screen md:flex">
+      <aside className="border-border bg-muted hidden w-60 shrink-0 flex-col border-r md:sticky md:top-0 md:flex md:h-screen">
+        <div className="px-5 pt-6 pb-5">
+          <p className="font-display truncate text-base font-bold">{site.name}</p>
+          <p className="text-muted-foreground text-sm">{t.panelTitle}</p>
+        </div>
+
+        <nav className="grid gap-0.5 px-3">
+          {/* <Link> is fine here. The panel is an SPA, exempt from the no-<Link> rule. */}
           <Link
             to="/admin/leads"
-            className="rounded-base px-2 py-1.5 text-sm"
-            // A nav entry points at a section, not at a page of it. TanStack compares search
-            // params when it decides whether a link is active, and this link carries no `page`
-            // while the route always resolves one, so on /admin/leads?page=2 the entry would stop
-            // looking active for the screen it is currently showing.
+            className="text-muted-foreground hover:bg-accent hover:text-foreground rounded-base flex items-center gap-2.5 px-2.5 py-2 text-sm font-medium transition-colors"
+            // Ignore search params, or the link looks inactive on ?page=2.
             activeOptions={{ includeSearch: false }}
             activeProps={{
-              className: 'bg-accent text-accent-foreground rounded-base px-2 py-1.5 text-sm',
+              className:
+                'bg-background text-foreground shadow-xs ring-1 ring-border hover:bg-background',
             }}
           >
+            <Inbox className="size-4" aria-hidden />
             {t.navLeads}
           </Link>
         </nav>
+
+        <div className="border-border mt-auto border-t px-3 py-3">
+          <p className="text-muted-foreground truncate px-2.5 pb-2 text-sm" title={email ?? ''}>
+            {email}
+          </p>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={signOut} className="flex-1 justify-start">
+              <LogOut aria-hidden />
+              {t.signOut}
+            </Button>
+            <LanguageToggle />
+          </div>
+        </div>
       </aside>
 
-      <div className="flex min-w-0 flex-col">
-        <header className="border-border flex items-center justify-end gap-2 border-b px-4 py-3">
-          {/* Rendered from the session rather than from storage. It is empty for the one frame
-              between mount and the first refresh completing, which is why it is not a heading. */}
-          <span className="text-muted-foreground mr-auto truncate text-sm">{email}</span>
-          <LanguageToggle />
-          <Button variant="ghost" size="sm" onClick={signOut}>
-            {t.signOut}
-          </Button>
-        </header>
-        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
-      </div>
+      <header className="border-border bg-muted flex items-center gap-2 border-b px-4 py-3 md:hidden">
+        <p className="font-display mr-auto truncate text-base font-bold">{site.name}</p>
+        <LanguageToggle />
+        <Button variant="ghost" size="sm" onClick={signOut}>
+          {t.signOut}
+        </Button>
+      </header>
+
+      <main className="min-w-0 flex-1 px-4 py-6 md:px-10 md:py-10">{children}</main>
 
       <Toaster />
     </div>

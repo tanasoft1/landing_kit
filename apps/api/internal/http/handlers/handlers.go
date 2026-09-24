@@ -1,5 +1,4 @@
-// Package handlers holds one handler per domain, so routes wire against a single struct rather
-// than a growing constructor parameter list.
+// Package handlers holds one HTTP handler per domain.
 package handlers
 
 import (
@@ -15,8 +14,7 @@ type Handlers struct {
 	Auth *authhandler.Handler
 }
 
-// New builds every handler from the service layer. cfg is taken for one reason: the auth handler
-// has to know whether to mark its refresh cookie Secure, and that follows APP_ENV.
+// New builds every handler. cfg decides whether the refresh cookie is Secure.
 func New(services *service.Services, cfg *conf.Config) *Handlers {
 	return &Handlers{
 		Lead: leadhandler.New(services.Lead),

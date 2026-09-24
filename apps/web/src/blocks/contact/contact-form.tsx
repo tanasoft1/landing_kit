@@ -26,16 +26,12 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
 
     setState('sending')
 
-    // Timing check, kept separate from field validation. If the fields are valid but the
-    // submission is too fast, wait out the rest instead of rejecting it: a bot will not stay
-    // for the promise, and a fast human should never be told their correct fields are wrong.
+    // Too fast? Wait out the rest instead of rejecting. A fast human still gets through.
     const elapsed = Date.now() - mountedAt.current
     if (elapsed < MIN_ELAPSED_MS) {
       await new Promise((r) => setTimeout(r, MIN_ELAPSED_MS - elapsed))
     }
 
-    // Measured again after the wait, so it is real time on screen and clears the minimum
-    // `submissionSchema` enforces on the server.
     const payload = { ...parsed.data, elapsedMs: Date.now() - mountedAt.current }
     const result = await submitContact(payload)
     if (result.ok) {
@@ -70,13 +66,8 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
             <textarea className={field} rows={5} {...register('message')} />
           </label>
 
-          {/*
-            Honeypot. `-left-96` is a scale value, not an arbitrary `-left-[9999px]` bracket
-            escape (blocks may not use those). Not `display:none`: verify-build rejects hidden
-            content, and bots detect it. Named `honeypot_url`, not e.g. `company`: autofill
-            matches recognised field names even with `autoComplete="off"`, and an autofilled
-            honeypot loses a real lead.
-          */}
+          {/* Honeypot. Moved off-screen, not display:none: verify-build rejects hidden content,
+              and bots detect it. */}
           <div aria-hidden="true" className="absolute -left-96">
             <input
               tabIndex={-1}
@@ -94,18 +85,11 @@ export function ContactForm({ copy, surface, anchorId, headingLevel }: BlockProp
             {state === 'sending' ? copy.submitting : copy.submit}
           </button>
 
-          {/*
-            The live region is always mounted; only its text changes. A `role="status"` node
-            inserted fresh on state change is announced inconsistently across screen readers.
-          */}
+          {/* Keep the live region mounted. Screen readers miss one inserted on change. */}
           <p
             role="status"
             aria-live="polite"
-            // Preset tokens, not stock Tailwind colours. A fixed colour would not move when the
-            // preset changes. Contrast for these was measured, not eyeballed — see
-            // `--c-destructive` and `--c-success` in each preset. The old class names are not
-            // written out here: Tailwind's scanner cannot tell code from comments, so naming
-            // them would keep those dead utilities in the built CSS.
+            // Preset tokens, not fixed colours, so they follow the preset.
             className={
               !message
                 ? 'sr-only'

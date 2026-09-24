@@ -1,30 +1,14 @@
 /**
- * Arrow-key pickers: a radio list for one-of, a checkbox list for many-of.
- *
- * Zero dependencies, like the rest of this CLI. A prompt library would be 30 minutes of work and
- * the first runtime dependency in a package that has none — and "no dependencies" is the property
- * that makes this thing safe to run with `pnpm dlx` in the first place.
- *
- * Split deliberately into pure functions and a thin driver:
- *
- * - `parseKey`, `radioNext`, `checkboxNext`, `renderRadio`, `renderCheckbox` are pure. All the
- *   behaviour lives there, so it can be exercised without a terminal.
- * - `runRadio` / `runCheckbox` only wire those to stdin and stdout.
- *
- * That split is not tidiness. Raw-mode TTY code cannot be driven from a pipe, so anything that
- * lives inside the driver is untestable by construction — and this file has to work first time on
- * someone else's machine.
+ * Arrow-key pickers: a radio list for one-of, a checkbox list for many-of. No dependencies, so
+ * `pnpm dlx` stays safe. The logic is in pure functions so it can be tested without a terminal;
+ * `runRadio` and `runCheckbox` only wire them to stdin and stdout.
  */
 
 const ESC = '\x1b'
 
 /**
- * One raw stdin chunk to a semantic key.
- *
- * Arrow keys arrive as three bytes (`ESC [ A`). A lone `ESC` is reported as `escape`, and the only
- * thing that acts on it is text entry, where it means "stop typing". It never cancels the run: on
- * some terminals a bare `ESC` is the start of a sequence whose remaining bytes have not arrived
- * yet, and abandoning a scaffold because a byte was slow would be unforgivable.
+ * One raw stdin chunk to a semantic key. A lone `ESC` never cancels the run: on some terminals it
+ * starts a sequence whose other bytes haven't arrived yet.
  */
 export function parseKey(chunk) {
   const s = String(chunk)
@@ -63,20 +47,11 @@ export function radioNext(state, key) {
 }
 
 /**
- * Text entry, inside the checkbox list rather than as a separate question.
- *
- * Only reached while `state.typing` is a string, which the `add` row switches on. `chunk` is the
- * raw keypress, and the reason it is threaded this far: `parseKey` maps `k` and `j` to up/down for
- * the list, and someone typing `kiosk` means the letters.
- *
- * Enter on an EMPTY box leaves text entry — the natural "I'm done" gesture, and it means a name
- * can be added, then another, then another, without ever reaching for a key nobody documented.
- * Enter on a name adds it and stays open for the next one.
+ * Text entry inside the checkbox list. `chunk` is the raw key, because `parseKey` maps `k`/`j` to
+ * up/down. Enter on an empty box leaves text entry; Enter on a name adds it and stays open.
  */
 function typingNext(state, key, chunk) {
-  // Leaving text entry puts the cursor back at the top of the list. Without that it stays on the
-  // `add` row, where Enter means "open the box" — so the obvious way to finish, Esc then Enter,
-  // reopened the box instead of confirming, and nothing on screen explained why.
+  // Back to the top of the list, so Esc then Enter confirms instead of reopening the box.
   const stop = { ...state, typing: null, typingError: null, index: 0 }
   if (key === 'escape') return { state: stop, done: false }
   if (key === 'backspace') {
@@ -100,9 +75,7 @@ function typingNext(state, key, chunk) {
     const checked = new Set(state.checked).add(name)
     return { state: { ...state, options, checked, typing: '', typingError: null }, done: false }
   }
-  // Printable ASCII only. Uppercase and spaces are accepted into the box and rejected on Enter
-  // with a reason, rather than silently ignored — a key that does nothing reads as a broken
-  // keyboard, not as a rule.
+  // Printable ASCII only. Bad names are rejected on Enter with a reason, not ignored.
   if (typeof chunk === 'string' && /^[\x20-\x7e]$/.test(chunk)) {
     return { state: { ...state, typing: state.typing + chunk, typingError: null }, done: false }
   }
@@ -110,11 +83,8 @@ function typingNext(state, key, chunk) {
 }
 
 /**
- * Same shape as `radioNext`, plus Space to toggle and an optional `add` row for typing new items.
- *
- * Enter only completes when `state.error` is null, and the error is recomputed by the caller's
- * `validate` after every toggle. So an unbuildable selection cannot be submitted, and the reason
- * is on screen the whole time rather than appearing after the question closes.
+ * Same as `radioNext`, plus Space to toggle and an optional `add` row. Enter completes only when
+ * `state.error` is null, so an unbuildable selection can't be submitted.
  */
 export function checkboxNext(state, key, chunk) {
   if (typeof state.typing === 'string') return typingNext(state, key, chunk)
@@ -145,13 +115,11 @@ export function checkboxNext(state, key, chunk) {
   }
 }
 
-// `(•)`/`[x]` rather than the nicer round glyphs: these render identically in every terminal and
-// font this will ever meet, including Windows consoles and CI log viewers.
+// ASCII glyphs render the same in every terminal, including Windows consoles and CI logs.
 const pad = (s, n) => s + ' '.repeat(Math.max(0, n - s.length))
 
 function renderOptions(state, marker) {
-  // The `add` row's label is a sentence, not a value; letting it set the column width would indent
-  // every real option past it.
+  // The `add` row's label doesn't count toward the column width.
   const width = Math.max(...state.options.filter((o) => !o.add).map((o) => o.value.length))
   return state.options.map((o, i) => {
     const cursor = i === state.index ? '>' : ' '
@@ -183,14 +151,8 @@ export function renderCheckbox(state) {
 }
 
 /**
- * Drive a pure key-handler against the terminal.
- *
- * The cursor is hidden while a picker is open and restored in `finally` — including when the
- * caller throws. A CLI that exits leaving the terminal with no cursor is a bug the user has to fix
- * with `reset`, so this is not optional.
- *
- * Ctrl-C exits the process rather than throwing. Raw mode swallows the normal SIGINT, so without
- * this the one key everybody reaches for to escape a prompt would do nothing at all.
+ * Drive a pure key-handler against the terminal. The cursor is restored in `finally`, even on a
+ * throw. Ctrl-C exits the process, because raw mode swallows SIGINT.
  */
 async function run(initial, next, render) {
   const { stdin, stdout } = process
@@ -231,13 +193,7 @@ async function run(initial, next, render) {
   }
 }
 
-/**
- * One keypress.
- *
- * All three listeners are removed on every outcome, not just the two that raced. Leaving the
- * `error` handler attached leaks one listener per keypress: Node warns at eleven, which is a
- * shortish block name typed into the "add your own" box.
- */
+/** One keypress. All three listeners are removed on every outcome, or they leak per keypress. */
 const once = (stream) =>
   new Promise((resolve, reject) => {
     const done = () => {
@@ -262,13 +218,7 @@ const once = (stream) =>
     stream.once('error', onError)
   })
 
-/**
- * Both stdin AND stdout must be terminals.
- *
- * `--yes` and CI pipe stdin, and raw mode on a pipe either throws or hangs forever waiting for a
- * keypress nobody can send. When this is false the caller falls back to typed prompts, which is
- * also what keeps every existing scripted invocation working unchanged.
- */
+/** Both stdin and stdout must be terminals. Raw mode on a pipe throws or hangs. */
 export const isInteractive = () =>
   process.stdin.isTTY === true &&
   process.stdout.isTTY === true &&
@@ -281,10 +231,8 @@ export async function runRadio({ title, options, initialIndex = 0 }) {
 
 /**
  * `addItem` turns on the "type your own" row: `{ label, hint, prompt, addedHint, validateNew }`.
- * `validateNew(name, taken)` returns a reason to refuse, or null to accept.
- *
- * Returns values in LIST order, not in the order they were ticked, with anything typed in appearing
- * after the fixed options in the order it was added.
+ * `validateNew(name, taken)` returns a reason to refuse, or null. Returns values in list order,
+ * with typed-in items after the fixed options.
  */
 export async function runCheckbox({
   title,

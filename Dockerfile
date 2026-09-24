@@ -23,7 +23,7 @@ COPY apps/web ./apps/web
 RUN pnpm --filter @tanasoftllc/landing-kit-web build
 
 # --- stage 2: build the Go binary --------------------------------------------------------------
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /src
 
 # go.mod/go.sum before the rest of the source, same layer-caching reason as the web stage above.

@@ -1,9 +1,6 @@
-// Package auth implements admin login and token refresh. Two properties of it are deliberate.
-// Login always runs bcrypt, even when the email does not exist (see the comment on
-// dummyPasswordHash below), so response time cannot tell an unregistered email from a wrong
-// password. And a refresh token is not stateless here: every one has a row in refresh_tokens, is
-// spent by the call that exchanges it, and takes every token descended from the same login down
-// with it if it is ever presented twice (see Refresh).
+// Package auth implements admin login and token refresh.
+// Login runs bcrypt even for unknown emails, so timing cannot reveal which emails exist.
+// Each refresh token is a single-use row in refresh_tokens. Presenting a spent one revokes its family.
 package auth
 
 import (
@@ -24,79 +21,38 @@ import (
 	"landing-api/internal/utils/secure"
 )
 
-// errInvalidCredentials is returned for BOTH an unknown email and a wrong password, and for
-// nothing else. One error for both failure modes is what keeps the endpoint from being an
-// account-existence oracle: a caller who can tell "no such admin" apart from "wrong password"
-// can enumerate every registered email with one request per guess.
+// errInvalidCredentials covers both an unknown email and a wrong password.
+// One error for both keeps the endpoint from revealing which emails are registered.
 var errInvalidCredentials = errors.New("invalid credentials")
 
-// errAccountLocked is returned when an email has failed too many times recently, whether or not
-// it belongs to a real account. Separate from errInvalidCredentials because it maps to a 429 the
-// panel shows differently, and safe to distinguish for one reason: it only ever tells a caller
-// about attempts they made themselves.
+// errAccountLocked maps to a 429. It is safe to tell apart from errInvalidCredentials
+// because it only reports on attempts the caller made themselves.
 var errAccountLocked = errors.New("account locked")
 
 const (
-	// lockAfterFailures is how many failures a legitimate typo budget absorbs before backoff
-	// starts. Five matches loginLimiter's per-IP allowance, so neither wall is reached first by
-	// accident.
+	// lockAfterFailures matches loginLimiter's per-IP allowance of five.
 	lockAfterFailures = 5
-	// maxLockDuration caps the curve. Backoff, never a permanent lockout, because a lock is a
-	// refusal to evaluate the password and so refuses the real admin exactly as firmly as it
-	// refuses a guess.
-	//
-	// An hour, and it can be an hour because the lock is keyed on the source address: the only
-	// person it costs an hour is whoever spent eleven failures earning it. A cap this long against
-	// an account-wide lock would have been a denial of service against any admin whose address is
-	// known.
+	// maxLockDuration caps the backoff. The lock is per source address, so an hour only costs
+	// whoever earned it. Never make the lock permanent or account-wide: that locks out the real admin.
 	maxLockDuration = 60 * time.Minute
-	// loginFailureDecay is how long a failure counts towards the curve. A failure older than this
-	// resets the count to one instead of adding to it, which is what lets a source climb back down
-	// the curve on its own; without it the count only grew and a source past eleven failures sat
-	// at maxLockDuration for good.
-	//
-	// It has to sit between two walls, and it is easy to satisfy one by breaking the other.
-	//
-	// SHORTER than maxLockDuration, which the guard below enforces. Serving a full-length lock has
-	// to be enough to decay the count, otherwise whoever earned the lock holds it at the cap
-	// forever by sending one failure each time it lapses and never waiting longer than the lock
-	// itself.
-	//
-	// LONGER than loginLimiter's window, which nothing can enforce from here. The limiter allows
-	// five attempts per fifteen minutes from one address, so a decay shorter than that window is
-	// already spent by the time the limiter lets the next attempt through: the count resets
-	// between every window, the curve never climbs past its first step, and the backoff does
-	// nothing the limiter was not doing alone. Measured against the limiter over ten hours, a
-	// ten-minute decay let one source have 200 guesses evaluated with the count never passing
-	// five; thirty minutes against the hour cap cuts that to 80 and the count reaches ten.
-	//
-	// The admin who fumbles their password pays almost nothing for the longer window, because the
-	// curve only diverges past nine failures and the limiter has already answered 429 by then.
+	// loginFailureDecay is how long a failure counts. An older failure resets the count to one.
+	// It must be shorter than maxLockDuration (checked below), or a source can hold the cap forever.
+	// It must be longer than loginLimiter's 15-minute window, or the count resets between windows
+	// and the backoff never climbs.
 	loginFailureDecay = 30 * time.Minute
-	// loginAttemptStale is how old the last failure must be before PruneLoginAttempts deletes the
-	// row. Well past loginFailureDecay, so the prune can never remove a row a live decision would
-	// still have read.
+	// loginAttemptStale is well past loginFailureDecay, so the prune never deletes a row a live
+	// decision still needs.
 	loginAttemptStale = 24 * time.Hour
-	// rotationGrace is how long after a rotation the token it spent is still honoured as a lost
-	// response rather than treated as a replay. See Refresh.
+	// rotationGrace is how long a spent token still counts as a lost response, not a replay.
 	rotationGrace = 30 * time.Second
 )
 
-// This is an assertion, not a value: it fails the build if loginFailureDecay is ever raised to or
-// past maxLockDuration. The subtraction is a compile-time constant, and a negative one does not
-// convert to an unsigned type, so the inversion cannot land quietly. uint64 rather than uint,
-// because uint is the platform word: on a 32-bit build the correct configuration would be the one
-// that failed to compile, since a 60-minute duration in nanoseconds does not fit in 32 bits. It is written as a constant rather than
-// as a test because the property is about two constants and nothing else, and a build that cannot
-// produce the inversion is stronger than a test run that catches it.
-//
-// The extra nanosecond makes equal windows fail too: a decay exactly as long as the longest lock
-// still leaves the count one nanosecond short of resetting, which is the same trap one minute
-// wider would be.
+// Build fails unless loginFailureDecay < maxLockDuration: a negative constant cannot convert to
+// uint64. uint64, not uint, so the check still compiles on 32-bit builds.
 const _ = uint64(maxLockDuration - loginFailureDecay - time.Nanosecond)
 
-// lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
-// minute, capped. failures is the count AFTER the failure being recorded.
+// lockDuration is 0 below lockAfterFailures, then doubles from one minute up to the cap.
+// failures includes the failure being recorded.
 func lockDuration(failures int32) time.Duration {
 	if failures < lockAfterFailures {
 		return 0
@@ -108,30 +64,15 @@ func lockDuration(failures int32) time.Duration {
 	return d
 }
 
-// errInvalidToken is returned for every way a refresh token can be refused: a bad signature, the
-// wrong token type, an unreadable jti, no matching ledger row, a row already spent, a row past its
-// expiry, and a token naming an admin that no longer exists. Every one of them answers with the
-// same status and the same body on purpose. An attacker who can tell "token malformed" from "admin
-// was deleted" from "that one was already used" learns something the token itself did not entitle
-// them to know, and the last of those would tell a thief exactly when the real admin noticed.
-//
-// Timing is not identical, and saying otherwise would overstate what the code delivers. The two
-// replay branches revoke a family and write an audit row before answering; a token with no ledger
-// row answers after a single SELECT. That residue is worth living with. The endpoint is rate
-// limited, so the gap cannot be sampled enough times to lift it out of network noise, and what it
-// leaks is only that the presented token was already spent -- a state the replay itself created,
-// about a token its holder already has.
+// errInvalidToken covers every refusal of a refresh token. One status and body for all of them,
+// so a caller cannot learn why, for example that the real admin already used the token.
 var errInvalidToken = errors.New("invalid token")
 
-// errTokenAlreadySpent is internal to this package and never reaches a handler. It is how rotate
-// tells Refresh that another request claimed the presented token, so Refresh can revoke the
-// family AFTER rotate's transaction has been rolled back and released the family lock.
+// errTokenAlreadySpent never leaves this package. rotate returns it so Refresh can revoke the
+// family after rotate's transaction has released the family lock.
 var errTokenAlreadySpent = errors.New("refresh token already spent")
 
-// LoginResult is what Login and Refresh hand back. It is not models.RsAuth, because the refresh
-// token is not part of the response body's shape: how it reaches the client, in the body or as a
-// Set-Cookie header, is the handler's decision, and the handler is the only layer that should
-// know which.
+// LoginResult is what Login and Refresh return. The handler decides how the refresh token reaches the client.
 type LoginResult struct {
 	AccessToken      string
 	RefreshToken     string
@@ -139,30 +80,10 @@ type LoginResult struct {
 	Admin            models.RsAdminProfile
 }
 
-// dummyPasswordHash is a bcrypt hash of a fixed string nobody's real password is checked
-// against. It exists so Login can run bcrypt.CompareHashAndPassword on every attempt, including
-// one against an email that is not registered.
-//
-// Returning on pgx.ErrNoRows before comparing anything would be faster for that one path --
-// and that speed difference is exactly what would make it an oracle: bcrypt is
-// deliberately slow (that is its entire purpose), so a request that skips it returns measurably
-// sooner than one that runs it. An attacker timing responses can use that gap to enumerate valid
-// emails without ever seeing a different error message. Comparing against this fixed hash costs
-// one bcrypt call on every path and closes the gap the identical error message alone does not.
-//
-// Closing it depends on this hash comparing in the same time as a real one, and bcrypt's running
-// time is set by the cost encoded in the hash it is handed. So the cost has to match exactly, not
-// merely keep up. A lower cost makes the unknown-email path the faster one, a higher cost makes it
-// the slower one, and either difference enumerates emails just as well. A value bcrypt cannot
-// parse at all is the worst of the three: CompareHashAndPassword rejects it on the parse and does
-// no hashing whatsoever, which measures at 3ns against 200ms for a real cost-12 compare. init
-// below refuses to start on any of them.
+// dummyPasswordHash lets Login run bcrypt for unknown emails too, so response time cannot reveal
+// which emails exist. Its cost must equal utils.bcryptCost exactly, or the timing differs; init checks.
 const dummyPasswordHash = "$2a$12$hUQZsy0MRlWsdaOKt6/a5ugySbQvoGmsHDxBxLO8EIRoxbk6/.6GC" //nolint:gosec // a bcrypt hash of a fixed non-secret string, not a credential
 
-// A wrong security invariant should stop the process rather than warn, which is what conf.Load
-// already does for an empty or too-short JWT secret outside development. The check is cheap, it
-// is correct only at startup, and there is no caller to return an error to.
-//
 //nolint:gochecknoinits // an invariant that must hold before the first request, with nothing to return an error to
 func init() {
 	if !utils.HashCostIsCurrent(dummyPasswordHash) {
@@ -170,10 +91,7 @@ func init() {
 	}
 }
 
-// Service holds the pool as well as the queries built from it, because sqlc.Queries can only run
-// statements, not open a transaction. Refresh needs one: spending a token and issuing its
-// successor have to commit together, under a lock that no other writer on the same family can
-// cross.
+// Service keeps the pool because token rotation needs a transaction, which sqlc.Queries cannot open.
 type Service struct {
 	pool         *pgxpool.Pool
 	queries      *sqlc.Queries
@@ -185,34 +103,12 @@ func New(pool *pgxpool.Pool, queries *sqlc.Queries, tokenService *secure.TokenSe
 	return &Service{pool: pool, queries: queries, tokenService: tokenService, audit: audit}
 }
 
-// Login checks req's credentials and, on success, issues a fresh access/refresh token pair. ip and
-// userAgent are recorded against the attempt, successful or not. Neither has any say in whether
-// the credentials are accepted; ip does decide whose backoff this attempt counts against, which is
-// a separate question and the subject of the comment below.
+// Login checks credentials and issues a new token pair. ip decides whose backoff a failure counts against.
 func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent string) (*LoginResult, error) {
-	// Read the lock before anything else, and read it for every email rather than only for
-	// registered ones: rows exist for any address that has failed, registered or not, so a
-	// lockout can never reveal that an account exists.
-	//
-	// The lock is keyed on the email AND the address the attempt came from, and skipped entirely
-	// when there is no address. Both halves matter.
-	//
-	// Keyed on the pair, because an account-wide lock is a denial of service against anyone whose
-	// email is known. It cannot be anything else: deciding whether the real admin or a stranger is
-	// knocking means checking the password, and refusing to check the password is what the lock
-	// is. So a stranger who sent one failed login each time the lock lapsed kept the address shut
-	// and kept the admin out with it. Per source, that stranger locks out their own source and
-	// nobody else. The cost is that a throttle spanning many source addresses is gone; it is the
-	// same property, so it could not be kept. Guessing is still charged per source on top of
-	// loginLimiter, which allows five attempts per fifteen minutes from one address.
-	//
-	// Skipped without an address, because an empty ip is not an address, it is every caller who
-	// arrived without one, and a lock on that shared bucket is the account-wide lock again under
-	// another name. The rate limiters make the same call for the same reason -- see
-	// clientKeyGenerator in internal/http/routes, which hands an unresolvable caller a key of
-	// their own rather than letting them join everyone else's. Failing open for one request beats
-	// a defence that can lock out a real admin. The audit rows below are written either way: a
-	// failed login is a fact worth recording whether or not it can be counted against a source.
+	// The lock is keyed on (email, ip), never the email alone: an account-wide lock would let anyone
+	// who knows the email keep the real admin out. Unknown emails get rows too, so a lock never
+	// reveals whether an account exists. No ip means no lock, since an empty ip is shared by every
+	// such caller.
 	if ip != "" {
 		attempt, attemptErr := s.queries.GetLoginAttempt(ctx, sqlc.GetLoginAttemptParams{
 			Email: req.Email,
@@ -224,12 +120,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 		}
 		if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
 			slog.Warn("login attempt against a locked email")
-			// Recorded, not merely logged. This branch returns before every other audit write in
-			// Login, so an attacker hammering a locked address used to leave nothing in
-			// admin_audit_log at all -- the table an operator reads to find out they are under
-			// attack stayed empty for exactly the attack it should have shown. No admin id: the
-			// row is not looked up on this path, deliberately, since doing so would make the lock
-			// a probe for whether the address is registered.
+			// No admin lookup here, so the lock cannot probe whether the email is registered.
 			s.audit.Record(ctx, auditsvc.EventLoginLocked, nil, ip, userAgent)
 			return nil, errAccountLocked
 		}
@@ -238,9 +129,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	admin, err := s.queries.GetAdminByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// See dummyPasswordHash above: run bcrypt here too, even though the result is
-			// discarded, so this branch takes the same time as a registered email with the
-			// wrong password.
+			// Result discarded. This keeps the timing equal to a wrong password.
 			utils.CheckPasswordHash(req.Password, dummyPasswordHash)
 			slog.Warn("login attempt with unknown email")
 			s.audit.Record(ctx, auditsvc.EventLoginFailed, nil, ip, userAgent)
@@ -256,8 +145,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 		return nil, s.noteFailure(ctx, req.Email, ip)
 	}
 
-	// Only this pair, never every row for the email. A successful sign-in from the office should
-	// not wipe the backoff a stranger elsewhere has been accumulating against the same address.
+	// Clear only this pair, so a successful login does not wipe a stranger's backoff elsewhere.
 	if ip != "" {
 		if err := s.queries.ClearLoginAttempts(ctx, sqlc.ClearLoginAttemptsParams{
 			Email: req.Email,
@@ -267,9 +155,7 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 		}
 	}
 
-	// Upgrade a hash written at an older cost. Deliberately not fatal: the caller supplied the
-	// right password, and refusing the login because a background rewrite failed would turn a
-	// housekeeping problem into an outage. Logged and ignored, and retried on the next login.
+	// Upgrade an old-cost hash. A failure here must not fail a correct login.
 	if utils.NeedsRehash(admin.PasswordHash) {
 		if newHash, hashErr := utils.HashPassword(req.Password); hashErr != nil {
 			slog.Error("rehash after login failed", slog.Any("err", hashErr))
@@ -283,20 +169,12 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 		}
 	}
 
-	// Housekeeping while we have the admin id. Bounded with no scheduled job: a dead row can
-	// only outlive its expiry until its owner next signs in. A failure here is not worth failing
-	// a valid login over.
+	// Pruning happens on login because there is no scheduled job.
 	if err := s.queries.DeleteExpiredRefreshTokens(ctx, admin.ID); err != nil {
 		slog.Warn("pruning expired refresh tokens failed", slog.Any("err", err))
 	}
 
-	// The same bargain for login_attempts, which ClearLoginAttempts above only ever empties for
-	// the one email and source that just succeeded. A row for an address that failed and was never
-	// tried again would otherwise live forever, so a spray across a million addresses leaves a
-	// million rows, and now one per source that tried each of them.
-	//
-	// The prune keys on staleness, not on the lock. Keying on locked_until only reached rows that
-	// had failed five times, and the million-address sprayer stops at four.
+	// Prune by age, not by locked_until: a sprayer that stops at four failures is never locked.
 	if err := s.queries.PruneLoginAttempts(ctx, time.Now().Add(-loginAttemptStale)); err != nil {
 		slog.Warn("pruning login attempts failed", slog.Any("err", err))
 	}
@@ -304,40 +182,15 @@ func (s *Service) Login(ctx context.Context, req *models.RqLogin, ip, userAgent 
 	slog.Info("admin login succeeded", slog.String("admin_id", admin.ID.String()))
 	s.audit.Record(ctx, auditsvc.EventLoginSuccess, &admin.ID, ip, userAgent)
 
-	// A login starts a new family. Nothing issued before it is related to it, so a replay
-	// detected later cannot reach back and revoke a session the admin started deliberately.
-	//
-	// This is also the only place the family's absolute deadline is chosen. Every rotation copies
-	// it forward untouched, so signing in again is the one way to get a later one.
+	// A login starts a new family. It is the only place the family's absolute deadline is set.
 	return s.issueTokenPair(ctx, s.queries, admin, uuid.New(), uuid.New(),
 		s.tokenService.SessionDeadline(time.Now()))
 }
 
 // noteFailure records a failed attempt and returns the error Login should surface.
-//
-// The count that feeds the backoff comes from the row the increment itself returns, not from the
-// row read at the top of Login. That distinction is the whole defence. A count read earlier is
-// already stale by the time the window is computed, so twenty requests firing at once would all
-// read zero, all compute "no lock yet", and all write one -- twenty free guesses against a fresh
-// email, which is precisely the many-address attacker this backoff exists to stop. Taking the
-// count from the write instead gives each request its own position in the sequence, so the
-// twentieth locks for the twentieth failure's window no matter how close together they arrive.
-//
-// The lock is a second statement rather than a column on the first because the window is not
-// known until the increment has answered. It costs one more round trip on a failed login past the
-// threshold, which is nothing beside the ~200ms of bcrypt the same request has already spent. A
-// write failure is logged, not returned: the caller supplied bad credentials either way, and
-// refusing to answer would hand an attacker a way to tell a bookkeeping error from a wrong
-// password.
-//
-// The count the write returns is a decayed one, not a running total: a previous failure older than
-// loginFailureDecay resets it to one instead of adding to it, in the same statement, so two
-// concurrent failures cannot disagree about whether the window had lapsed.
-//
-// The count belongs to the pair (email, ip), and a caller with no resolvable address gets no count
-// at all. Both follow from the lock Login reads; the reasoning is written there. The audit row for
-// this failure is already written by the time we are called, so nothing about the attempt goes
-// unrecorded when the counting is skipped.
+// The backoff uses the count the increment returns, not the one Login read earlier, so concurrent
+// failures cannot all see zero and skip the lock. A write failure is logged, not returned, so it
+// looks the same as a wrong password.
 func (s *Service) noteFailure(ctx context.Context, email, ip string) error {
 	if ip == "" {
 		return errInvalidCredentials
@@ -364,19 +217,8 @@ func (s *Service) noteFailure(ctx context.Context, email, ip string) error {
 	return errInvalidCredentials
 }
 
-// Refresh validates a refresh token, spends it, and issues a replacement. The admin row is
-// re-read rather than trusted from the token's claims, so an admin removed after the refresh
-// token was issued cannot use it to obtain a new access token.
-//
-// The ledger lookup is what makes a refresh token single-use. Presenting one that has already been
-// spent means two parties hold the same token, and only one of them came by it honestly, so the
-// entire family dies and both are forced back to the login screen. That is deliberately disruptive:
-// the alternative is letting a thief keep rotating quietly for a week.
-//
-// With one exception, and only one: a token spent within rotationGrace whose successor is still
-// live. That is what a rotation whose response went missing looks like, and it was costing honest
-// admins their session for closing a tab at the wrong moment. See resumeLostRotation, which both
-// spent-token paths below go through.
+// Refresh validates a refresh token, spends it, and issues a replacement.
+// Presenting a spent token revokes the whole family, unless resumeLostRotation treats it as a lost response.
 func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent string) (*LoginResult, error) {
 	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
 	if err != nil {
@@ -393,8 +235,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	row, err := s.queries.GetRefreshToken(ctx, jti)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Signed by us, but no ledger row: either issued before this table existed, or the
-			// row was pruned. Neither is a token we are willing to honour.
 			slog.Warn("refresh token is not in the ledger")
 			return nil, errInvalidToken
 		}
@@ -413,18 +253,13 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 		return nil, errInvalidToken
 	}
 
-	// Belt and braces. The JWT's own exp claim already covers this, so reaching here means the
-	// ledger and the token disagree, and the ledger wins.
+	// The JWT exp already covers this. If the ledger disagrees, the ledger wins.
 	if row.ExpiresAt.Before(time.Now()) {
 		slog.Warn("refresh token is past its ledger expiry")
 		return nil, errInvalidToken
 	}
 
-	// The family's absolute deadline, refused exactly like an expired row: same error, same
-	// status, same body, per errInvalidToken's uniformity above. Every row's own expires_at is
-	// clamped to this value at issue time, so the check above almost always fires first -- almost,
-	// because a row written before the clamp existed has no such guarantee, and a check that only
-	// holds for rows this version wrote is not a bound.
+	// expires_at is clamped to this deadline at issue time, but older rows may not be.
 	if row.FamilyExpiresAt.Before(time.Now()) {
 		slog.Warn("refresh token's family is past its absolute lifetime",
 			slog.String("admin_id", row.AdminID.String()),
@@ -446,24 +281,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	result, err := s.rotate(ctx, admin, jti, row.FamilyID, row.FamilyExpiresAt)
 	if err != nil {
 		if errors.Is(err, errTokenAlreadySpent) {
-			// Someone else spent this token between the ledger read above and rotate's write. That
-			// is the same event as the already-revoked row above, caught a few milliseconds
-			// earlier, and it now gets the same answer in both senses: same grace window, same
-			// no-write rule, same fall-through to the replay path when the window does not apply.
-			//
-			// The two paths converge deliberately. They used to differ -- this one always revoked
-			// the family -- and the difference was an accident of where the race is noticed, not a
-			// judgement about what it means. Both are "this token was spent by somebody else
-			// moments ago", and the winner's successor is live either way. Do not restore the
-			// asymmetry; it was never reasoned for.
-			//
-			// The row read at the top of Refresh is stale here by definition: the winner committed
-			// after it. So re-read, because revoked_at and replaced_by are exactly the two columns
-			// that changed and exactly the two resumeLostRotation needs.
+			// Another request spent this token after our read. Handle it exactly like the revoked
+			// row above. Re-read first: revoked_at and replaced_by have just changed.
 			spent, readErr := s.queries.GetRefreshToken(ctx, jti)
 			if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
-				// Same reasoning as in resumeLostRotation: revoking a family because a read failed
-				// is the wrong answer to "we do not know".
+				// A failed read must not revoke the family.
 				slog.Error("re-reading a concurrently spent token failed", slog.Any("err", readErr))
 				return nil, fmt.Errorf("get refresh token after concurrent spend: %w", readErr)
 			}
@@ -486,33 +308,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken, ip, userAgent strin
 	return result, nil
 }
 
-// resumeLostRotation decides whether a revoked row is a rotation whose response never reached the
-// client, and if it is, hands that client the successor it never received. handled reports whether
-// this function answered the request; when it is false the caller carries on to the replay path
-// unchanged.
-//
-// Both of Refresh's ways of meeting a spent token come here: the row that was already revoked when
-// Refresh read it, and the row another request spent while rotate was working. They are one event
-// seen at two moments, and one function answering both is what keeps them from drifting apart
-// again.
-//
-// The case it exists for needs no attacker and no race. A refresh commits, the response is lost --
-// the tab closed mid-flight, the network dropped, a proxy timed out -- and the browser still holds
-// the cookie the server has already spent. The next refresh presented it, found revoked_at set, and
-// killed the whole family. Closing a tab at the wrong moment logged the admin out and wrote a
-// token_reuse_detected row, which internal/service/audit calls the only signal a refresh token was
-// stolen. Honest clients writing that row routinely is how a real one gets ignored.
-//
-// What this trades, plainly: a thief who replays a stolen token within rotationGrace of an honest
-// rotation is not detected, and lands in the same live session the honest client holds. That is a
-// real cost, not a free win. It is much smaller than the one the old behaviour charged real admins,
-// because the thief's window is thirty seconds wide and starts only at a rotation they did not
-// cause, while the admin's window was every refresh they ever made. Outside the window nothing
-// changes: the family still dies and the audit row is still written.
-//
-// Nothing is written here. No rotation, no revocation, no new ledger row, no new jti, no audit row.
-// The successor already exists and is still live; this only re-signs a JWT naming it, with that
-// row's own expiry rather than a recomputed one, so the answer cannot extend anything.
+// resumeLostRotation handles a rotation whose response never reached the client, such as a tab
+// closed mid-request. If row was spent within rotationGrace and its successor is still live, it
+// re-signs that successor with its own expiry and writes nothing. When handled is false, the
+// caller goes on to the replay path.
+// The cost: a thief replaying inside the grace window is not detected.
 func (s *Service) resumeLostRotation(ctx context.Context, row sqlc.RefreshToken) (*LoginResult, bool, error) {
 	if row.ReplacedBy == nil || row.RevokedAt == nil || time.Since(*row.RevokedAt) > rotationGrace {
 		return nil, false, nil
@@ -521,21 +321,16 @@ func (s *Service) resumeLostRotation(ctx context.Context, row sqlc.RefreshToken)
 	successor, err := s.queries.GetRefreshToken(ctx, *row.ReplacedBy)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// The successor was pruned or never landed. Not a lost response, so the caller's
-			// replay path takes it from here.
 			return nil, false, nil
 		}
-		// Deliberately answered rather than passed through. Falling through on a failed read would
-		// revoke a family and record a stolen token because the database hiccuped, and a
-		// destructive answer is the wrong default for "we do not know".
+		// Answer with the error. Falling through would revoke the family over a database hiccup.
 		slog.Error("reading a spent token's successor failed", slog.Any("err", err))
 		return nil, true, fmt.Errorf("get successor refresh token: %w", err)
 	}
 
 	now := time.Now()
 	if successor.RevokedAt != nil || successor.ExpiresAt.Before(now) || successor.FamilyExpiresAt.Before(now) {
-		// The successor is dead too, which is a chain someone kept rotating, not one response
-		// that went missing thirty seconds ago.
+		// A dead successor means someone kept rotating the chain. That is not a lost response.
 		return nil, false, nil
 	}
 
@@ -575,18 +370,8 @@ func (s *Service) resumeLostRotation(ctx context.Context, row sqlc.RefreshToken)
 	}, true, nil
 }
 
-// Logout revokes every token in the presented token's family.
-//
-// It returns nothing. A logout that reports failure gives a caller something to probe with, and
-// there is nothing useful for them to do with the answer either way: the handler clears the
-// cookie regardless, so from the browser's side the session is over even if the ledger write
-// failed. A stale live row is bounded by the token's own seven-day expiry.
-//
-// The revoke goes through revokeFamily, which takes the family's advisory lock, rather than
-// running the family UPDATE on its own. Signing out in one tab while another is mid-refresh is
-// exactly the race the lock exists for: an UPDATE cannot see the successor row a rotation
-// inserts after the UPDATE's own statement began, so an unlocked revoke can leave that successor
-// alive in a family it has just killed.
+// Logout revokes every token in the presented token's family. It returns nothing, so a caller has
+// nothing to probe. It uses revokeFamily's lock so a concurrent rotation's successor is not missed.
 func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string) {
 	claims, err := s.tokenService.ValidateRefreshToken(refreshToken)
 	if err != nil {
@@ -598,11 +383,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string
 	}
 	row, err := s.queries.GetRefreshToken(ctx, jti)
 	if err != nil {
-		// A token with no ledger row is the ordinary case: it was already spent, or its family
-		// was revoked, and there is nothing left to revoke. Anything else means the lookup itself
-		// failed, and the caller cannot be told -- logout answers the same way regardless. Without
-		// this line that failure leaves no trace at all, while the caller sees a cleared cookie
-		// and a success, and the session it asked to end stays live until its own expiry.
+		// No row is normal. Log any other error, because the caller is never told.
 		if !errors.Is(err, pgx.ErrNoRows) {
 			slog.Error("reading the token ledger on logout failed", slog.Any("err", err))
 		}
@@ -616,35 +397,15 @@ func (s *Service) Logout(ctx context.Context, refreshToken, ip, userAgent string
 	s.audit.Record(ctx, auditsvc.EventLogout, &row.AdminID, ip, userAgent)
 }
 
-// rotate spends the presented token and issues its successor as one transaction, under the
-// family's advisory lock. Both halves of that matter and for different reasons.
-//
-// The transaction is what makes spending atomic: a crash between the two now leaves the
-// presented token still live, so the client's next attempt with it simply works. The previous
-// ordering argument -- revoke first, because a crash between them costs a re-login while the
-// reverse leaves two live tokens -- no longer applies, because there is no longer an in-between
-// state to crash in.
-//
-// The lock is what orders this transaction against a family revoke running at the same time. A
-// revoke cannot revoke a row that does not exist yet, and an UPDATE's scan cannot see a row
-// inserted after its statement began, so without the lock a family revoke racing this function
-// can miss the successor and leave it live in a family it has just killed.
-//
-// The revoke is also what claims the token, which is why its row count is read rather than
-// discarded. The RevokedAt check in Refresh cannot do that job: two requests carrying the same
-// live token can both pass it, because neither has written anything yet. The UPDATE settles it
-// instead, by matching only a row that is still unrevoked (see RevokeRefreshToken). Exactly one
-// of the two changes a row.
+// rotate spends the presented token and issues its successor in one transaction, under the
+// family's advisory lock, which orders it against a concurrent family revoke. The revoke only
+// matches an unrevoked row, so when two requests race with one token, exactly one wins.
 func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyID uuid.UUID, familyExpiresAt time.Time) (*LoginResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin token rotation: %w", err)
 	}
-	// Load-bearing, not hygiene. This is what releases the family lock on every path that does not
-	// commit, including the one where the token was already spent -- and on that path Refresh goes
-	// straight on to revokeFamilyAsReplay, which takes the same lock on another connection. Without
-	// the rollback here that call waits on a lock this function still holds, and the request hangs
-	// until its deadline.
+	// Releases the family lock. Without it, revokeFamilyAsReplay would wait on the lock and hang.
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
 			slog.Warn("rolling back token rotation failed", slog.Any("err", rbErr))
@@ -658,10 +419,7 @@ func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyI
 		return nil, fmt.Errorf("lock token family: %w", err)
 	}
 
-	// The successor's jti is minted here rather than inside issueTokenPair because the revoke
-	// below writes it into replaced_by, in the same statement that spends the presented token. A
-	// spent row therefore always names its successor, which is what lets Refresh tell a rotation
-	// whose response was lost from a genuine replay.
+	// Minted here so the revoke can write it into replaced_by, which resumeLostRotation reads.
 	successorJti := uuid.New()
 
 	spent, err := qtx.RevokeRefreshToken(ctx, sqlc.RevokeRefreshTokenParams{
@@ -676,8 +434,7 @@ func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyI
 		return nil, errTokenAlreadySpent
 	}
 
-	// familyExpiresAt is carried forward from the presented row, never recomputed. Recomputing it
-	// is what made the seven days an idle timeout instead of a session lifetime.
+	// Carry familyExpiresAt forward. Recomputing it turns the session lifetime into an idle timeout.
 	result, err := s.issueTokenPair(ctx, qtx, admin, familyID, successorJti, familyExpiresAt)
 	if err != nil {
 		return nil, err
@@ -691,13 +448,8 @@ func (s *Service) rotate(ctx context.Context, admin sqlc.AdminUser, jti, familyI
 	return result, nil
 }
 
-// revokeFamilyAsReplay kills every token descended from the same login and records the detection.
-// Two paths reach it: a token whose ledger row was already revoked, and a token another request
-// spent while this one was working. Both mean two parties held one token, and neither tells us
-// which of the two is the one asking now, so both lose the session.
-//
-// The audit row records the detection, which happened, and not the revocation, which may not have.
-// A failed revoke shows up only in the error log, so the row is not proof that the family died.
+// revokeFamilyAsReplay revokes the family and records the replay. The audit row does not prove
+// the revoke worked; a failed revoke shows only in the error log.
 func (s *Service) revokeFamilyAsReplay(ctx context.Context, row sqlc.RefreshToken, ip, userAgent string) {
 	if err := s.revokeFamily(ctx, row.FamilyID); err != nil {
 		slog.Error("revoking refresh token family failed", slog.Any("err", err))
@@ -705,20 +457,13 @@ func (s *Service) revokeFamilyAsReplay(ctx context.Context, row sqlc.RefreshToke
 	s.audit.Record(ctx, auditsvc.EventTokenReuse, &row.AdminID, ip, userAgent)
 }
 
-// revokeFamily revokes every unrevoked token in one family, under that family's advisory lock.
-// The lock is the whole reason this needs a transaction of its own. A rotation of a live token in
-// the same family can be running right now, and the UPDATE below cannot see a successor row the
-// rotation inserts after the UPDATE's own statement began -- it would revoke everything it could
-// see and leave that successor alive in a family this call has just declared compromised. Taking
-// the lock first means whichever of the two writers arrives second starts after the other has
-// committed, and so sees its rows.
+// revokeFamily revokes every live token in one family under the family's advisory lock.
+// Without the lock, the UPDATE could miss a successor that a concurrent rotation inserts.
 func (s *Service) revokeFamily(ctx context.Context, familyID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin family revoke: %w", err)
 	}
-	// Releases the family lock on every path that does not commit. Another writer on this family
-	// is blocked behind it until then.
 	defer func() {
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
 			slog.Warn("rolling back family revoke failed", slog.Any("err", rbErr))
@@ -742,16 +487,8 @@ func (s *Service) revokeFamily(ctx context.Context, familyID uuid.UUID) error {
 	return nil
 }
 
-// issueTokenPair signs a new access and refresh token and records the refresh token in the
-// ledger under familyID, through whichever queries handle q is. A rotation passes its
-// transaction-bound handle, so the insert commits with the revoke that preceded it; a login
-// passes the pool-bound one. A login also passes a fresh familyID, where a rotation passes the
-// one the presented token already belonged to, which is what lets replay revoke the whole chain.
-//
-// jti and familyExpiresAt are supplied by the caller for the same reason familyID is. A rotation
-// has already written the successor's jti into the predecessor's replaced_by, and has already read
-// the family's deadline off the row it spent; both have to be the values this function uses, not
-// fresh ones it invents.
+// issueTokenPair signs a token pair and records the refresh token through q. A rotation passes
+// its transaction handle so the insert commits with the revoke.
 func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sqlc.AdminUser, familyID, jti uuid.UUID, familyExpiresAt time.Time) (*LoginResult, error) {
 	accessToken, err := s.tokenService.GenerateAccessToken(admin.ID, admin.Email)
 	if err != nil {
@@ -770,9 +507,7 @@ func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sql
 		ExpiresAt:       expiresAt,
 		FamilyExpiresAt: familyExpiresAt,
 	}); err != nil {
-		// Fail the whole call. A signed refresh token with no ledger row is worse than no token:
-		// Refresh would reject it as unknown, so the admin would appear to log in and then be
-		// bounced on their first refresh with nothing explaining why.
+		// A token with no ledger row would fail on its first refresh, so fail now.
 		return nil, fmt.Errorf("store refresh token: %w", err)
 	}
 
@@ -788,8 +523,7 @@ func (s *Service) issueTokenPair(ctx context.Context, q *sqlc.Queries, admin sql
 	}, nil
 }
 
-// IsInvalidCredentials reports whether err is the credentials failure Login returns, so the
-// handler can map it to its own status and message without importing an unexported sentinel.
+// IsInvalidCredentials reports whether err is the credentials failure Login returns.
 func IsInvalidCredentials(err error) bool {
 	return errors.Is(err, errInvalidCredentials)
 }

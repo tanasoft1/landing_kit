@@ -6,14 +6,10 @@ import {
   submissionSchema,
 } from '@/integrations/submit-schema'
 
-// Deliberately named `.rpc.ts`, not `.server.ts` — see the `@/submit` alias comment in
-// vite.config.ts for why. Do NOT rename this back to `submit.server.ts` and do NOT re-add an
-// `importProtection.client.excludeFiles` entry: that would silently disable the guard for every
-// other file too. If real server-only secrets or logic land here, split them into a separate
-// `*.server.ts` file that this module imports instead.
+// Named `.rpc.ts` on purpose: the client imports it, and `.server.ts` files are blocked there.
+// Don't rename it or add an import-protection exclude. Put real secrets in a `*.server.ts` file.
 
 const handler = createServerFn({ method: 'POST' })
-  // Revalidates server-side, including the timing minimum — the client can be bypassed.
   .validator((data: unknown) => submissionSchema.parse(data))
   .handler(async ({ data }): Promise<SubmitResult> => {
     console.log('[contact]', data.name, data.email)
@@ -29,8 +25,6 @@ export async function submitContact(input: SubmissionInput): Promise<SubmitResul
   }
 }
 
-// Type-checks this file against the shared `@/submit` surface, so the two variants cannot drift
-// apart. `tsconfig` points `@/submit` at one variant only, so without this line the other one
-// (`KIT_SUBMIT=server`) is the setup nothing type-checks.
+// Checks every export against the shared type. Callers only check what they import.
 const _contract: SubmitModule = { submitContact }
 void _contract

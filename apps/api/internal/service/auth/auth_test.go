@@ -85,10 +85,6 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
-	// The property under test: a caller cannot tell "no such admin" apart from "wrong
-	// password" -- neither by error identity nor by the exact message text. Either
-	// distinguishing signal would let an attacker enumerate registered emails one guess at a
-	// time.
 	t.Run("wrong password and unknown email return the identical error", func(t *testing.T) {
 		t.Parallel()
 
@@ -118,8 +114,7 @@ func TestRefresh(t *testing.T) {
 	t.Run("valid refresh token returns a new pair", func(t *testing.T) {
 		t.Parallel()
 
-		// Through Login, not tokenSvc: a refresh token is only honoured if it has a ledger row,
-		// and Login is what writes one.
+		// Through Login, which writes the ledger row a refresh token needs.
 		login, err := svc.Login(ctx, &models.RqLogin{Email: "refresh@test.mn", Password: testPassword}, testIP, testUserAgent)
 		if err != nil {
 			t.Fatalf("Login: %v", err)
@@ -137,9 +132,6 @@ func TestRefresh(t *testing.T) {
 		}
 	})
 
-	// A refresh token has a much longer life than an access token (days versus minutes, see
-	// conf.JWTConfig), so accepting an access token here would silently extend a stolen access
-	// token's usefulness beyond its own, much shorter, lifetime.
 	t.Run("access token rejected as refresh token", func(t *testing.T) {
 		t.Parallel()
 
@@ -163,9 +155,6 @@ func TestRefresh(t *testing.T) {
 		}
 	})
 
-	// Signed by this service, and valid on its face, but with nothing behind it in the ledger.
-	// That is what a token issued before the ledger existed looks like, and what a token whose row
-	// was pruned looks like, and neither is one this service will honour.
 	t.Run("refresh token with no ledger row returns invalid token", func(t *testing.T) {
 		t.Parallel()
 

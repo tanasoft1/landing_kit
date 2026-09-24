@@ -16,10 +16,7 @@ const COLOR_TOKENS = [
 
 const TYPE_TOKENS = ['display', 'h2', 'h3', 'lead'] as const
 
-// Tailwind's scanner only sees class names written out in full. `bg-${t}` is invisible to it
-// and ships no CSS, so these lookups write each class as a literal string once, here. Typed as
-// `Record<(typeof TOKENS)[number], string>` rather than `Record<string, string>`, so a token
-// added above with no class here is a compile error instead of a blank swatch you find by eye.
+// Full class names on purpose. Tailwind cannot see `bg-${t}` and would ship no CSS for it.
 const COLOR_SWATCH_CLASS: Record<(typeof COLOR_TOKENS)[number], string> = {
   background: 'bg-background',
   foreground: 'bg-foreground',
@@ -46,11 +43,6 @@ export function TokenGallery() {
     <div className="grid gap-10">
       <div>
         <h3 className="text-h3 font-semibold">Colour</h3>
-        {/*
-          `DocsPage` renders no `<Header>`, so the toggle lives here instead, next to the
-          swatches it changes. In a single-mode build `@/theme` resolves to `theme.single.tsx`,
-          whose `ThemeToggle` renders `null` — so this adds no theme-switching code where there is none.
-        */}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground text-sm">
             Rendered from the live CSS variables, for whichever preset is imported.

@@ -6,17 +6,8 @@ export type ResolvedPage<Id extends string = string> = {
   path: string
 }
 
-/**
- * The one place paths get normalized: drop the query, collapse repeated slashes, drop a
- * trailing slash, turn a trailing `/index.html` into `/`.
- *
- * Always use this result, never a raw pathname. Two normalizations that only agree on clean
- * input are how `//en` becomes a protocol-relative `href="//en"`.
- *
- * The `/index.html` rule is for hosts that serve prerendered files by their literal filename.
- * Without it the router matches only the `$` splat and the page flips to "Not Found" right
- * after it hydrates.
- */
+// The only path normalizer. Use its result, never a raw pathname, or `//en` can become a
+// protocol-relative link. `/index.html` is for hosts that serve files by their literal name.
 export function normalizePath(pathname: string): string {
   const withoutQuery = pathname.split('?')[0] ?? '/'
   const withoutIndexHtml = withoutQuery.replace(/\/index\.html$/, '/')

@@ -2,12 +2,7 @@ import { pages } from '@/config/pages.config'
 import { site } from '@/config/site.config'
 import { enumerateUrls } from '@/lib/pages/enumerate'
 
-// The explanations live in the README. This list only names the headings, so the two cannot
-// drift apart.
-//
-// Plain text, not links. README.md ships in neither `public/` nor `dist/client/`, so
-// `<a href="/README.md#…">` would 404 in every real deployment. Copying it into `public/` would
-// just create the second copy this list exists to avoid.
+// README headings. Plain text, not links: README.md is not deployed.
 const RECIPES = [
   'Adding a page',
   'Adding a block',
@@ -22,9 +17,7 @@ const RECIPES = [
 export function ConfigReference() {
   const urls = enumerateUrls(pages, site)
   return (
-    // `min-w-0` on every row. Without it a grid track grows to fit its widest item, so the long
-    // unbroken JSON in the `<pre>` below stretches the column past the viewport and the
-    // `overflow-x-auto` on that `<pre>` never gets a chance to work.
+    // min-w-0 on each row, or the long <pre> stretches the grid past the viewport.
     <div className="grid gap-8">
       <div className="min-w-0">
         <h3 className="text-h3 font-semibold">Pages this config produces</h3>

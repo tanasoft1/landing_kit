@@ -7,32 +7,11 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// normalizeClientIP collapses ProxyHeader down to the one address this service will treat as the
-// client, and it has to exist because Fiber reads that header from the LEFT.
-//
-// Fiber's c.IP() returns the first syntactically valid address in ProxyHeader. Every common proxy
-// APPENDS to X-Forwarded-For rather than replacing it -- an ALB does, and so does nginx's
-// $proxy_add_x_forwarded_for -- so the header a handler sees is "<whatever the caller sent>,
-// <the address the proxy actually observed>". The leftmost field is therefore written by the
-// caller, and the caller is who these limits are meant to be applied to.
-//
-// Two attacks come out of that, and the second is the worse one. A caller who sends
-// "X-Forwarded-For: <an admin's address>" is keyed as that admin and can lock them out of the
-// panel. A caller who sends a different value on every request gets a fresh rate-limit bucket and
-// a fresh login-backoff row each time, so neither limit ever reaches its threshold.
-//
-// The address to trust is the rightmost one that is not itself a proxy we trust: everything to the
-// right of it was written by infrastructure, everything to the left could have been written by
-// anyone. This runs before the limiters and rewrites the header to that single value, so c.IP()
-// answers correctly everywhere -- the limiters, the login backoff, and the audit log -- rather than
-// each caller having to remember which of the two answers it wanted.
-//
-// It is a no-op when there is no ProxyHeader to read, and when the request did not arrive from a
-// trusted proxy, because Fiber ignores the header in both cases and c.IP() is already the peer.
-//
-// What it cannot do is recover the truth from a proxy that does not append the address it saw. If
-// yours passes the caller's header through untouched, every field in it is the caller's and no
-// amount of parsing changes that; name a header the proxy writes itself instead, such as X-Real-IP.
+// normalizeClientIP rewrites ProxyHeader to the one address to treat as the client.
+// Fiber's c.IP() reads the leftmost field, which the caller writes, since proxies append to
+// X-Forwarded-For. Trusting it lets a caller pose as an admin or get a fresh rate-limit bucket per
+// request. The client is the rightmost field that is not a trusted proxy.
+// This only works with a proxy that appends the address it saw.
 func normalizeClientIP(proxyHeader string, trustedProxies []string) fiber.Handler {
 	trusted := parseTrusted(trustedProxies)
 
@@ -41,16 +20,8 @@ func normalizeClientIP(proxyHeader string, trustedProxies []string) fiber.Handle
 			return c.Next()
 		}
 
-		// PeekAll, not c.Get. A repeated header field is one comma-joined list per RFC 9110, and
-		// c.Get reads only the FIRST line of that name. HAProxy's `option forwardfor` adds its own
-		// line rather than editing the caller's, so a caller who sends one line of their own gets
-		// it read in full and the proxy's line -- the only honest one -- never looked at. Reading
-		// one line there is not a partial fix, it is the whole attack back again.
-		//
-		// Joined in the order received, which is what makes the walk below correct: RFC 9110 says
-		// a repeated field means the same thing as one list in line order, so the proxy's line is
-		// last because the proxy appended it last. A proxy that PREPENDS its line instead would
-		// put the honest value on the left, where this treats it as hearsay.
+		// PeekAll, not c.Get: c.Get reads only the first line. HAProxy adds its own line, so the
+		// honest value is on the last line.
 		var fields []string
 		for _, line := range c.Request().Header.PeekAll(proxyHeader) {
 			fields = append(fields, strings.Split(string(line), ",")...)
@@ -61,13 +32,10 @@ func normalizeClientIP(proxyHeader string, trustedProxies []string) fiber.Handle
 
 		client := c.Context().RemoteIP()
 
-		// Right to left. The first field that is not a trusted proxy is the furthest point in the
-		// chain whose value infrastructure vouched for; anything beyond it is hearsay.
 		for i := len(fields) - 1; i >= 0; i-- {
 			ip := parseForwardedIP(fields[i])
 			if ip == nil {
-				// A field that is not an address at all breaks the chain: nothing to its left can
-				// be attributed to a proxy any more, so stop rather than keep walking past it.
+				// A non-address breaks the chain. Nothing to its left can be trusted.
 				break
 			}
 			if isTrustedIP(ip, trusted) {
@@ -77,27 +45,17 @@ func normalizeClientIP(proxyHeader string, trustedProxies []string) fiber.Handle
 			break
 		}
 
-		// Del before Set, or a repeated field keeps every line after the first and the walk above
-		// reads a list this one never wrote.
-		//
-		// String() and not the raw field: Fiber re-validates whatever is here with its own IsIPv4
-		// and IsIPv6, which disagree with net.ParseIP about "::ffff:198.51.100.50" and reject it.
-		// A rejected value sends c.IP() back to the socket peer, which puts every caller behind the
-		// proxy in one bucket -- the failure this whole file exists to prevent, arriving quietly.
-		// net.IP.String() writes the dotted-quad form for a v4-mapped address, which both accept.
+		// Del before Set, or repeated lines after the first survive.
+		// String(), not the raw field: Fiber rejects "::ffff:198.51.100.50", and a rejected value
+		// puts every caller behind the proxy in one bucket.
 		c.Request().Header.Del(proxyHeader)
 		c.Request().Header.Set(proxyHeader, client.String())
 		return c.Next()
 	}
 }
 
-// parseForwardedIP reads one field of ProxyHeader, in the forms proxies actually write.
-//
-// A bare address is the common case. Azure App Service appends the source port ("1.2.3.4:53422"),
-// and the bracketed form ("[2001:db8::1]:443") is what RFC 7239 uses for IPv6 with a port. A zone
-// identifier ("fe80::1%eth0") means nothing off the host that wrote it, so it is dropped rather
-// than carried. Every one of these used to fail net.ParseIP outright and break the walk, which
-// collapsed every caller onto the proxy's own address.
+// parseForwardedIP reads one field of ProxyHeader. It accepts a bare address, one with a port
+// (Azure App Service), and the bracketed IPv6 form. A zone like "%eth0" is dropped.
 func parseForwardedIP(field string) net.IP {
 	field = strings.TrimSpace(field)
 	if field == "" {
@@ -107,18 +65,15 @@ func parseForwardedIP(field string) net.IP {
 		return ip
 	}
 
-	// Strip a port if there is one. SplitHostPort removes the brackets with it, and it does not
-	// check that the port half is a number -- which is fine, since the host half is the only part
-	// read here.
+	// SplitHostPort also removes the brackets.
 	if host, _, err := net.SplitHostPort(field); err == nil {
 		field = host
 	} else {
-		// No port, so brackets are still on: "[2001:db8::50]" is the bare form RFC 7239 writes.
+		// No port, so brackets are still on: "[2001:db8::50]".
 		field = strings.TrimSuffix(strings.TrimPrefix(field, "["), "]")
 	}
 
-	// Drop any zone. Inside brackets RFC 6874 escapes the "%" as "%25", and cutting at the first
-	// "%" takes care of both spellings.
+	// Cutting at the first "%" also handles the "%25" spelling of RFC 6874.
 	if zone := strings.IndexByte(field, '%'); zone > 0 {
 		field = field[:zone]
 	}
@@ -126,12 +81,8 @@ func parseForwardedIP(field string) net.IP {
 	return net.ParseIP(field)
 }
 
-// trustedRange is one entry of TRUSTED_PROXIES, which conf.Load has already accepted as either a
-// bare address or a CIDR range.
-//
-// Parsed here as well as by Fiber, which keeps its own copy private. Two readers of one setting is
-// worth less than a fork of the setting itself, so this reads the same strings conf handed Fiber
-// and never a list of its own.
+// trustedRange is one TRUSTED_PROXIES entry. Fiber keeps its parsed copy private, so this parses
+// the same strings again.
 type trustedRange struct {
 	ip  net.IP
 	net *net.IPNet

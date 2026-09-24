@@ -10,8 +10,7 @@ import type { ResolvedPage } from '@/lib/pages/resolve-request'
 export function PageView({ resolved }: { resolved: ResolvedPage<BlockId> }) {
   const resolve = createResolver(resolved, pages, site)
 
-  // No hidden page-title <h1> here. `RenderBlocks` gives the first block `headingLevel={1}`, so
-  // that block renders the page's one real, visible <h1> itself.
+  // No <h1> here. The first block renders it.
   return (
     <>
       <Header site={site} locale={resolved.locale} path={resolved.path} resolve={resolve} />

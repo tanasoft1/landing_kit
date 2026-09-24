@@ -11,20 +11,8 @@ sql:
         emit_pointers_for_null_types: true
         emit_json_tags: true
         json_tags_case_style: snake
-        # SQLC matches db_type by exact string, and its Postgres parser normalises only SOME type
-        # aliases to their pg_catalog name. Measured against sqlc v1.30.0 with a scratch schema:
-        #
-        #   normalised, a pg_catalog override matches:  boolean, integer, varchar,
-        #                                              character varying, decimal, numeric,
-        #                                              timestamp, timestamp with time zone,
-        #                                              timestamp without time zone,
-        #                                              time with time zone
-        #   NOT normalised, the same override misses:  bool, int4, timetz, timestamptz
-        #
-        # So an override on a type that has a short alias may need BOTH spellings, and the symptom
-        # is silent: the column comes back as a pgtype wrapper and only the call site notices. That
-        # is why "timestamptz" appears below in addition to pg_catalog.timestamptz. If you add an
-        # override, check the shorthand your migrations actually use.
+        # sqlc matches db_type by exact string and does not normalise short aliases like bool, int4,
+        # timetz or timestamptz. So timestamptz is listed twice below. A missed override fails silently.
         overrides:
           - db_type: pg_catalog.timestamp
             nullable: false

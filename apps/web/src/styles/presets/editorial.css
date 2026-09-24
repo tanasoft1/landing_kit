@@ -9,11 +9,7 @@
   --gutter: clamp(1.25rem, 5vw, 2.5rem);
   --width-page: 68rem;
   --width-narrow: 34rem;
-  /* `.dark` matches the same element as `:root`, so a token that doesn't differ between themes
-     is declared once, here.
-     `0 0 #0000`, not `none`: `.shadow-card` substitutes this into a comma-separated `box-shadow`
-     list, and `none` is not a legal item there — it "works" only by accident (invalid value
-     falls back to initial, which is also `none`). Do not "tidy" this back to `none`. */
+  /* `0 0 #0000`, not `none`: `none` is invalid inside a box-shadow list. */
   --elevation-card: 0 0 #0000;
 
   /* Skin: light palette. Near-hueless neutrals; one accent does the work. */
@@ -27,11 +23,7 @@
   --c-primary-foreground: oklch(99.2% 0.002 260);
   --c-ring: oklch(52% 0.17 258);
 
-  /* Status colours belong to the preset, so they move with it; a stock colour would not. The
-     old class names are not written out, because Tailwind's scanner cannot tell code from
-     comments. These are only on screen while a submission resolves, so contrast was measured
-     rather than eyeballed: worst case over background, muted and accent is 5.33:1 for
-     destructive and 5.42:1 for success, both above the 4.5:1 AA floor. */
+  /* Worst-case contrast: destructive 5.33:1, success 5.42:1 (AA needs 4.5:1). */
   --c-destructive: oklch(52% 0.19 27);
   --c-success: oklch(48% 0.12 152);
 }
@@ -47,9 +39,7 @@
   --c-primary: oklch(74% 0.14 258);
   --c-primary-foreground: oklch(15.5% 0.008 265);
   --c-ring: oklch(74% 0.14 258);
-  /* Re-authored for the dark surfaces, not carried forward: the light-mode values are far too
-     dark to read on a 15.5%-lightness background. Worst case here: destructive 5.90:1,
-     success 7.18:1. */
+  /* Worst-case contrast: destructive 5.90:1, success 7.18:1. */
   --c-destructive: oklch(70% 0.16 27);
   --c-success: oklch(72% 0.13 152);
 }
