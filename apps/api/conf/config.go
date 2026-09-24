@@ -42,9 +42,10 @@ type ServerConfig struct {
 	// without the cookie "*" lets any site on the internet post leads here.
 	CORSOrigins string
 	// ProxyHeader names the header Fiber reads the client IP from behind a load balancer.
-	// Empty means "use the socket address". Do not set it unless a proxy really sets that
-	// header: Fiber's c.IP() returns "" when the named header is absent, and a limiter keyed
-	// on that collapses every caller into one bucket.
+	// Empty means "use the socket address". Do not set it unless a proxy really sets that header:
+	// naming one nothing writes buys a lookup per request and tells you nothing about the caller.
+	// Which field of it is believed is decided in internal/http/routes/clientip.go, because the
+	// leftmost is the caller's to write.
 	ProxyHeader string
 	// TrustedProxies is the comma-separated list of IPs or CIDR ranges allowed to set
 	// ProxyHeader, and it is what makes ProxyHeader safe to honour at all.

@@ -46,6 +46,11 @@ func normalizeClientIP(proxyHeader string, trustedProxies []string) fiber.Handle
 		// line rather than editing the caller's, so a caller who sends one line of their own gets
 		// it read in full and the proxy's line -- the only honest one -- never looked at. Reading
 		// one line there is not a partial fix, it is the whole attack back again.
+		//
+		// Joined in the order received, which is what makes the walk below correct: RFC 9110 says
+		// a repeated field means the same thing as one list in line order, so the proxy's line is
+		// last because the proxy appended it last. A proxy that PREPENDS its line instead would
+		// put the honest value on the left, where this treats it as hearsay.
 		var fields []string
 		for _, line := range c.Request().Header.PeekAll(proxyHeader) {
 			fields = append(fields, strings.Split(string(line), ",")...)
@@ -101,17 +106,24 @@ func parseForwardedIP(field string) net.IP {
 	if ip := net.ParseIP(field); ip != nil {
 		return ip
 	}
+
+	// Strip a port if there is one. SplitHostPort removes the brackets with it, and it does not
+	// check that the port half is a number -- which is fine, since the host half is the only part
+	// read here.
 	if host, _, err := net.SplitHostPort(field); err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			return ip
-		}
+		field = host
+	} else {
+		// No port, so brackets are still on: "[2001:db8::50]" is the bare form RFC 7239 writes.
+		field = strings.TrimSuffix(strings.TrimPrefix(field, "["), "]")
 	}
+
+	// Drop any zone. Inside brackets RFC 6874 escapes the "%" as "%25", and cutting at the first
+	// "%" takes care of both spellings.
 	if zone := strings.IndexByte(field, '%'); zone > 0 {
-		if ip := net.ParseIP(field[:zone]); ip != nil {
-			return ip
-		}
+		field = field[:zone]
 	}
-	return nil
+
+	return net.ParseIP(field)
 }
 
 // trustedRange is one entry of TRUSTED_PROXIES, which conf.Load has already accepted as either a
