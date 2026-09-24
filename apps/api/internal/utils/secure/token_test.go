@@ -14,10 +14,15 @@ import (
 
 const testSecret = "test-secret-at-least-32-bytes-long"
 
+// testFamilyDeadline is far enough out that the family clamp never applies.
+func testFamilyDeadline() time.Time {
+	return time.Now().Add(365 * 24 * time.Hour)
+}
+
 func TestAccessTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
 	token, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
@@ -43,12 +48,17 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 func TestRefreshTokenRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
-	token, err := svc.GenerateRefreshToken(adminID)
+	jti := uuid.New()
+
+	token, expiresAt, err := svc.GenerateRefreshToken(adminID, jti, testFamilyDeadline())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
+	}
+	if expiresAt.IsZero() {
+		t.Error("GenerateRefreshToken returned a zero expiry")
 	}
 
 	claims, err := svc.ValidateRefreshToken(token)
@@ -61,22 +71,22 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	if claims.TokenType != secure.TokenTypeRefresh {
 		t.Errorf("TokenType = %q, want %q", claims.TokenType, secure.TokenTypeRefresh)
 	}
+	if claims.ID != jti.String() {
+		t.Errorf("ID = %q, want %q", claims.ID, jti.String())
+	}
 }
 
-// An access token presented where a refresh token is required, and vice versa, must both be
-// rejected. A token type checked only at issue time is not checked at all: accepting an access
-// token as a refresh token (or the reverse) would silently swap in the wrong session lifetime.
 func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 	t.Parallel()
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	adminID := uuid.New()
 
 	access, err := svc.GenerateAccessToken(adminID, "admin@example.mn")
 	if err != nil {
 		t.Fatalf("GenerateAccessToken: %v", err)
 	}
-	refresh, err := svc.GenerateRefreshToken(adminID)
+	refresh, _, err := svc.GenerateRefreshToken(adminID, uuid.New(), testFamilyDeadline())
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}
@@ -92,8 +102,8 @@ func TestCrossTokenTypeIsRejectedBothWays(t *testing.T) {
 func TestValidateRejectsWrongSecret(t *testing.T) {
 	t.Parallel()
 
-	issuer := secure.NewTokenService(testSecret, 1, 7)
-	verifier := secure.NewTokenService("a-completely-different-secret-value", 1, 7)
+	issuer := secure.NewTokenService(testSecret, 15, 7, 30)
+	verifier := secure.NewTokenService("a-completely-different-secret-value", 15, 7, 30)
 
 	token, err := issuer.GenerateAccessToken(uuid.New(), "admin@example.mn")
 	if err != nil {
@@ -108,9 +118,7 @@ func TestValidateRejectsWrongSecret(t *testing.T) {
 func TestValidateRejectsExpiredToken(t *testing.T) {
 	t.Parallel()
 
-	// Built directly with jwt, not through GenerateAccessToken: the service's expiry is
-	// configured in whole hours, too coarse to produce an already-expired token in a fast test.
-	// Same secret and shape parseToken expects, so this exercises exactly the expiry check.
+	// Built directly with jwt: the service's expiry is in whole minutes, too coarse for this test.
 	claims := &secure.Claims{
 		AdminID:   uuid.New(),
 		TokenType: secure.TokenTypeAccess,
@@ -124,17 +132,13 @@ func TestValidateRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted an expired token, want error")
 	}
 }
 
-// jwt.Parse's keyfunc runs before signature verification, so a keyfunc that returns the secret
-// unconditionally accepts anything the library can parse. RS256 proves the method assertion
-// actually runs: it is a different concrete Go type from *jwt.SigningMethodHMAC, unlike HS384 or
-// HS512, which would pass a same-Go-type check while still being the "wrong" algorithm this
-// service issues.
+// RS256, not HS384 or HS512: those share the *jwt.SigningMethodHMAC type and would pass the check.
 func TestValidateRejectsWrongAlgorithm(t *testing.T) {
 	t.Parallel()
 
@@ -156,7 +160,7 @@ func TestValidateRejectsWrongAlgorithm(t *testing.T) {
 		t.Fatalf("sign rs256 token: %v", err)
 	}
 
-	svc := secure.NewTokenService(testSecret, 1, 7)
+	svc := secure.NewTokenService(testSecret, 15, 7, 30)
 	if _, err := svc.ValidateAccessToken(token); err == nil {
 		t.Error("ValidateAccessToken accepted a token signed with RS256, want error")
 	}

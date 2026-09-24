@@ -1,17 +1,5 @@
-/* `source(none)` + an explicit `@source`, rather than Tailwind v4's automatic detection.
-   Automatic detection scans the whole repo with no notion of comments or prose — a MARKDOWN PLAN
-   DOCUMENT in `docs/` once kept 13 dead utilities alive in the shipped stylesheet: 26,424 ->
-   24,595 bytes after switching to this, 13 selectors removed, none added.
-
-   Narrowing, not a guarantee: `docs/`, `README.md`, plans and `.css` files can no longer
-   contribute anything, but a comment inside a scanned `.ts`/`.tsx` file still can (measured) —
-   naming a class in a component comment keeps it in the build whether or not real code uses it,
-   which is why some comments deliberately avoid naming the class they replaced, and why the next
-   person writing about a class in a component comment should do the same. (Safe to name them
-   here: `.css` is outside the globs below.)
-
-   Both source trees are listed: `KIT_CONFIG=onepage` is a supported build and must not lose
-   styles from a config that renders a class. */
+/* `source(none)`: automatic detection scans docs and markdown too and ships dead classes.
+   Tailwind still reads .ts/.tsx comments as text, so don't name classes in comments there. */
 @import "tailwindcss" source(none);
 
 @import "@fontsource-variable/inter/wght.css";
@@ -19,9 +7,11 @@
 
 @import "./presets/editorial.css";
 
-/* After every `@import`, not between them: CSS requires `@import` to precede all other at-rules,
-   and Biome's `noInvalidPositionAtImportRule` fails the build otherwise. Tailwind reads `@source`
-   from anywhere in the file. */
+/* Animation utilities for the panel's sheet and dropdown. Import it here, inside Tailwind, so
+   only used classes ship. Imported from any other stylesheet, the whole library ships. */
+@import "tw-animate-css";
+
+/* After every @import: CSS requires @import first. */
 @source "../**/*.{ts,tsx}";
 @source "../../configs/**/*.{ts,tsx}";
 
@@ -60,14 +50,24 @@
   --color-destructive: var(--c-destructive);
   --color-success: var(--c-success);
 
+  /* shadcn/ui names, aliased onto existing tokens. A new colour would need contrast checks in
+     every preset and theme. */
+  --color-card: var(--c-background);
+  --color-card-foreground: var(--c-foreground);
+  --color-popover: var(--c-background);
+  --color-popover-foreground: var(--c-foreground);
+  --color-secondary: var(--c-muted);
+  --color-secondary-foreground: var(--c-foreground);
+  --color-accent-foreground: var(--c-foreground);
+  --color-input: var(--c-border);
+  --color-destructive-foreground: var(--c-primary-foreground);
+
   --font-display: var(--face-display);
   --font-body: var(--face-body);
 
   --radius-base: var(--radius);
   --spacing-section: var(--section-y);
-  /* Derived from the preset's own rhythm, not a second hand-tuned value: a preset that changes
-     --section-y moves both. Used only by <Section density="compact">, for reference surfaces
-     like /docs where ~300px between sections works against scanning. */
+  /* For <Section density="compact">. Follows --section-y. */
   --spacing-section-tight: calc(var(--section-y) * 0.4);
   --spacing-gutter: var(--gutter);
   --container-page: var(--width-page);

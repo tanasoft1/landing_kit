@@ -11,19 +11,9 @@ import (
 	"landing-api/internal/http/models"
 )
 
-// clientKeyGenerator is shared by every rate limiter below. It never collapses every caller into
-// one bucket.
-//
-// psyfint_v2_back removed its per-IP limiter after finding that Fiber's c.IP() returns "" whenever
-// ProxyHeader is configured and that header does not arrive, which put every caller in ONE bucket.
-// On a public contact form that means a single spammer locks out every real visitor; on a login
-// endpoint it means one attacker's guesses lock out every admin trying to sign in.
-//
-// So an unresolvable IP gets a unique key instead of a shared one: the request goes unlimited
-// rather than joining everyone else's bucket. That fails open for one request and never locks out
-// a real caller. The honeypot and the timing floor are the contact form's primary defences, and
-// bcrypt plus the identical error message are the login endpoint's; this is depth for both, and
-// depth that can deny service is worse than none.
+// clientKeyGenerator gives a caller with no address a unique key, not a shared "" bucket, so one
+// spammer or attacker cannot lock out everyone. EnableIPValidation makes this unreachable today;
+// keep it in case that setting changes.
 func clientKeyGenerator(c *fiber.Ctx) string {
 	if ip := c.IP(); ip != "" {
 		return ip
@@ -45,9 +35,7 @@ func leadLimiter() fiber.Handler {
 	})
 }
 
-// loginLimiter caps attempts per client against /api/auth/login and /api/auth/refresh. These are
-// the only public, unauthenticated endpoints where guessing is the attack, so unlike /api/leads
-// this limiter guards a credential check rather than a spam-prone form.
+// loginLimiter caps attempts per client against /api/auth/login.
 func loginLimiter() fiber.Handler {
 	return limiter.New(limiter.Config{
 		Max:          5,
@@ -61,8 +49,44 @@ func loginLimiter() fiber.Handler {
 	})
 }
 
+// refreshLimiter is far looser than loginLimiter. The panel refreshes on every reload, and there
+// is no secret to guess here.
+func refreshLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:          30,
+		Expiration:   15 * time.Minute,
+		KeyGenerator: clientKeyGenerator,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+				Error: "rate limited", Message: "Хэт олон удаа оролдлоо. Дараа дахин оролдоно уу.",
+			})
+		},
+	})
+}
+
+// csrfHeader must be present on refresh and logout. Only its presence is checked: a cross-origin
+// page cannot set it without a CORS preflight.
+const csrfHeader = "X-Requested-With"
+
+// requireNonSimpleRequest refuses a request that did not set csrfHeader. SameSite=Strict still
+// lets a sibling subdomain send the cookie, so without this any subdomain page could log the admin
+// out or rotate the cookie from a hidden form.
+func requireNonSimpleRequest(c *fiber.Ctx) error {
+	if c.Get(csrfHeader) == "" {
+		return c.Status(fiber.StatusForbidden).JSON(models.ErrorResponse{
+			Error: "forbidden", Message: "Хүсэлт хүлээн зөвшөөрөгдөхгүй.",
+		})
+	}
+	return c.Next()
+}
+
 func setupPublicRoutes(api fiber.Router, h *handlers.Handlers) {
 	api.Post("/leads", leadLimiter(), h.Lead.Create)
 	api.Post("/auth/login", loginLimiter(), h.Auth.Login)
-	api.Post("/auth/refresh", loginLimiter(), h.Auth.Refresh)
+	// The header check runs before the limiter. Forged requests come from the admin's own IP, and
+	// counting them would spend the admin's refresh budget.
+	api.Post("/auth/refresh", requireNonSimpleRequest, refreshLimiter(), h.Auth.Refresh)
+
+	// No AuthMiddleware: logout uses the refresh cookie, so it works after the access token expires.
+	api.Post("/auth/logout", requireNonSimpleRequest, h.Auth.Logout)
 }

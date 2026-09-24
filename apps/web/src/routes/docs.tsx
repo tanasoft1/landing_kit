@@ -5,21 +5,10 @@ import { TokenGallery } from '@/components/docs/token-gallery'
 import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
 
-// Left out of pages.config.ts on purpose. That keeps it out of the sitemap (`enumerateUrls`),
-// and — with `autoStaticPathsDiscovery` and `crawlLinks` both false in vite.config.ts — out of
-// prerendering. The `noindex, nofollow` meta below is the third layer.
-//
-// robots.txt has no `Disallow: /docs`, also on purpose. `Disallow` and `noindex` cancel each
-// other out: a crawler that obeys `Disallow` never fetches the page, so it never sees the
-// `noindex`, and an external link can still get it indexed by URL alone. `/docs` has to stay
-// fetchable for the `noindex` to be read. `verify-build.mjs` fails the build if
-// `Disallow: /docs` comes back, and `check-conventions.mjs` fails if this meta tag is removed.
+// Not in pages.config.ts, so it stays out of the sitemap and prerendering. Keep the noindex
+// meta, and never add `Disallow: /docs` to robots.txt: crawlers must fetch it to see noindex.
 export const Route = createFileRoute('/docs')({
-  // `<html lang>` comes from `useActiveLocale` in `__root.tsx`, which falls back to
-  // `site.defaultLocale` when no route declares one. Without this loader `/docs` fell back to
-  // `mn` and shipped `<html lang="mn">` on an English-only page, which makes a screen reader
-  // mispronounce it. Handled with a loader here rather than a special case in `__root.tsx`,
-  // which is meant to know nothing about any particular route.
+  // Sets <html lang="en">. Without it the page gets the default locale.
   loader: () => ({ locale: 'en' as const }),
   head: () => ({
     meta: [
@@ -32,8 +21,6 @@ export const Route = createFileRoute('/docs')({
 
 function DocsPage() {
   return (
-    // `density="compact"` everywhere here. `py-section` leaves about 300px between sections,
-    // which suits a marketing page but slows down scanning a reference page.
     <main>
       <Section density="compact">
         <Container>
@@ -64,7 +51,6 @@ function DocsPage() {
           </p>
         </Container>
       </Section>
-      {/* Outside any Section/Container on purpose: every block brings its own. See BlockGallery. */}
       <BlockGallery />
 
       <Section surface="muted" density="compact">

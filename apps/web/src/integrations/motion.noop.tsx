@@ -15,8 +15,6 @@ export function Stagger({ children, className }: { children: ReactNode; classNam
   return <div className={className}>{children}</div>
 }
 
-// Type-checks this file against the shared `@/motion` surface, so the two variants cannot drift
-// apart. `tsconfig` points `@/motion` at motion.animated.tsx only, so without this line this
-// file (`KIT_ANIMATION=off`) is the one setup nothing type-checks.
+// Checks every export against the shared type. Callers only check what they import.
 const _contract: MotionModule = { FadeIn, Reveal, Stagger }
 void _contract

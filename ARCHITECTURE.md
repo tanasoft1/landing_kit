@@ -7,11 +7,16 @@ question about this repo resolves once you know which of the three you are looki
 |---|---|---|---|
 | **Scaffold time** | `cli/`, under `pnpm dlx` | once, per new project | a standalone project on disk that no longer depends on this package |
 | **Build time** | Vite plus TanStack Start prerendering; optionally `go build` | per deploy | static HTML in `dist/client`, optionally a Go binary with that HTML inside it |
-| **Run time** | the browser; optionally the Go service | per visitor | pages, and exactly one JSON exchange |
+| **Run time** | the browser; optionally the Go service | per visitor | pages, and one JSON exchange; two with the admin panel |
 
 The site a visitor loads has **no server component at all** unless the optional backend was asked
 for. That is the premise the whole repo is arranged around, and it is why "how does this exchange
 data with the backend" has such a small answer: one endpoint, one direction, one payload.
+
+`--backend=admin` adds the one exception, and confines it. The admin panel is a real client: it logs
+in, holds a token, refreshes it, and reads a paginated list. But it lives behind `/admin`, it ships
+only to a project that asked for it, and the marketing pages import none of it. So the sentence
+above still describes every page a visitor sees, on every answer. Section 6 is the panel's half.
 
 ## Contents
 
@@ -33,6 +38,7 @@ flowchart LR
   subgraph KIT["landing_kit (this repo, a pnpm workspace)"]
     direction TB
     WEB["apps/web<br/>TanStack Start template"]
+    WADMIN["apps/web/src/admin + src/routes/admin<br/>the panel, a subtree of the same template"]
     API["apps/api<br/>GoFiber service on Postgres"]
     CLI["cli/<br/>the scaffolder"]
     TOOLS["tools/<br/>maintainer scripts, never published"]
@@ -43,10 +49,12 @@ flowchart LR
   subgraph PROJ["my-site (generated, flat, one package)"]
     direction TB
     PSRC["src/ public/ vite.config.ts<br/>package.json tsconfig.json"]
-    PAPI["api/<br/>only with --backend=api"]
+    PADMIN["src/admin + src/routes/admin<br/>only with --backend=admin"]
+    PAPI["api/<br/>only with --backend=api or admin"]
   end
 
   WEB -.->|"WEB_ROOT: lands at the project root"| PSRC
+  WADMIN -.->|"only with --backend=admin"| PADMIN
   API -.->|"API_DEST: lands at api/"| PAPI
 ```
 
@@ -55,6 +63,14 @@ The asymmetry is the thing to hold onto. This repo is a workspace whose packages
 `api/`. `WEB_ROOT` and `API_DEST` in `cli/kit-manifest.mjs` are the only two places that know about
 that difference, which is what lets `add-block` and `add-page` run without any awareness that a
 backend can exist.
+
+The panel is not a fourth tree. It is two directories inside the web one, `src/admin` for everything
+it renders and `src/routes/admin` for the URLs, and it reaches a generated project only under
+`--backend=admin`. Opposite mechanisms keep the two halves out, which is worth knowing before going
+looking for one switch. `src/admin` is listed in `ADMIN_COPY_DIRS` and walked only for that answer.
+`src/routes/admin` sits inside `src/routes`, a directory `COPY_DIRS` already copies whole, so
+`isAdminPath` filters it back out. Add a panel file under `src/routes` and the filter has to learn
+about it; add one under `src/admin` and it is covered already.
 
 ## 2. Scaffold time
 
@@ -86,8 +102,8 @@ rollback.
 
 | Kind | Examples | Why |
 |---|---|---|
-| Copied verbatim | `src/components`, `src/lib`, `src/routes`, `public`, `scripts` | nothing about them varies by answer |
-| Copied, filtered | `src/styles/presets` | only the chosen preset survives |
+| Copied verbatim | `src/components`, `src/lib`, `public`, `scripts` | nothing about them varies by answer |
+| Copied, filtered | `src/styles/presets`, `src/routes` | only the chosen preset survives; `src/routes/admin` only with `--backend=admin` |
 | Copied, one of two | `@/motion`, `@/theme`, `@/submit` implementations | see the boundary table below |
 | Copied, edited | `README.md`, `theme.css`, `biome.json`, `submit-schema.ts`, the docs components | the kit's own copy names things a generated project does not have |
 | Generated from answers | `package.json`, `tsconfig.json`, `vite.config.ts`, `registry.ts`, `block-modules.ts`, `variants.all.ts`, `pages.config.ts`, `site.config.ts`, `.gitignore`, `.kit/scaffold.json`, `pnpm-workspace.yaml`, and `docker-compose.yml` with a backend | these encode the answers, so copying them would only mean overwriting them a moment later |
@@ -155,7 +171,7 @@ flowchart LR
     direction TB
     W["pnpm install then pnpm build"] --> D1["apps/web/dist/client"]
   end
-  subgraph S2["stage 2: golang:1.25-alpine"]
+  subgraph S2["stage 2: golang:1.27-alpine"]
     direction TB
     CP["COPY dist/client into internal/static/dist"] --> EMB["go:embed all:dist"]
     EMB --> BIN["CGO_ENABLED=0 go build, static binary"]
@@ -185,7 +201,7 @@ flowchart TD
   REQ["incoming request"] --> MW["recover, logger, helmet, cors"]
   MW --> H{"path starts with /api?"}
   H -->|"yes"| G["/api/health"]
-  H -->|"yes"| P["public: POST /api/leads, /api/auth/login, /api/auth/refresh"]
+  H -->|"yes"| P["public: POST /api/leads, /api/auth/login, /api/auth/refresh, /api/auth/logout"]
   H -->|"yes"| AD["admin: GET /api/admin/leads, behind AuthMiddleware"]
   H -->|"no"| S{"HasSite?"}
   S -->|"yes"| FS["filesystem handler over the embedded tree<br/>NotFoundFile index.html"]
@@ -221,9 +237,10 @@ hydration and React then throws away the server-rendered HTML. That was measured
 becoming 0.169.
 
 This loading happens once, for the first URL only. Nothing re-runs it, which is safe only because
-every link in the template is a plain `<a href>` full page load. A `@tanstack/react-router` `Link`
-would navigate to a page whose block chunks were never fetched, so `check-conventions.mjs` fails the
-build on any such import inside `src/blocks`, `src/components` or `src/routes`.
+every link on a marketing page is a plain `<a href>` full page load. A `@tanstack/react-router`
+`Link` would navigate to a page whose block chunks were never fetched, so `check-conventions.mjs`
+fails the build on any such import inside `src/blocks`, `src/components` or `src/routes`. The
+panel's own routes are excepted, since it renders no blocks and so has no chunks to miss.
 
 If a chunk fails to load, hydration is **deliberately skipped**: the static page stays on screen and
 readable, and one console error names every block that failed. A missing block module would make
@@ -231,7 +248,9 @@ readable, and one console error names every block that failed. A missing block m
 
 ## 5. Run time: data exchange with the backend
 
-This is the whole of it. One endpoint, one direction, fire and forget.
+For the site itself, this is the whole of it. One endpoint, one direction, fire and forget: a
+visitor submits the contact form and nothing is ever read back. Only `--backend=admin` adds a second
+exchange, and only behind `/admin`, where the reading happens. That one is section 6.
 
 ### The submit boundary, both modes
 
@@ -375,57 +394,180 @@ instance profile's resolved region) that the other two do not.
 
 ## 6. The admin read path
 
+Present only under `--backend=admin`. The client below is the panel in `src/admin` and
+`src/routes/admin`; with `--backend=api` these endpoints are all still there and nothing in the
+project calls them, so the same path runs against curl or a client you write.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant OP as Operator, or a client you write
+    participant OP as The panel, or a client you write
     participant CMD as ./cmd seed-admin
     participant A as landing-api
     participant DB as Postgres
 
-    OP->>CMD: make seed-admin email=... password=at-least-12-chars
+    OP->>CMD: make seed-admin email=... , then the password on stdin with echo off
+    CMD->>CMD: at least 12 runes, not bytes
     CMD->>DB: INSERT INTO admin_users with a bcrypt hash
     CMD-->>OP: the created email, and nothing else, ever
     OP->>A: POST /api/auth/login
+    A->>DB: GetLoginAttempt, before the lookup and whether or not the email is registered
     A->>DB: GetAdminByEmail
     A->>A: bcrypt compare on every path, even for an unknown email
-    A-->>OP: access_token, refresh_token, admin profile
+    A->>DB: ClearLoginAttempts on success, RecordLoginFailure on either failure
+    A->>DB: ExtendLoginLock, from the count the increment returned, once past the threshold
+    A->>DB: CreateRefreshToken, a ledger row under a new family_id, stamped with family_expires_at
+    A-->>OP: access_token and admin profile in the body, refresh token as a Set-Cookie
     OP->>A: GET /api/admin/leads with Authorization Bearer access_token
     A->>A: AuthMiddleware: HS256 asserted, token_type must be access
     A->>DB: ORDER BY created_at DESC, id DESC, LIMIT and OFFSET
-    A-->>OP: success true, data is an array of RsLead
-    OP->>A: POST /api/auth/refresh with refresh_token
+    A-->>OP: success true, data is an RsLeadPage: items plus the whole table's total
+    OP->>A: POST /api/auth/refresh, refresh cookie plus X-Requested-With
+    A->>A: no X-Requested-With is a 403, before the limiter counts it
+    A->>DB: GetRefreshToken by jti; already revoked means replay, unless it is a lost rotation
     A->>DB: GetAdminByID, re-read rather than trusted from the claims
-    A-->>OP: a fresh pair
+    A->>DB: RevokeRefreshToken then CreateRefreshToken, one transaction under the family lock
+    A-->>OP: a fresh access_token and a replacement cookie; the presented token is now dead
+    OP->>A: POST /api/auth/logout, refresh cookie plus X-Requested-With
+    A->>DB: revoke every unrevoked row in the family, under the family lock
+    A-->>OP: 200 and an expired cookie, whatever the cookie was worth
 ```
 
 | Endpoint | Auth | Limits |
 |---|---|---|
-| `POST /api/auth/login` | none | 5 per 15 minutes per client |
-| `POST /api/auth/refresh` | the refresh token itself | 5 per 15 minutes per client |
+| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email and client address together: from the 5th failure, one minute doubling to a 60-minute cap, decaying after 30 minutes without a failure |
+| `POST /api/auth/refresh` | the refresh cookie, plus any `X-Requested-With` | 30 per 15 minutes per client |
+| `POST /api/auth/logout` | the refresh cookie, plus any `X-Requested-With` | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
 
-Four properties of this path are deliberate and easy to undo by accident:
+Fourteen properties of this path are deliberate and easy to undo by accident:
 
 - **Unknown email and wrong password are the same error**, and the unknown-email branch still runs
   bcrypt against a fixed dummy hash. The identical message alone is not enough: bcrypt is
   deliberately slow, so a path that skips it returns measurably sooner, and that gap enumerates
-  valid emails without ever showing a different message.
+  valid emails without ever showing a different message. The dummy hash has to carry the same cost
+  as a real one, since bcrypt reads its running time out of the hash it is given; the `auth`
+  package panics at startup if it drifts below `utils.bcryptCost`.
+- **Failed logins back off per email as well as per client.** The per-client limiter alone lets an
+  attacker spread across a thousand addresses take five thousand guesses at one account. From the
+  fifth failure the email is refused for a minute, doubling with each further failure to a
+  one-hour cap, answered with the same 429 the limiter returns so a client needs one case
+  rather than two. A row is written for every email tried, registered or not: if only real accounts
+  were recorded, a lockout would prove an account exists, which is the leak the dummy hash above
+  closes on the timing side.
+- **That backoff is keyed on the email and the client address together, not on the email alone.** A
+  lock covering the whole account is a denial of service against anyone whose address is known, and
+  it cannot be anything else: deciding whether the admin or a stranger is knocking means checking
+  the password, and refusing to check it is what the lock is. One failed login each time the lock
+  lapsed, four an hour, held the address shut and refused the real admin along with the guesses.
+  Per source, a stranger locks out their own source and nobody else. The cost is that the backoff
+  no longer spans source addresses, which is the same property, so it could not be kept; each of
+  those addresses still gets only five attempts per fifteen minutes from the limiter. What remains
+  is an attacker who really does share an address with the admin, on office NAT, a shared VPN, or a
+  deployment with `PROXY_HEADER` set and `TRUSTED_PROXIES` empty, which puts every caller on the
+  proxy's own address. A caller with no resolvable address is not counted at all, for the reason the
+  limiter gives such a caller a key of their own: one shared bucket for everyone without an address
+  is the account-wide lock again.
+- **The address every limit is keyed on is the one the proxy observed, not the one the caller
+  claimed.** Fiber reads `PROXY_HEADER` from the left, and every common proxy appends to
+  `X-Forwarded-For` rather than replacing it, so the leftmost field is written by the caller. Left
+  alone, that lets a caller be filed under an admin's address and lock them out, or under a fresh
+  address per request and never reach any threshold at all. `normalizeClientIP` runs before the
+  limiters and rewrites the header to the rightmost field that is not itself a trusted proxy.
+- **The decay window sits between two walls.** A failure older than `loginFailureDecay`, thirty
+  minutes, resets the count to one instead of adding to it. It is shorter than the one-hour cap, so
+  a source that serves a full-length lock comes back at the bottom of the curve instead of
+  re-locking on its next failure indefinitely, and a constant assertion fails the build if that
+  relationship is ever inverted. It is longer than the limiter's fifteen-minute window, which
+  nothing can enforce from the code: a shorter decay is spent before the limiter releases the next
+  attempt, so the count resets between windows, the curve never leaves its first step, and the
+  backoff costs an attacker nothing the limiter was not already costing them.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
-  extends the session from one hour to seven days.
+  extends the session from fifteen minutes to seven days.
 - **The signing method is asserted in the keyfunc**, not assumed. `jwt.Parse` runs the keyfunc
   before verifying the signature, so a keyfunc that returns the secret unconditionally accepts
   anything the library can parse.
 - **Refresh re-reads the admin row.** An admin removed after a refresh token was issued cannot use
   it to obtain a new access token, and "token malformed" and "admin was deleted" collapse to the
   same 401.
+- **Every refresh token is single-use, and a replayed one kills its whole family.** Each token
+  carries a `jti` and has a row in `refresh_tokens`. Refreshing revokes that row and writes a new
+  one under the same `family_id`, so a token presented twice can only mean two parties hold it. The
+  second presentation revokes the entire family, logs `token_reuse_detected`, and sends the thief
+  and the real admin both back to the login screen. The revoke and the insert are one transaction,
+  so no crash can leave the family half-rotated. That transaction and every family revoke both take
+  an advisory lock on the `family_id` before writing, which is what keeps a revoke from finishing
+  past a successor row inserted after the revoke's own statement began and leaving it live in a
+  family the server has just declared compromised. The revoke is also what claims the token. It is
+  a single `UPDATE ... WHERE revoked_at IS NULL` whose row count is read, so two requests racing on
+  one live token cannot both proceed: the loser affects zero rows and is treated as replay. A
+  `SELECT` followed by an `UPDATE` would let both through, because neither has written anything when
+  the check runs. One exception, because honest clients hit this with no attacker anywhere: a token
+  spent within the last 30 seconds whose successor is still live is a rotation whose response went
+  missing — a tab closed mid-flight, a proxy timeout, two tabs restored together — so the same
+  successor is re-sent, with no new row, no revocation and no audit entry. `replaced_by` on the
+  ledger row is what makes the two cases distinguishable at all.
+- **A family has an absolute deadline as well as an idle one.** `JWT_REFRESH_EXPIRE_DAYS` bounds how
+  long one token may sit unused and is recomputed on every rotation, so on its own it bounded
+  nothing: anyone who kept refreshing kept the login alive forever, a stolen cookie included.
+  `family_expires_at` is stamped at login from `JWT_SESSION_MAX_DAYS`, copied forward untouched by
+  every rotation, and clamps each successor's own expiry. A session ends at whichever bound comes
+  first.
+- **The refresh token never reaches JavaScript.** It leaves as `Set-Cookie: landing_refresh=...;
+  Path=/api/auth; HttpOnly; Secure; SameSite=Strict` and is absent from every response body. The
+  token lives seven days, so a copy anywhere a script can read is a week of access for one injected
+  script. `Path=/api/auth` keeps it off `/api/admin/*`, where it does no work and could only end up
+  in a proxy log. `SameSite=Strict` is most of what removes the need for CSRF tokens on these
+  endpoints: a request that did not come from this site does not carry the cookie, and
+  `/api/admin/*` needs an `Authorization` header no cross-site form can set. `Secure` comes off only
+  under `APP_ENV=development`, where the browser would otherwise refuse to store the cookie at all
+  over plain HTTP.
+- **Refresh and logout require a header a simple request cannot set.** SameSite is evaluated per
+  *site*, so a sibling subdomain is not cross-site and its requests do carry the cookie. Both routes
+  took no body and no custom header, which made them preflight-free, so any page on any subdomain
+  could sign the admin out or rotate the cookie underneath a live tab. It could not read either
+  answer, so nothing leaked. `requireNonSimpleRequest` demands `X-Requested-With` — presence only,
+  no value — which forces a cross-origin caller through a preflight the `CORS_ORIGINS` allowlist
+  governs. `Accept` cannot do this job: it is CORS-safelisted, so setting it leaves a request
+  simple. The check runs ahead of the rate limiter, so a forged request cannot spend the admin's own
+  refresh budget.
+- **Revocation does not reach an access token already issued.** `AuthMiddleware` validates the JWT
+  and looks nothing up, which is what keeps an admin request free of a database read. After a
+  logout, a family revocation, or the admin row being deleted, the token already in a tab's memory
+  keeps reading `/api/admin/leads` until its own expiry, up to `JWT_ACCESS_EXPIRE_MINUTES`. What is
+  immediate is that nothing new is issued. This is the stateless-JWT trade taken deliberately; the
+  window is written down in both READMEs where Sign out is described.
+- **A cross-origin panel would need `AllowCredentials`, and nothing the kit generates is one.**
+  `cors.Config` sets `AllowCredentials: true`, without which a browser refuses to store a
+  `Set-Cookie` from a cross-origin response and refuses to send it back. The panel never takes
+  that path: it reaches the API through Vite's `/api` proxy in development
+  (`apps/web/vite.config.ts`) and through the single binary in production, so it is same-origin in
+  both, and a `--backend=api` project's contact form carries no cookies at all. The setting is
+  there for one deployment shape only: a panel on `admin.example.com` calling `api.example.com`,
+  which is cross-origin but same-*site*, so the Strict cookie does travel. A panel on a genuinely
+  different registrable domain never receives the cookie whatever CORS says. The cost is that
+  `CORS_ORIGINS` must be literal origins: `conf.Load` refuses a bare `*` and, as of this branch,
+  Fiber's `https://*.example.com` subdomain form too, because a credentialed response lets any host
+  matching the pattern refresh with the admin's cookie and read the access token out of the reply.
 
 `JWT_SECRET` has a development-only default and **no** default anywhere else: startup refuses an
 empty or shorter-than-32-character secret whenever `APP_ENV` is not `development`. The same
 asymmetry applies to `CORS_ORIGINS`, whose development default is refused outside development,
 because a deploy that forgets it boots cleanly, answers `/api/health` with 200, and drops every real
-submission at preflight with no server-side log line at all.
+submission at preflight with no server-side log line at all. Any `*` in `CORS_ORIGINS` is refused
+everywhere instead, development included, because a wildcard origin on a credentialed response is
+both invalid per the spec and, for any deployment that did put a session cookie on credentialed
+CORS, a handout of that session to every site the browser visits. Nothing the kit generates is such
+a deployment today, which is why this reads as a consequence rather than a description of the panel.
+
+`PROXY_HEADER` is paired with `TRUSTED_PROXIES` for a related reason. Every rate limit above is
+keyed on the client address, and Fiber returns whatever a named proxy header contains unless it is
+told which peers may set it — so a header alone meant a fresh bucket per request and attacker-chosen
+text in `admin_audit_log.ip`. `TRUSTED_PROXIES` is the list of IPs or CIDR ranges the header is
+believed from; anything else falls back to the socket address. `conf.Load` parses every entry and
+refuses to start on one it cannot, because Fiber only warns and drops it, and a typo'd range boots
+cleanly while quietly trusting nobody.
 
 ## 7. Data model
 
@@ -448,16 +590,64 @@ erDiagram
         text password_hash "bcrypt"
         timestamptz created_at "default now"
     }
+    refresh_tokens {
+        uuid jti PK "the token's own id, stored in the clear"
+        uuid admin_id FK "ON DELETE CASCADE"
+        uuid family_id "shared by every token descended from one login"
+        timestamptz expires_at "clamped to family_expires_at at issue time"
+        timestamptz family_expires_at "the login's deadline, copied forward on rotation"
+        timestamptz revoked_at "nullable, NULL while the token is still good"
+        uuid replaced_by "nullable, the successor this token was rotated into"
+    }
+    login_attempts {
+        text email PK "as submitted, registered or not"
+        text ip PK "the client address the attempt came from, '' when there is none"
+        int failed_count "default 0"
+        timestamptz last_failure_at "default now, what the decay and the prune both read"
+        timestamptz locked_until "nullable"
+    }
+    admin_audit_log {
+        uuid id PK
+        uuid admin_id FK "nullable, NULL for a login against an unknown email"
+        text event
+        text ip "nullable"
+        text user_agent "nullable"
+        timestamptz created_at "default now, indexed DESC"
+    }
+    admin_users ||--o{ refresh_tokens : issues
+    admin_users ||--o{ admin_audit_log : "appears in"
 ```
 
-No foreign key joins the two, because nothing relates them: an admin reads leads, an admin does not
-own them.
+No foreign key joins `leads` to `admin_users`, because nothing relates them: an admin reads leads,
+an admin does not own them.
+
+The two auth tables that do point at `admin_users` point at it differently on purpose. Deleting an
+admin drops that admin's refresh tokens, because a token for an account that no longer exists is only
+a way to fail. The same delete keeps the audit rows and blanks their `admin_id`, because the record
+of what happened outlives the account it happened to. `login_attempts` joins nothing: it is keyed by
+the email as submitted and the address the attempt came from, so a lockout exists for emails that
+were never registered, and the presence of one cannot be used to ask whether an account exists.
+
+`refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
+reads it to decide whether a presented token is still live. `admin_audit_log` is written by those
+two paths and by logout, through `internal/service/audit`, for four events: login success, login
+failure, logout and detected token reuse. `login_attempts` is read and written by `Login` alone:
+it reads the row before it looks the email up, records a failure on both credential-failure
+branches, deletes the row for the pair that just signed in, and drops rows whose lock lapsed more
+than a day ago. Every one of those reads and writes names a client address as well as an email, and
+is skipped when there is no address to name.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The
 `id DESC` tiebreaker in `ListLeads` is not decoration either: `created_at` alone is not a total
 order, two rows can share a timestamp under concurrent inserts, and `LIMIT`/`OFFSET` paging over a
 non-total order can show one lead twice or skip another.
+
+The auth tables carry three more indexes. `refresh_tokens_family_idx` serves the write that revokes
+a whole token family at once, which is what a replayed token triggers.
+`refresh_tokens_admin_expiry_idx` serves the expired-row cleanup that runs for the admin who is
+logging in. `admin_audit_log_created_idx` is DESC for the same reason `leads_created_at_idx` is: the
+only way anyone reads an event log is newest first.
 
 Migrations are embedded and run automatically at startup, before the pool is opened. The sqlc output
 under `internal/db/sqlc` is committed so a scaffolded project builds without anyone installing sqlc
@@ -564,6 +754,10 @@ the third column is the part worth knowing.
 | Block dependencies | `requires.blocks` in each `block.ts`, the `target`s in each `copy.ts` | `readBlockDeps`, before the CLI's first question |
 | Page SEO copy | `PAGE_SEO` in `cli/generate.mjs`, the kit's `pages.config.ts` | `assertSeoCopyMatchesKit` at generate time |
 | Compiler options | `apps/web/tsconfig.json`, `tsconfigJson` in the CLI | `assertTsconfigMatchesKit`, compared semantically |
+| The route tree | `apps/web/src/app/routeTree.gen.ts`, `routeTreeGen` in the CLI | `assertRouteTreeMatchesKit`, on every scaffold: it builds the admin branch and compares the whole file against the kit's |
+| The Vite config | `apps/web/vite.config.ts`, `viteConfigTs` in the CLI | `assertViteConfigMatchesKit`, on seven axes rather than by text: the `/admin` prerender entry, the `/api` dev proxy, `build.manifest`, the prerender options, the tanstackStart entries, the `@/theme` alias, the page list, plus the alias keys and the plugins in order. Not equality — the kit branches on `KIT_ANIMATION`, `KIT_SUBMIT` and `KIT_CONFIG` and a scaffold does not |
+| The panel's roots | `ADMIN_COPY_DIRS`, `ADMIN_ROUTE_PATHS`, the directories themselves | `assertAdminPathsExist` proves each name is real; `assertPanelStaysInItsRoots` fails a file outside them that is named for the panel or imports it. A panel file with a neutral name and no panel imports is caught only by the snapshot diff |
+| Admin-only packages | `ADMIN_RUNTIME_DEPS`, what the shipped source imports | `assertShippedImportsAreDeclared`, per answer set, over the finished target |
 | pnpm settings | `pnpm-workspace.yaml`, `pnpmWorkspaceYaml` in the CLI | byte comparison after stripping the `packages:` key |
 | Compose file | root `docker-compose.yml`, `dockerComposeYml` in the CLI | `assertDockerComposeMatchesKit`, only when the kit's copy is on disk |
 | Dependency versions | the kit's `package.json`, a generated project's | versions are read from the kit manifest; only the *grouping* is listed, and an unclassified package is an error |
@@ -573,9 +767,9 @@ the third column is the part worth knowing.
 | DB port 5433 | `conf.defaultDBPort`, the compose host port, `.env.example` | nothing automated; the comments cross-reference each other |
 | The `@/submit` surface | `submit.endpoint.ts`, `submit.rpc.ts` | the `SubmitModule` contract line at the bottom of each |
 
-Three of those checks compare against files that **do not exist under `pnpm dlx`** at all:
-`tsconfig.json`, `pnpm-workspace.yaml` and `docker-compose.yml` are none of them in
-`package.json`'s `files`. Each guards on `existsSync` and therefore runs only when the kit's own
+Four of those checks compare against files that **do not exist under `pnpm dlx`** at all:
+`tsconfig.json`, `pnpm-workspace.yaml`, `docker-compose.yml` and `vite.config.ts` are none of them
+in `package.json`'s `files`. Each guards on `existsSync` and therefore runs only when the kit's own
 working copy is present, which is exactly where someone would be editing them. The other checks
 read `apps/web/src`, which the tarball does carry, so they run on every scaffold.
 
@@ -583,15 +777,21 @@ read `apps/web/src`, which the tarball does carry, so they run on every scaffold
 
 Useful to know before going looking for it.
 
-- **No admin UI.** `GET /api/admin/leads` is the read path; nothing in `apps/web` calls it, and no
-  page or route in the template mentions an admin. Bring your own client, or curl.
+- **No admin UI on two of the three answers.** The panel exists, and `--backend=admin` is the only
+  way to get it. Section 6 covers it. On `none` and `api` nothing in the project calls
+  `GET /api/admin/leads` and no route mentions an admin, so it is curl or a client you write, as it
+  was before the panel existed.
 - **No server runtime in a default build.** `src/app/server.ts` exists for prerendering; the shipped
   artifact is static files. RPC submit mode would change that, and it is not a scaffolding option.
-- **No client-side navigation.** Every link is a plain `<a href>`. Full page loads are cheap when
-  every page is static HTML, and the alternative would land on a page whose block chunks were never
-  fetched.
+- **No client-side navigation on the marketing pages.** Every link there is a plain `<a href>`. Full
+  page loads are cheap when every page is static HTML, and the alternative would land on a page whose
+  block chunks were never fetched. The panel is the exception, and the reason does not reach it: it
+  renders no blocks, so it has no chunks to miss and navigates with TanStack's `<Link>` like any
+  other single-page app. `check-conventions.mjs` enforces the ban across `src/blocks`,
+  `src/components` and every route but the panel's.
 - **No CMS.** The marketing pages are prerendered at build time and the Go service never touches
-  them. Content changes are code changes.
+  them. Content changes are code changes, panel or no panel: it reads leads and offers no screen for
+  editing a page.
 - **No global rate limiter.** The three public routes carry their own, because each needs a key
   generator that cannot collapse callers into one bucket.
 - **No `api` service in a generated `docker-compose.yml`.** See topology C above.

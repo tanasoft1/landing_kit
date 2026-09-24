@@ -18,8 +18,7 @@ func (f *failing) Lead(context.Context, notify.LeadMessage) error {
 	return errors.New("ses is down")
 }
 
-// The rule this pins: a notification failure must not fail Create, and the row must still be
-// there afterwards. Losing a lead to a mail outage is the failure this ordering prevents.
+// A notify failure must not fail Create, and the row must still be there.
 func TestCreateSucceedsWhenNotifyFails(t *testing.T) {
 	t.Parallel()
 	db := testsupport.Fresh(t)
@@ -28,8 +27,6 @@ func TestCreateSucceedsWhenNotifyFails(t *testing.T) {
 
 	err := svc.Create(context.Background(), lead.Input{
 		Name: "Bat", Email: "bat@example.mn", Message: "Sain baina uu, ta bental...", Locale: "mn",
-		// A documentation-range address, so the value is obviously a fixture and never a real
-		// client. Present so the assertion below can prove the inet column round-trips.
 		IP: "203.0.113.7",
 	})
 	if err != nil {
@@ -46,10 +43,7 @@ func TestCreateSucceedsWhenNotifyFails(t *testing.T) {
 	if len(rows) != 1 || rows[0].Email != "bat@example.mn" {
 		t.Fatalf("got %d rows (%+v), want 1 for bat@example.mn", len(rows), rows)
 	}
-	// Asserts the inet round trip, which nothing before this point has exercised. SQLC chose
-	// *netip.Addr for the column and pgx has to encode and decode it; a schema check and a
-	// health check prove neither direction. If this ever fails on the read side while the write
-	// succeeded, the encode and decode paths disagree.
+	// The inet column must round-trip through *netip.Addr.
 	if rows[0].Ip == nil || rows[0].Ip.String() != "203.0.113.7" {
 		t.Fatalf("Ip round-tripped as %v, want 203.0.113.7", rows[0].Ip)
 	}

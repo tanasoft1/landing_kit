@@ -8,18 +8,10 @@ type RqLogin struct {
 	Password string `json:"password" validate:"required"`
 }
 
-// RqRefreshToken is POST /api/auth/refresh's wire shape.
-type RqRefreshToken struct {
-	RefreshToken string `json:"refresh_token" validate:"required"`
-}
-
-// RsAuth is what both login and refresh return: a fresh token pair plus the admin's identity.
-// AccessToken and RefreshToken are NOT interchangeable -- see
-// internal/utils/secure.TokenService, which rejects each as the other.
+// RsAuth is what login and refresh return. The refresh token travels only as an HttpOnly cookie.
 type RsAuth struct {
-	AccessToken  string         `json:"access_token"`
-	RefreshToken string         `json:"refresh_token"`
-	Admin        RsAdminProfile `json:"admin"`
+	AccessToken string         `json:"access_token"`
+	Admin       RsAdminProfile `json:"admin"`
 }
 
 // RsAdminProfile is the admin identity carried in RsAuth.

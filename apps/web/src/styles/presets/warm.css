@@ -9,9 +9,6 @@
   --gutter: clamp(1rem, 4vw, 2rem);
   --width-page: 74rem;
   --width-narrow: 36rem;
-  /* Unlike editorial's `none` (same in both themes), warm's shadow is real and must get darker
-     AND more opaque in `.dark` — a shadow lighter than its surface reads as a glow, not
-     elevation. Tuned against this preset's 99%-lightness background; `.dark` redefines it. */
   --elevation-card: 0 1px 2px oklch(30% 0.02 70 / 0.06), 0 8px 24px oklch(30% 0.02 70 / 0.08);
 
   /* Warm neutrals — hue pulled toward amber, chroma raised. */
@@ -21,23 +18,18 @@
   --c-muted-foreground: oklch(50% 0.022 60);
   --c-accent: oklch(94% 0.02 75);
   --c-border: oklch(89% 0.016 75);
-  /* L lowered from the brief's 60% to 55%: at 60%, CTA buttons and hero eyebrow text both
-     measured ~4.11:1, under the 4.5:1 AA floor. 55% clears both at ~5.06:1, same hue/chroma. */
+  /* ~5.06:1 for buttons and eyebrow text. At 60% lightness it fails AA (4.5:1). */
   --c-primary: oklch(55% 0.16 40);
   --c-primary-foreground: oklch(99% 0.006 85);
   --c-ring: oklch(55% 0.16 40);
 
-  /* Status, hue-nudged toward warm's amber/terracotta rather than reusing editorial's values —
-     a preset swap should move these too. Worst case over background/muted/accent:
-     destructive 5.08:1, success 5.18:1, both over the 4.5:1 AA floor. */
+  /* Worst-case contrast: destructive 5.08:1, success 5.18:1 (AA needs 4.5:1). */
   --c-destructive: oklch(52% 0.19 30);
   --c-success: oklch(48% 0.12 150);
 }
 
 .dark {
-  /* Darker AND more opaque than the light-mode value above, not the same value carried forward —
-     against a 19%-lightness background, a shadow at the light-mode's oklch(30% … / 0.06-0.08)
-     is LIGHTER than its surface and reads as a faint glow, not elevation. Tuned by eye. */
+  /* Darker than the light shadow. A shadow lighter than its surface reads as a glow. */
   --elevation-card: 0 1px 2px oklch(0% 0 0 / 0.35), 0 10px 28px oklch(0% 0 0 / 0.5);
   --c-background: oklch(19% 0.014 55);
   --c-foreground: oklch(96% 0.008 80);
@@ -48,8 +40,7 @@
   --c-primary: oklch(76% 0.13 45);
   --c-primary-foreground: oklch(19% 0.014 55);
   --c-ring: oklch(76% 0.13 45);
-  /* Re-authored for warm's 19%-lightness dark background, same as editorial's.
-     Worst case: destructive 5.53:1, success 6.43:1. */
+  /* Worst-case contrast: destructive 5.53:1, success 6.43:1. */
   --c-destructive: oklch(72% 0.16 32);
   --c-success: oklch(73% 0.12 150);
 }

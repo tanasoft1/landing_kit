@@ -15,9 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 )
 
-// sesNotifier is the production Notifier. Client construction and the send call mirror
-// habido-back's internal/utils/mail/ses.go: that SDK surface is easy to get subtly wrong from
-// memory, and there is a working in-house version.
+// sesNotifier is the production Notifier.
 type sesNotifier struct {
 	client   *sesv2.Client
 	from     string
@@ -25,17 +23,8 @@ type sesNotifier struct {
 	siteName string
 }
 
-// NewSES builds a Notifier backed by Amazon SES.
-//
-// habido-back's ses.go always builds static credentials with
-// aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(...)) and never falls back to
-// anything else. That line is mirrored here verbatim for the case where cfg.AWSKeyID is set. The
-// deviation: when it is empty, this loads the ambient AWS config chain instead (instance profile,
-// EKS pod identity, shared config, ...), so a service running on EC2 or EKS with an attached role
-// needs no long-lived keys in the environment at all. habido-back has no such path because it
-// always requires explicit keys; this seam adds one because a landing site deployed into an AWS
-// account that already grants role-based access should not need a second credential just to send
-// mail.
+// NewSES builds a Notifier backed by Amazon SES. Without AWS_ACCESS_KEY_ID it uses the ambient
+// AWS credentials, such as an EC2 or EKS role.
 func NewSES(ctx context.Context, cfg conf.NotifyConfig) (Notifier, error) {
 	optFns := []func(*awsconfig.LoadOptions) error{awsconfig.WithRegion(cfg.AWSRegion)}
 	if cfg.AWSKeyID != "" {
@@ -50,24 +39,8 @@ func NewSES(ctx context.Context, cfg conf.NotifyConfig) (Notifier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
-	// Checked against the resolved config, not the raw env var: conf.Load cannot require
-	// AWS_REGION at the config boundary the way it requires NOTIFY_TO and SES_FROM, because a
-	// region can legitimately come from several places this code lets aws-sdk-go-v2/config
-	// resolve on its own: the AWS_REGION or AWS_DEFAULT_REGION environment variable, or a
-	// "region" line in a shared config profile.
-	//
-	// EC2 instance metadata (IMDS) is deliberately NOT one of those places. The SDK only queries
-	// IMDS for a region when LoadOptions.UseEC2IMDSRegion is set via
-	// awsconfig.WithEC2IMDSRegion(), which is never called here, so getEC2IMDSRegion short-
-	// circuits before any IMDS client is built. Calling WithEC2IMDSRegion() would make a bare EC2
-	// instance profile with nothing else configured resolve a region, but at the cost of every
-	// host that is NOT on EC2 (a laptop, a non-EC2 container) waiting out an IMDS connect timeout
-	// on every startup with no region set, turning this fast, clear failure into a hang.
-	//
-	// Do not assume a deployment target injects AWS_REGION for you: Lambda always does; ECS only
-	// on the Fargate launch type, not reliably on EC2; EKS only when the pod identity webhook's
-	// --aws-default-region flag is explicitly enabled, which it is not by default. Treat
-	// AWS_REGION as a variable this deployment must set, not one it can count on inheriting.
+	// Check the resolved region, since it can come from env or a shared profile. Do not add
+	// WithEC2IMDSRegion: off EC2 it makes startup wait out an IMDS timeout.
 	if awsCfg.Region == "" {
 		return nil, errors.New("AWS_REGION not set and no region resolved from the ambient AWS config")
 	}
@@ -80,20 +53,8 @@ func NewSES(ctx context.Context, cfg conf.NotifyConfig) (Notifier, error) {
 	}, nil
 }
 
-// buildSubject names the site, when configured, and the visitor: "[Landing Kit] New lead from
-// Bat". siteName empty degrades to "New lead from Bat" rather than a broken or placeholder-filled
-// subject: an owner running only one site through this template has nothing to disambiguate, so
-// there is nothing worth guarding at config validation time either.
-//
-// Deliberately not l.SourcePage: "New lead from /contact" names a route, not a site. SourcePage
-// stays in the body, where which page the visitor was on is genuinely useful.
-//
-// CR and LF are stripped from the visitor's name before it reaches the subject line. The SDK's
-// validators only check that Content.Data is non-nil, never its content, so whether SES's
-// server-side RFC 5322 composition would strip an embedded CRLF is an assumption this code does
-// not rely on, and one that cannot be tested without a live send. Email needs no equivalent
-// sanitiser here: task 5's handler validates it with the `email` struct tag before the lead
-// service ever calls Notifier.Lead.
+// buildSubject returns "[Site] New lead from Bat", or no prefix when siteName is empty.
+// CR and LF are stripped from the name, because the SDK does not check for header injection.
 func buildSubject(siteName, name string) string {
 	name = strings.ReplaceAll(name, "\r", "")
 	name = strings.ReplaceAll(name, "\n", "")
@@ -103,16 +64,8 @@ func buildSubject(siteName, name string) string {
 	return fmt.Sprintf("[%s] New lead from %s", siteName, name)
 }
 
-// Lead sends a plain-text email, mirroring habido-back's SendEmail shape (Destination, Content,
-// Simple, Message, Subject, Body) with two changes required by this seam rather than habido's:
-//
-//   - Body.Text instead of Body.Html: the brief calls for plain text, and a lead notification has
-//     no formatting worth the extra surface.
-//   - ReplyToAddresses is set to the visitor's email so the owner can reply directly from their
-//     mail client. From stays cfg.From (SES_FROM) and is never the visitor's address, which would
-//     fail SPF/DKIM alignment for the sending domain and land in spam.
-//
-// See buildSubject for how the subject names the site.
+// Lead sends a plain-text email. Reply-To is the visitor. From stays SES_FROM, since the visitor's
+// address would fail SPF/DKIM and land in spam.
 func (s *sesNotifier) Lead(ctx context.Context, l LeadMessage) error {
 	subject := buildSubject(s.siteName, l.Name)
 	body := fmt.Sprintf(

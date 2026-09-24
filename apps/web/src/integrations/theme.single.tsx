@@ -1,6 +1,4 @@
-// Identical surface, nothing rendered, nothing imported. Because this variant imports no
-// implementation, a single-mode build contains no theme-switching code at all rather than
-// merely rendering none of it.
+// Imports no implementation, so single-theme builds ship no theme-switching code.
 import type { ThemeModule, ThemeToggleProps } from '@/integrations/theme.types'
 
 export function ThemeScript() {

@@ -1,7 +1,4 @@
-// Package secure issues and validates the HS256 JWTs that carry admin identity between the login
-// endpoint and every route behind AuthMiddleware. Mirrors
-// ~/work/psyfint_v2_back/internal/utils/secure/token.go: same shape, same two checks that keep a
-// stolen or mistyped token from doing more than the caller intended.
+// Package secure issues and validates the HS256 JWTs that carry admin identity.
 package secure
 
 import (
@@ -18,25 +15,15 @@ const (
 	TokenTypeRefresh = "refresh"
 )
 
-// errWrongTokenType and errUnexpectedSigningMethod are the two checks a token-issued-at-time
-// check cannot replace: TokenType is read back out of the claims on every validation, and the
-// signing method is asserted in the keyfunc, not merely assumed from how this service signs.
-//
-// A refresh token has a much longer life than an access token (days versus an hour, see
-// conf.JWTConfig), so accepting one as the other silently extends the session window to the
-// longer one. And jwt.Parse's keyfunc runs before signature verification: a keyfunc that returns
-// the secret unconditionally accepts anything the library can parse, including a token signed
-// with "none" in some configurations, which is why the method is asserted here rather than left
-// to the library's default.
+// The token type is checked on every validation, so a long-lived refresh token never works as an
+// access token.
 var (
 	errWrongTokenType          = errors.New("wrong token type")
 	errUnexpectedSigningMethod = errors.New("unexpected signing method")
 	errInvalidToken            = errors.New("invalid token")
 )
 
-// Claims carries the admin identity through the token, plus its own type so a caller can tell an
-// access token from a refresh token after parsing (see the type check in parseToken's two
-// callers below).
+// Claims carries the admin identity and the token type.
 type Claims struct {
 	jwt.RegisteredClaims
 
@@ -45,27 +32,31 @@ type Claims struct {
 	TokenType string    `json:"token_type"`
 }
 
-// TokenService signs and parses tokens with one shared secret. HS256, not RSA: this service's
-// only client is its own admin UI, so one secret to manage beats a keypair (see the plan's
-// "Decisions taken before writing this").
+// TokenService signs and parses tokens with one shared HS256 secret.
 type TokenService struct {
-	secret            string
-	accessExpireHours int
-	refreshExpireDays int
+	secret              string
+	accessExpireMinutes int
+	refreshExpireDays   int
+	sessionMaxDays      int
 }
 
-func NewTokenService(secret string, accessExpireHours, refreshExpireDays int) *TokenService {
+func NewTokenService(secret string, accessExpireMinutes, refreshExpireDays, sessionMaxDays int) *TokenService {
 	return &TokenService{
-		secret:            secret,
-		accessExpireHours: accessExpireHours,
-		refreshExpireDays: refreshExpireDays,
+		secret:              secret,
+		accessExpireMinutes: accessExpireMinutes,
+		refreshExpireDays:   refreshExpireDays,
+		sessionMaxDays:      sessionMaxDays,
 	}
 }
 
-// GenerateAccessToken signs a short-lived token carrying the admin's identity, used to
-// authorize requests to routes behind AuthMiddleware.
+// SessionDeadline is the absolute expiry a login stamps on the token family it starts.
+func (s *TokenService) SessionDeadline(from time.Time) time.Time {
+	return from.Add(time.Duration(s.sessionMaxDays) * 24 * time.Hour)
+}
+
+// GenerateAccessToken signs a short-lived token carrying the admin's identity.
 func (s *TokenService) GenerateAccessToken(adminID uuid.UUID, email string) (string, error) {
-	expiresAt := time.Now().Add(time.Duration(s.accessExpireHours) * time.Hour)
+	expiresAt := time.Now().Add(time.Duration(s.accessExpireMinutes) * time.Minute)
 
 	claims := &Claims{
 		AdminID:   adminID,
@@ -85,17 +76,29 @@ func (s *TokenService) GenerateAccessToken(adminID uuid.UUID, email string) (str
 	return signed, nil
 }
 
-// GenerateRefreshToken signs a long-lived token used only to obtain a new token pair through
-// Refresh. It deliberately carries no email: a refresh token's one job is proving the admin id,
-// and the endpoint that consumes it (internal/service/auth.Refresh) looks the admin up again
-// before issuing anything, rather than trusting a value that may be days stale.
-func (s *TokenService) GenerateRefreshToken(adminID uuid.UUID) (string, error) {
+// GenerateRefreshToken signs a refresh token, capped at familyExpiresAt. It returns the expiry
+// so the ledger row matches the token's exp claim.
+func (s *TokenService) GenerateRefreshToken(adminID, jti uuid.UUID, familyExpiresAt time.Time) (string, time.Time, error) {
 	expiresAt := time.Now().Add(time.Duration(s.refreshExpireDays) * 24 * time.Hour)
+	if expiresAt.After(familyExpiresAt) {
+		expiresAt = familyExpiresAt
+	}
 
+	signed, err := s.SignRefreshToken(adminID, jti, expiresAt)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, expiresAt, nil
+}
+
+// SignRefreshToken signs a refresh token for an existing jti and expiry. It re-sends the successor
+// of a rotation whose response was lost.
+func (s *TokenService) SignRefreshToken(adminID, jti uuid.UUID, expiresAt time.Time) (string, error) {
 	claims := &Claims{
 		AdminID:   adminID,
 		TokenType: TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti.String(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -109,8 +112,7 @@ func (s *TokenService) GenerateRefreshToken(adminID uuid.UUID) (string, error) {
 	return signed, nil
 }
 
-// ValidateAccessToken parses tokenString and rejects it unless its type is access. See the
-// package doc for why that check runs on every validation rather than only at issue time.
+// ValidateAccessToken parses tokenString and rejects it unless its type is access.
 func (s *TokenService) ValidateAccessToken(tokenString string) (*Claims, error) {
 	claims, err := s.parseToken(tokenString)
 	if err != nil {
@@ -138,8 +140,7 @@ func (s *TokenService) parseToken(tokenString string) (*Claims, error) {
 	claims := &Claims{}
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		// Asserted, not assumed: without this, a keyfunc that returns the secret unconditionally
-		// lets jwt.Parse accept a token signed with any algorithm the library supports.
+		// Without this, jwt.Parse accepts a token signed with any algorithm the library supports.
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("%w: %v", errUnexpectedSigningMethod, token.Header["alg"])
 		}

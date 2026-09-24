@@ -16,6 +16,7 @@ import (
 	leadhandler "landing-api/internal/http/handlers/lead"
 	"landing-api/internal/http/models"
 	"landing-api/internal/http/routes"
+	"landing-api/internal/service/audit"
 	"landing-api/internal/service/auth"
 	"landing-api/internal/service/lead"
 	"landing-api/internal/service/notify"
@@ -23,21 +24,19 @@ import (
 	"landing-api/internal/utils/secure"
 )
 
-// testTokenService is shared by every test in this package that needs a token: same secret and
-// expiries throughout, so a token minted with it in one test file validates in another. Never
-// used for anything but tests.
+// Shared by every test in this package, so a token from one file validates in another.
 const (
-	testJWTSecret         = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
-	testAccessExpireHours = 1
-	testRefreshExpireDays = 7
+	testJWTSecret           = "lead-handler-test-secret-32-bytes!" //nolint:gosec // fixture value for tests, not a real secret
+	testAccessExpireMinutes = 15
+	testRefreshExpireDays   = 7
+	testSessionMaxDays      = 30
 )
 
 func newTestTokenService() *secure.TokenService {
-	return secure.NewTokenService(testJWTSecret, testAccessExpireHours, testRefreshExpireDays)
+	return secure.NewTokenService(testJWTSecret, testAccessExpireMinutes, testRefreshExpireDays, testSessionMaxDays)
 }
 
-// validRequest clears every check this handler applies: field shape, the honeypot, and the
-// timing floor. Each case below starts here and breaks exactly one property.
+// validRequest passes every check. Each case below breaks exactly one property.
 func validRequest() models.CreateLeadRequest {
 	return models.CreateLeadRequest{
 		Name:      "Bat",
@@ -48,11 +47,7 @@ func validRequest() models.CreateLeadRequest {
 	}
 }
 
-// newApp builds the real middleware chain (routes.Setup, not a bare handler call) against its
-// own pristine database, so the rate limiter, CORS and the rest of production wiring are
-// exercised too, not just Handler.Create in isolation. notify.NewLogger is used instead of SES:
-// no AWS account is available here, and the log driver's Lead never returns an error, so it
-// never masks a real failure the way a misconfigured SES client's silence would.
+// newApp builds the real middleware chain against a fresh database, so the limiters and CORS are tested too.
 func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	t.Helper()
 
@@ -61,11 +56,11 @@ func newApp(t *testing.T) (*fiber.App, *testsupport.DB, *secure.TokenService) {
 	tokenService := newTestTokenService()
 	h := &handlers.Handlers{
 		Lead: leadhandler.New(svc),
-		Auth: authhandler.New(auth.New(db.Queries, tokenService)),
+		Auth: authhandler.New(auth.New(db.Pool, db.Queries, tokenService, audit.New(db.Queries)), false),
 	}
 
 	app := fiber.New()
-	routes.Setup(app, h, "http://localhost:5173", tokenService)
+	routes.Setup(app, h, "http://localhost:5173", tokenService, false, "", nil)
 
 	return app, db, tokenService
 }
@@ -93,10 +88,7 @@ func TestCreateAcceptsAValidSubmission(t *testing.T) {
 	}
 }
 
-// The property under test: a filled honeypot and a too-fast submission must be indistinguishable
-// to the caller. Both are asserted in one test, side by side, specifically so a future change
-// that special-cases one of them shows up as this test failing, rather than as two separate tests
-// that merely happen to agree by coincidence.
+// A filled honeypot and a too-fast submission must look the same to the caller.
 func TestCreateRejectsHoneypotAndTimingWithTheSameMessage(t *testing.T) {
 	t.Parallel()
 

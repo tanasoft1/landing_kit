@@ -14,6 +14,13 @@ func NewPool(dsn string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("failed to parse database config: %w", err)
 	}
 
+	// Cap lock waits. Request contexts have no deadline, so a blocked statement would hold a
+	// pooled connection forever.
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "3000"
+
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)

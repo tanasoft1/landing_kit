@@ -8,3 +8,6 @@ RETURNING *;
 
 -- name: GetAdminByID :one
 SELECT * FROM admin_users WHERE id = $1;
+
+-- name: UpdateAdminPasswordHash :exec
+UPDATE admin_users SET password_hash = $2 WHERE id = $1;

@@ -6,12 +6,7 @@ run:
 dev:
 	air
 
-# Rebuilds the web app and re-embeds its output, wiping internal/static/dist first rather than
-# copying over the top of it. A stale asset from a previous build that the new one no longer
-# produces would otherwise stay embedded forever: every filename is content-hashed, so nothing
-# ever overwrites it, and go:embed has no notion of "files this build removed". touch restores
-# dist/.placeholder afterwards so the one file this directory always tracks in git is never left
-# missing from a working tree that just ran this.
+# Wipes dist first, or old hashed assets stay embedded forever. touch restores the tracked placeholder.
 build-site:
 	cd ../web && pnpm build
 	rm -rf internal/static/dist
@@ -41,10 +36,12 @@ migrate-create:
 	        internal/db/migrations/$${ts}_$(name).down.sql; \
 	  echo "created internal/db/migrations/$${ts}_$(name).{up,down}.sql"
 
-# Wraps `./cmd seed-admin`, not a raw `go run` one-liner, so the usage message is the same
-# whether the missing argument is email or password rather than whatever go run's own failure
-# happens to print.
+# Prompts for the password with echo off and pipes it in, so it never lands in shell history or `ps`.
 seed-admin:
-	@test -n "$(email)" || (echo "usage: make seed-admin email=admin@example.mn password=..." && exit 1)
-	@test -n "$(password)" || (echo "usage: make seed-admin email=admin@example.mn password=..." && exit 1)
-	@go run ./cmd seed-admin "$(email)" "$(password)"
+	@test -n "$(email)" || (echo "usage: make seed-admin email=admin@example.mn" && exit 1)
+	@printf 'Password: ' >&2; \
+	  stty -echo 2>/dev/null || true; \
+	  read -r pw; \
+	  stty echo 2>/dev/null || true; \
+	  printf '\n' >&2; \
+	  printf '%s' "$$pw" | go run ./cmd seed-admin "$(email)"

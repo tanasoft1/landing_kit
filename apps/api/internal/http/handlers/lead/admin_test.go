@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tanasoft1/testkit"
@@ -63,12 +64,19 @@ func TestAdminLeadsReturnsSeededLeadWithValidToken(t *testing.T) {
 		t.Fatal("Success = false, want true")
 	}
 
-	leads, ok := body.Data.([]any)
+	page, ok := body.Data.(map[string]any)
 	if !ok {
-		t.Fatalf("Data = %T, want a list", body.Data)
+		t.Fatalf("Data = %T, want an object", body.Data)
+	}
+	leads, ok := page["items"].([]any)
+	if !ok {
+		t.Fatalf("items = %T, want a list", page["items"])
 	}
 	if len(leads) != 1 {
 		t.Fatalf("got %d leads, want 1", len(leads))
+	}
+	if page["total"] != float64(1) {
+		t.Errorf("total = %v, want 1", page["total"])
 	}
 	row, ok := leads[0].(map[string]any)
 	if !ok {
@@ -79,15 +87,12 @@ func TestAdminLeadsReturnsSeededLeadWithValidToken(t *testing.T) {
 	}
 }
 
-// A refresh token must not be accepted where an access token is required. Without this check, a
-// refresh token -- which lives far longer, see conf.JWTConfig -- would silently extend the
-// session window to its own, much longer, lifetime.
 func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 	t.Parallel()
 
 	app, _, tokenService := newApp(t)
 
-	refresh, err := tokenService.GenerateRefreshToken(uuid.New())
+	refresh, _, err := tokenService.GenerateRefreshToken(uuid.New(), uuid.New(), time.Now().Add(30*24*time.Hour))
 	if err != nil {
 		t.Fatalf("GenerateRefreshToken: %v", err)
 	}
@@ -98,10 +103,7 @@ func TestAdminLeadsRejectsRefreshTokenAsAccessToken(t *testing.T) {
 		Status(http.StatusUnauthorized)
 }
 
-// The property under test: no matter how large a limit a caller asks for, at most MaxListLimit
-// (200) rows come back. 205 leads are seeded specifically so the 200th and 205th cannot both be
-// in the response -- if the clamp regressed to, say, "cap at 1000", this still passes; only
-// clamping to exactly 200 or fewer does.
+// At most MaxListLimit rows come back, whatever limit is asked for.
 func TestAdminLeadsClampsAnOversizedLimit(t *testing.T) {
 	t.Parallel()
 
@@ -122,11 +124,18 @@ func TestAdminLeadsClampsAnOversizedLimit(t *testing.T) {
 
 	var body models.SuccessResponse
 	res.Decode(&body)
-	leads, ok := body.Data.([]any)
+	page, ok := body.Data.(map[string]any)
 	if !ok {
-		t.Fatalf("Data = %T, want a list", body.Data)
+		t.Fatalf("Data = %T, want an object", body.Data)
+	}
+	leads, ok := page["items"].([]any)
+	if !ok {
+		t.Fatalf("items = %T, want a list", page["items"])
 	}
 	if len(leads) != 200 {
 		t.Fatalf("got %d leads for limit=10000, want 200 (the clamp)", len(leads))
+	}
+	if page["total"] != float64(205) {
+		t.Errorf("total = %v, want 205", page["total"])
 	}
 }

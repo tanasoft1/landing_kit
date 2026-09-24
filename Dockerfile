@@ -12,13 +12,18 @@ WORKDIR /repo
 # not on every source edit below.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/web/package.json apps/web/package.json
-RUN npm install -g pnpm@10.13.1 && pnpm install --frozen-lockfile
+# corepack rather than a version pinned here: it reads packageManager out of the package.json
+# copied above, so the image builds with the same pnpm the repo declares and there is no second
+# number to forget. There was one, it said 10.13.1, and the move to pnpm 12 wrote a lockfile this
+# stage then refused with --frozen-lockfile. Nothing caught it, because `pnpm verify` does not
+# build the image.
+RUN corepack enable && corepack install && pnpm install --frozen-lockfile
 
 COPY apps/web ./apps/web
 RUN pnpm --filter @tanasoftllc/landing-kit-web build
 
 # --- stage 2: build the Go binary --------------------------------------------------------------
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /src
 
 # go.mod/go.sum before the rest of the source, same layer-caching reason as the web stage above.

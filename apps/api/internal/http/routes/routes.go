@@ -15,48 +15,41 @@ import (
 )
 
 // Setup mounts the global middleware chain and every route group.
-//
-// No global rate limiter. The limited routes are POST /api/leads and the two /api/auth routes,
-// and each needs a key generator that cannot collapse callers into one bucket (see
-// internal/http/routes/public.go).
-func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService) {
+func Setup(app *fiber.App, h *handlers.Handlers, corsOrigins string, tokenService *secure.TokenService, isProduction bool, proxyHeader string, trustedProxies []string) {
 	app.Use(recover.New())
+	// Before the logger and the limiters, which all read c.IP().
+	app.Use(normalizeClientIP(proxyHeader, trustedProxies))
 	app.Use(logger.New())
 	app.Use(helmet.New(helmet.Config{
-		// Both default to values that break a served site, and the breakage is browser-side with
-		// no server-side signal. require-corp blocks every cross-origin subresource lacking a
-		// matching CORP or CORS header, which is most third-party widgets and CDN assets;
-		// same-origin blocks other origins from loading anything here. "unsafe-none" and
-		// "cross-origin" are the browser defaults, so this restores normal behaviour rather than
-		// weakening a protection this site relies on. Verified against Fiber v2.52.8's ConfigDefault.
+		// Helmet's defaults block most third-party widgets and CDN assets, with no server-side
+		// error. These are the browser defaults.
 		CrossOriginEmbedderPolicy: "unsafe-none",
 		CrossOriginResourcePolicy: "cross-origin",
 	}))
+	app.Use(securityHeaders(isProduction))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: corsOrigins,
-		AllowHeaders: "Origin, Content-Type, Accept",
+		// Authorization carries the access token. X-Requested-With is the csrfHeader.
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods: "GET, POST, OPTIONS",
+		// Lets the refresh cookie travel for a same-site split like admin.example.com calling
+		// api.example.com. Because of this, conf.Load rejects any "*" in CORS_ORIGINS.
+		AllowCredentials: true,
 	}))
 
 	api := app.Group("/api")
 	api.Get("/health", func(c *fiber.Ctx) error {
-		// Same payload as psyfint_v2_back's, so a monitoring check written against one service
-		// works unchanged against the other.
+		// Monitoring checks depend on this exact shape.
 		return c.JSON(fiber.Map{"status": "ok", "message": "server is running"})
 	})
 
 	setupPublicRoutes(api, h)
 	setupAdminRoutes(api, h, tokenService)
 
-	// Mounted last, and conditionally: an API-only binary (no web build ever embedded) is a
-	// legitimate thing to run, and mounting a handler with no index.html to fall back on would
-	// answer every page request with a confusing 404 instead of the API's own routes. Mounting
-	// static.Handler() before the routes above, instead of after, would let its catch-all answer
-	// for every unmatched path -- including a typo'd API route -- before an API handler ever saw
-	// the request.
+	// Mounted last, or its catch-all would answer unmatched API paths. Skipped in an API-only build.
 	if static.HasSite() {
 		app.Use(static.Handler())
 	} else {
-		slog.Warn("no web build embedded, serving API only -- run `make build` in apps/api to embed the site")
+		slog.Warn("no web build embedded, serving API only -- run `make build` in the API directory to embed the site")
 	}
 }

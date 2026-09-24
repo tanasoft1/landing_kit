@@ -1,6 +1,4 @@
-// Package testsupport hands every integration test its own pristine, migrated Postgres
-// database. Mirrors ~/work/psyfint_v2_back/internal/testsupport/db.go, minus its OrgID seeding,
-// which is psyfint-specific: this service has no organizations table.
+// Package testsupport gives every integration test its own migrated, empty Postgres database.
 package testsupport
 
 import (
@@ -18,15 +16,10 @@ import (
 	"landing-api/internal/db/sqlc"
 )
 
-// perTestPoolMaxConns bounds how many connections dbsetup.NewPool opens for a single test's
-// pool. Without it, pgxpool falls back to its own default (max(4, NumCPU)), and every DB test
-// under Fresh holds its own pool at that ceiling; with universal parallelism, dozens of
-// concurrently running tests each opening that many connections can exhaust the server's
-// max_connections. A handful of connections is far more than any one test needs.
+// perTestPoolMaxConns keeps many parallel tests from exhausting max_connections.
 const perTestPoolMaxConns = 4
 
-// postgres is resolved once per test-binary process. Migrations run once per distinct schema
-// hash across the whole suite, not once per package.
+// postgres is resolved once per test binary.
 var postgres = pgkit.New(pgkit.Config{ //nolint:gochecknoglobals // one server per test binary
 	Migrator: pgkit.FSMigrator(migrations.FS, dbsetup.RunMigrations),
 })
@@ -44,11 +37,7 @@ func Fresh(t *testing.T) *DB {
 
 	dsn := postgres.Fresh(t)
 
-	// The project's own pool constructor is used deliberately, so its settings are exercised by
-	// every integration test rather than only in production. Its connection ceiling is bounded
-	// for this test's pool specifically (see perTestPoolMaxConns); the DSN handed to
-	// dbsetup.NewPool carries pool_max_conns, but DB.DSN above stays unbounded for callers that
-	// open their own raw connections.
+	// Use the real pool constructor so tests exercise its settings.
 	poolDSN, err := withPoolMaxConns(dsn, perTestPoolMaxConns)
 	if err != nil {
 		t.Fatalf("testsupport: bound pool size: %v", err)
@@ -63,10 +52,7 @@ func Fresh(t *testing.T) *DB {
 	return &DB{DSN: dsn, Pool: pool, Queries: sqlc.New(pool)}
 }
 
-// withPoolMaxConns adds (or overwrites) the pool_max_conns query parameter on dsn.
-// pgxpool.ParseConfig honours that key to cap MaxConns. Going through net/url instead of string
-// concatenation means this composes correctly whether or not dsn already carries a query string
-// (it does: postgres.Fresh returns one with sslmode=disable).
+// withPoolMaxConns sets the pool_max_conns query parameter on dsn.
 func withPoolMaxConns(dsn string, n int) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {

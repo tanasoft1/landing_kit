@@ -1,125 +1,165 @@
 # The Go API
 
-`api/` is a GoFiber service on PostgreSQL. It accepts and stores this site's contact form
-submissions, with a honeypot and a timing floor as spam defences and an email notification on
-every new lead, and it gives an admin a way to read them back: log in, then list leads over
-`GET /api/admin/leads`. It is not a CMS — the marketing pages stay static, prerendered at build
-time, and this service never touches them.
+`api/` is a GoFiber service on PostgreSQL. It stores the contact form's submissions, emails you
+about each new lead, and lets an admin read them over `GET /api/admin/leads`. The marketing pages
+stay static; this service never touches them.
 
 ## Running it
 
 ```bash
-docker compose up -d db     # Postgres, on host port 5433
-cd api && make dev          # air, on PORT (default 3000)
+cp api/.env.example api/.env   # once
+docker compose up -d db        # Postgres, on host port 5433
+cd api && make run             # on PORT (default 3000). `make dev` hot-reloads if you have air.
 ```
 
-Migrations run automatically at startup. Copy `api/.env.example` to `api/.env` before your first
-run.
+Migrations run at startup.
 
-The host port is 5433 rather than 5432 so the compose service does not collide with a Postgres
-already running on your machine — see the comment in `docker-compose.yml`. `DB_PORT` in `.env`
-defaults to 5433 to match. If you change `DB_USER`, `DB_PASSWORD` or `DB_NAME`, change
-`docker-compose.yml`'s `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` together with them —
-a mismatch fails loudly with an authentication error, except for `DB_NAME`: if your own Postgres
-happens to hold a database of the same name, a mismatch connects successfully to the wrong one.
+Postgres uses host port 5433 so it doesn't clash with one already on your machine. If you change
+`DB_USER`, `DB_PASSWORD` or `DB_NAME`, change `POSTGRES_USER`, `POSTGRES_PASSWORD` and
+`POSTGRES_DB` in `docker-compose.yml` too.
+
+## Prerequisites
+
+Go, Docker, `sqlc` and `golangci-lint`. `pnpm verify` runs `sqlc diff`, which fails if the
+generated code in `internal/db/sqlc/` doesn't match the queries. Never edit that folder by hand.
+`air` is optional.
 
 ## Connecting the contact form
 
-The frontend already POSTs to `VITE_CONTACT_ENDPOINT` — see `src/integrations/submit.endpoint.ts`.
-Point it at this service, for example in a `.env` at the project root:
+The form posts to `VITE_CONTACT_ENDPOINT`. Set it in a `.env` at the project root:
 
 ```
 VITE_CONTACT_ENDPOINT=http://localhost:3000/api/leads
 ```
 
-`api/.env.example`'s `CORS_ORIGINS` already defaults to `http://localhost:5173`, Vite's own
-default port, so the two dev servers talk to each other with no CORS changes on a fresh scaffold.
+`CORS_ORIGINS` already allows `http://localhost:5173`, Vite's dev port.
 
-## Prerequisites
+**Every `CORS_ORIGINS` entry must be a literal origin.** Any `*`, including
+`https://*.example.com`, stops startup. Responses carry the admin's session cookie, so any host
+that matches a wildcard could take over the panel.
 
-`sqlc` and `golangci-lint`, both used by `pnpm verify`. `sqlc` is needed to run verify, not only to
-regenerate: `pnpm api:sqlc` runs `sqlc diff`, which fails if the committed generated code under
-`internal/db/sqlc/` (committed, never hand-edit it) does not match what generation would produce —
-catching a hand-edit and a forgotten regeneration alike. It needs no database, because it reads the
-migration files as its schema. `air` is optional, for hot reload.
+The admin panel of a `--backend=admin` project needs no entry. It is same-origin: Vite proxies
+`/api` in development, and one binary serves both in production. It can't move to another origin,
+because it always sends `credentials: 'same-origin'`.
 
 ## Notifications
 
-`NOTIFY_DRIVER` selects how a new lead reaches you: `log` (default) writes a line and needs no AWS
-account; `ses` sends mail through AWS SES and additionally requires `NOTIFY_TO` and `SES_FROM`.
-Startup refuses `NOTIFY_DRIVER=log` when `APP_ENV=production`, because that combination stores
-every lead and tells nobody.
+`NOTIFY_DRIVER=log` (the default) writes a log line. `NOTIFY_DRIVER=ses` sends email through AWS
+SES and needs `NOTIFY_TO` and `SES_FROM`. With `APP_ENV=production`, `log` is refused, because
+leads would be stored and nobody told.
 
 ## Admin access
 
-Create an admin account, then log in:
+Create an account. It asks for the password (at least 12 characters) with echo off, so the
+password never lands in shell history or `ps`:
 
 ```bash
-cd api && make seed-admin email=owner@example.mn password=at-least-12-characters
+cd api && make seed-admin email=owner@example.mn
 ```
 
-`seed-admin` refuses a password under 12 characters and prints nothing but the created email —
-never the password, never its hash. A second seed of the same email fails rather than creating a
-duplicate.
+To script it, pipe the password in with no trailing newline:
+
+```bash
+printf '%s' "$PASSWORD" | go run ./cmd seed-admin owner@example.mn
+```
+
+A second seed of the same email fails. There is no change-password command: to rotate a password,
+seed a new account and delete the old one.
+
+### Endpoints
 
 ```
-POST /api/auth/login    {"email": "...", "password": "..."}  -> access_token, refresh_token
-POST /api/auth/refresh  {"refresh_token": "..."}              -> a fresh access_token, refresh_token
+POST /api/auth/login    {"email": "...", "password": "..."}   -> access_token, and a refresh cookie
+POST /api/auth/refresh  refresh cookie + X-Requested-With     -> a new access_token and cookie
+POST /api/auth/logout   refresh cookie + X-Requested-With     -> 200, and the session is revoked
 GET  /api/admin/leads   Authorization: Bearer <access_token>
 ```
 
-`access_token` and `refresh_token` are not interchangeable: `GET /api/admin/leads` rejects a
-refresh token, and `POST /api/auth/refresh` rejects an access token. Use the access token
-everywhere else, and only call `/api/auth/refresh` with the refresh token to get a new pair once
-the access token expires (`JWT_ACCESS_EXPIRE_HOURS`, default 1 hour; the refresh token lasts
-`JWT_REFRESH_EXPIRE_DAYS`, default 7 days).
+- **Refresh and logout need an `X-Requested-With` header** (any value), or they answer 403. A
+  plain cross-site form can't set it, so another site can't sign you out.
+- The refresh token is only ever a cookie:
+  `landing_refresh=...; Path=/api/auth; HttpOnly; Secure; SameSite=Strict`. `Secure` is dropped
+  when `APP_ENV=development`.
+- Browser clients send `credentials: 'include'` on the `/api/auth` calls and keep the access token
+  in memory, not `localStorage`. A client on another origin must be in `CORS_ORIGINS`, or the
+  browser drops the cookie. From the command line, use a cookie jar: `curl -c jar -b jar`.
+- Access and refresh tokens are not interchangeable.
+- `GET /api/admin/leads` takes `limit` (default 50, max 200) and `offset`. It returns
+  `{"items": [...], "total": N}`, where `total` counts every lead and `items` is never `null`.
+- All `/api/admin` responses, errors included, carry `Cache-Control: no-store`.
 
-`JWT_SECRET` has no default outside development: startup refuses to run with `APP_ENV` set to
-anything but `development` when the secret is empty or shorter than 32 characters, because a short
-or empty secret makes admin tokens forgeable. Generate a real one before deploying, for example
+### Sessions
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `JWT_ACCESS_EXPIRE_MINUTES` | 15 | How long an access token works |
+| `JWT_REFRESH_EXPIRE_DAYS` | 7 | How long a session may sit unused |
+| `JWT_SESSION_MAX_DAYS` | 30 | The longest a login lasts, however active |
+
+`JWT_SECRET` must be at least 32 characters outside development:
 `openssl rand -base64 32`.
 
-`POST /api/auth/login` and `POST /api/auth/refresh` are rate limited, same as the contact form, so
-repeated wrong guesses get throttled rather than retried without limit.
+Each refresh token works once, and the refresh sets a new cookie. Sending a spent token again
+looks like theft, so the server revokes the whole login and writes a `token_reuse_detected` row to
+`admin_audit_log`. One exception: a token spent in the last 30 seconds whose replacement is still
+unused gets the same replacement again. That covers dropped connections and two tabs refreshing at
+once. Still, send one refresh at a time from your client.
 
-`GET /api/admin/leads` accepts `limit` and `offset` query parameters. `limit` defaults to 50 and is
-capped at 200 regardless of what is requested, so one request can't pull every lead the site has
-ever received.
+**Open a `token_reuse_detected` row when you see one.** Compare its `ip` and `user_agent` with the
+nearby `login_success` row. A different address or browser means someone else had the token. The
+session is already revoked; decide whether to rotate the password.
+
+**Sign out isn't instant for tabs already open.** It revokes the session, so no new token is
+issued. But the access token already in a tab keeps working until it expires, up to 15 minutes,
+because the API doesn't check a database on every request. On a shared computer, also close the
+browser.
+
+### Rate limits
+
+- Per client address: login gets 5 requests per 15 minutes, refresh gets 30. Logout isn't limited.
+- Login also backs off per email **and** address together. From the 5th failure, that pair is
+  locked for a minute, doubling up to an hour. A success clears it, and so do 30 quiet minutes.
+- Because the lock includes the address, a stranger can't lock you out from elsewhere. People who
+  share your address (office NAT, a VPN) can.
+- Both limits answer 429.
+
+### Behind a proxy or load balancer
+
+Set both `PROXY_HEADER` (e.g. `X-Forwarded-For`) and `TRUSTED_PROXIES` (e.g.
+`10.0.0.0/8,172.16.0.0/12`). The header is trusted only from those addresses, and the server takes
+the rightmost address that isn't a trusted proxy. If your proxy replaces the header instead of
+appending to it, name a header it writes itself, such as `X-Real-IP`.
+
+With `PROXY_HEADER` set and `TRUSTED_PROXIES` empty, the header is ignored and every request shares
+the proxy's address, which means one rate-limit bucket for everyone. An entry that won't parse
+stops startup.
 
 ## Serving the site
 
-This service can serve the built site itself, alongside the API, out of one binary: `api/internal/static`
-embeds the web app's build output with `//go:embed`, and `/` falls back to it for anything that is
-not `/api/*`. `make build` (not `make dev`) is what fills it in — it builds the frontend first, then
-wipes and recreates `internal/static/dist` from that output rather than copying over the top, so a
-stale asset a previous build produced and this one no longer does can never stay embedded forever
-(every filename the build produces is content-hashed, so nothing would ever overwrite it). Run
-`./bin/landing-api` afterwards and it serves both the site and the API on the same port.
+`make build` builds the web app, embeds it in the binary, and writes `bin/landing-api`. That one
+binary serves the site on `/` and the API on `/api/*`. Without a build embedded (`make run`,
+`make dev`), the API still works and there is just no site. `internal/static/dist/.placeholder`
+only exists so the package compiles before the first build.
 
-Without a build ever embedded (`make dev`, or `make build` never having run), the service still
-starts and the API still works — it just has no site to fall back to, and says so once at startup.
-`api/internal/static/dist/.placeholder` is a committed empty file that exists only so this package
-compiles on a fresh clone before any build has run; it is not itself a site.
+Two security header settings in `internal/http/routes/` matter if you add third-party content:
 
-If you serve the site this way, do not put `helmet`'s `CrossOriginEmbedderPolicy` and
-`CrossOriginResourcePolicy` back to their library defaults (`require-corp` and `same-origin`) in
-`internal/http/routes/routes.go`. Both are relaxed to the browser's own defaults (`unsafe-none` and
-`cross-origin`) because the stricter ones silently break every cross-origin subresource the site
-loads — third-party widgets, CDN assets, embedded iframes — with no error anywhere on the server
-side; the site just looks broken in the browser for no visible reason.
+- In `routes.go`, keep `CrossOriginEmbedderPolicy` and `CrossOriginResourcePolicy` relaxed. The
+  strict defaults silently break widgets, CDN assets and iframes.
+- In `headers.go`, the content security policy allows only same-origin resources and `data:`
+  images. For analytics, a chat widget or CDN fonts, add the host to `script-src`, `img-src` or
+  `font-src`, and usually `connect-src` too. Frames need a new `frame-src` line. A missing entry
+  shows up only as a CSP error in the browser console.
 
 ## Docker
 
-```bash
-docker compose up --build     # both services; PORT=3001 if 3000 is already taken on your machine
-```
+`docker-compose.yml` runs Postgres only. The kit's Dockerfile is built for the kit's own folder
+layout, and the scaffolder doesn't generate one for this project yet. Run the database in Docker
+and the service directly:
 
-Builds and runs the whole thing in one container: `docker build .` produces an image that serves
-the site on `/` and the API on `/api/*`, the same way `make build` plus running the binary does
-locally. Inside that one container the site and the API share an origin, so `CORS_ORIGINS` matters
-far less than it does in local development, where the Vite dev server and this API are two
-different origins — a request from the served site to its own `/api/leads` never goes through CORS
-at all.
+```bash
+docker compose up -d db
+cd api && make run
+```
 
 ## Tests
 
@@ -127,25 +167,13 @@ at all.
 cd api && go test ./...
 ```
 
-Integration tests need Docker. Set environment values for a test with `t.Setenv`, never by writing
-a second `.env` — the first `.env` read wins for the whole test binary and a later one is silently
-ignored rather than erroring.
-
-## Why docker-compose.yml has no `api` service
-
-The kit this project was generated from builds one image serving both the site and the API, from a
-Dockerfile at its own repo root. That Dockerfile is written for the kit's layout, `apps/web` beside
-`apps/api`. This project has a different shape: the web app is flat at the root and the service is
-in `api/`. So the kit's Dockerfile does not apply, and the scaffolder does not yet generate one for
-this shape.
-
-Shipping a compose file that referenced a Dockerfile this project never received would look
-complete and then fail on `docker compose up` with a missing-file error, so the service is omitted
-until there is one to point at.
-
-Run the database in compose and the service directly:
+Integration tests need Docker. With colima instead of Docker Desktop, the tests fail with
+"rootless Docker not found" unless you set both of these first:
 
 ```bash
-docker compose up -d db
-cd api && make dev
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
+
+Set env values in a test with `t.Setenv`. Don't write a second `.env`: the first one read wins for
+the whole test binary.

@@ -7,16 +7,11 @@ import (
 	"landing-api/conf"
 )
 
-// Config loading reads process env, so these cases cannot use t.Parallel: t.Setenv panics in a
-// parallel test. Same documented exception as psyfint_v2_back's conf/config_test.go. A scratch
-// .env is deliberately not used either: conf.LoadEnvFile is sync.Once guarded, so only the first
-// read would ever take effect for the whole test binary.
+// No scratch .env: LoadEnvFile runs once per test binary, so only the first one would count.
 //
 //nolint:paralleltest // t.Setenv is incompatible with t.Parallel
 func TestLoadJWTSecretValidation(t *testing.T) {
-	// setProductionPrereqs satisfies every OTHER validation Load enforces outside development,
-	// so each subtest's outcome depends only on JWT_SECRET rather than on drift in an unrelated
-	// check this test does not care about.
+	// setProductionPrereqs satisfies every other check, so each subtest depends only on JWT_SECRET.
 	setProductionPrereqs := func(t *testing.T) {
 		t.Helper()
 		t.Setenv("APP_ENV", "production")

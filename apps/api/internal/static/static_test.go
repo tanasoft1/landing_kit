@@ -6,9 +6,7 @@ import (
 	"landing-api/internal/static"
 )
 
-// A fresh clone (and CI) never has more than dist/.placeholder committed, so HasSite must read
-// false there. If this ever reads true against a clean checkout, `all:dist` picked up a build
-// artifact that got committed by mistake.
+// A clean checkout has only dist/.placeholder. If this fails, a build artifact was committed.
 func TestHasSiteFalseOnFreshClone(t *testing.T) {
 	t.Parallel()
 

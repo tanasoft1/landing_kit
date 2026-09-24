@@ -13,8 +13,7 @@ import {
 } from './generate.mjs'
 import { parseArgs, resolveAnswers } from './prompts.mjs'
 
-// The package root, one level up from `cli/`. Under `pnpm dlx` that is the unpacked tarball, so
-// the kit being copied is always the published one — never anything in the user's own tree.
+// The package root. Under `pnpm dlx` this is the unpacked tarball, never the user's own tree.
 const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const HELP = `landing-kit — scaffold a bilingual landing site
@@ -34,7 +33,8 @@ Options:
   --pages=multi|one          Multi-page or one-page          (default: multi)
   --theme=both|light|dark    Toggle, or pin one palette      (default: both)
   --preset=editorial|warm    Token preset                    (default: editorial)
-  --backend=none|api         Static site, or +Go service     (default: none)
+  --backend=none|api|admin   Static site, +Go service,       (default: none)
+                             +admin panel for reading leads
   --blocks=a,b,c             Blocks to include               (default: all four)
                              Not a free choice — see Blocks below
   --add-blocks=a,b           Blocks of your own, any number  (default: none)
@@ -85,11 +85,7 @@ const list = (v) =>
         .map((s) => s.trim())
         .filter(Boolean)
 
-/**
- * `pnpm fix` is only in the next steps when the new files were NOT formatted — which is the
- * pre-`pnpm install` case. Printing it unconditionally trains people to run a fix step that has
- * nothing to do, and hides the one time it matters.
- */
+/** `pnpm fix` is listed only when the new files were not formatted (before `pnpm install`). */
 const verifyStep = (formatted) =>
   formatted.ran ? 'pnpm verify' : `pnpm fix && pnpm verify   (${formatted.why})`
 
@@ -156,6 +152,68 @@ function runSubcommand(cmd, argv) {
 `)
 }
 
+/**
+ * The steps printed at the end. For `admin` they cover Postgres, `.env`, the API and
+ * `make seed-admin`, which prompts for the password. Migrations run at startup, so there is no
+ * migrate step. `make run`, not `make dev`, because `air` is optional.
+ */
+function nextSteps(answers) {
+  const backend = answers.backend ?? 'none'
+  const lines = [`  cd ${answers.dir}`, '  pnpm install']
+
+  if (backend === 'none') {
+    lines.push('  pnpm dev')
+  } else {
+    lines.push(
+      '  cp api/.env.example api/.env',
+      '  docker compose up -d db          # Postgres, on host port 5433',
+      '  (cd api && make run)             # the API on :3000 — migrations run at startup',
+      '  pnpm dev                         # the site on :5173',
+    )
+  }
+
+  const notes = []
+  if (backend === 'admin') {
+    notes.push(
+      '',
+      '  Create the first admin account — there is no sign-up screen:',
+      '',
+      '    cd api && make seed-admin email=you@example.mn',
+      '',
+      '  It prompts for the password with echo off; there is no `password=` to pass, on',
+      '  purpose. Minimum 12 characters. Then open /admin and sign in.',
+    )
+  }
+  if (backend !== 'none') {
+    // Absolute for `api`, which goes through CORS. Relative for `admin`, which is same-origin.
+    const admin = backend === 'admin'
+    notes.push(
+      '',
+      '  The contact form posts nowhere until you point it at the service. In a .env at',
+      '  the project root:',
+      '',
+      `    VITE_CONTACT_ENDPOINT=${admin ? '/api/leads' : 'http://localhost:3000/api/leads'}`,
+      '',
+      admin
+        ? '  Relative, because your vite.config.ts proxies /api to :3000 in development and'
+        : '  Absolute, because the site and the API are separate origins and the form reaches',
+      admin
+        ? '  the Go binary serves the site and the API together in production.'
+        : '  the service through CORS. api/README.md covers that side.',
+    )
+  }
+
+  return [
+    '',
+    ...lines,
+    ...notes,
+    '',
+    '  Then set `url` in src/config/site.config.ts to your real domain.',
+    '  `pnpm verify` fails until you do.',
+    '',
+  ].join('\n')
+}
+
 async function main() {
   const cmd = process.argv[2]
   if (cmd === 'add-block' || cmd === 'add-page') {
@@ -168,27 +226,18 @@ async function main() {
     console.log(HELP)
     return
   }
-  // Before the first question, not just before the first write. This reconciles each block's
-  // `requires.blocks` against the `target`s in its own copy files and throws if they disagree —
-  // the prompt is about to offer or refuse combinations on the strength of that declaration, and a
-  // declaration that has drifted from the copy would make it offer one the CLI then rejects.
-  // Unconditional, so `--yes` and the flag path prove it too; those are the only paths CI runs.
+  // Check each block's `requires.blocks` against its copy before asking anything, so the prompt
+  // never offers a combination the CLI then rejects.
   const blockDeps = readBlockDeps(KIT_ROOT)
 
   const answers = await resolveAnswers(process.argv, blockDeps)
   const outDir = resolve(process.cwd(), answers.dir)
   const kitVersion = readKitVersion(KIT_ROOT)
 
-  // Before the copy layer, not inside the generate layer: this rejects the ANSWERS, and answers
-  // that cannot produce a working site should never reach the point of creating a directory. With
-  // this inside `generateFiles` the target held 60-odd copied files before the throw, and only the
-  // rollback made that invisible — correct, but not what "refuses before anything is written" says.
+  // Reject answers that can't build before anything is written.
   assertBlockLinksResolve(KIT_ROOT, answers)
 
-  // Read BEFORE the first write, and shared by both phases. `copyKit` proves the target empty and
-  // rolls its own failures back; a failure in `generateFiles` would otherwise leave a target that
-  // is complete enough to look finished and non-empty enough to block the next run — the same
-  // wedge the copy layer's rollback exists to prevent, one layer up.
+  // Checked before the first write, so a failure in `generateFiles` can roll the target back.
   const preexisting = existsSync(outDir)
   const written = copyKit(KIT_ROOT, outDir, answers)
   try {
@@ -198,23 +247,13 @@ async function main() {
     throw err
   }
 
-  // Last, after every other write has succeeded: this is the one edit outside the target
-  // directory, so it must never happen for a run that then fails. It is deliberately outside the
-  // rollback above — that is what "last" buys.
+  // Last, and outside the rollback: this is the only edit outside the target directory.
   const workspace = registerInWorkspace(outDir)
 
   console.log(`\n✓ Created ${answers.dir}/ — ${written.length} files`)
   if (workspace.message) console.log(workspace.message)
-  console.log(`
-  cd ${answers.dir}
-  pnpm install
-  pnpm dev
-
-  Then set \`url\` in src/config/site.config.ts to your real domain.
-  \`pnpm verify\` fails until you do.
-`)
-  // Named one per line, because these are the only files in the whole scaffold that hold text
-  // nobody wrote. Left unsaid, the placeholder headings ship.
+  console.log(nextSteps(answers))
+  // Listed one per line: these are the only files holding placeholder text nobody wrote.
   if (answers.custom.length > 0) {
     console.log(
       `  Your own blocks are on the home page with placeholder text. Write their copy in:`,

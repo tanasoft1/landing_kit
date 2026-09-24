@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"landing-api/conf"
 	"landing-api/internal/db/dbsetup"
@@ -24,12 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// main does nothing but map run's error to an exit code.
-//
-// The work lives in run so that `defer` still executes on the failure path: os.Exit skips
-// deferred calls, so a `log.Fatalf` or a bare os.Exit inside the body would leak whatever later
-// tasks in this plan register a defer for, starting with the pgx pool in task 2. psyfint_v2_back
-// calls log.Fatalf inline and does not have this split.
+// main only maps run's error to an exit code. os.Exit skips defers, so the work lives in run.
 func main() {
 	if err := run(); err != nil {
 		slog.Error("startup failed", slog.Any("err", err))
@@ -37,13 +36,7 @@ func main() {
 	}
 }
 
-// setupLogging installs the default slog handler for an environment.
-//
-// Split out and called BEFORE conf.Load so that a config failure, which is the single most
-// important line this service ever logs, is emitted in the format the rest of the service
-// promises. Configured after Load, that one line goes through slog's built-in default handler
-// instead: stderr, stdlib text format, no source, even when APP_ENV=production promises JSON on
-// stdout. That is exactly the line a JSON-only log pipeline drops.
+// setupLogging runs before conf.Load, so a config error is logged in the environment's format.
 func setupLogging(appEnv string) {
 	opts := &slog.HandlerOptions{
 		AddSource: true,
@@ -66,14 +59,7 @@ func setupLogging(appEnv string) {
 }
 
 func run() error {
-	// .env is read before the log handler is chosen, not after. APP_ENV commonly lives only in
-	// .env, and conf.Load is what used to read that file, so configuring logging from a value
-	// read before Load locked the development text format in for the entire process whenever
-	// APP_ENV came from the file rather than the shell.
-	//
-	// A malformed .env is still reported through slog's built-in default handler, because the
-	// file that says which format to use is the file that failed to parse. That is unavoidable
-	// and much rarer than a misread APP_ENV.
+	// Read .env before choosing the log handler, because APP_ENV often lives only in .env.
 	if err := conf.LoadEnvFile(); err != nil {
 		return fmt.Errorf("load .env: %w", err)
 	}
@@ -92,24 +78,17 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
-	// This defer is the reason main is split into main plus run. os.Exit skips deferred calls,
-	// so returning an error is what lets the pool close on every failure path below.
 	defer pool.Close()
 
-	// Dispatched before the notifier or the HTTP server are built, following habido-back's
-	// `./cmd cron` pattern of branching on os.Args[1] in the same entrypoint rather than
-	// shipping a second binary. seed-admin needs nothing past this point: it reuses conf.Load
-	// and this pool so it can never disagree with the server about which database it writes to,
-	// then returns before a port is ever bound or the "database connection established" line
-	// below is logged -- so its stdout carries exactly one line, the created email.
+	// seed-admin reuses this config and pool, so it writes to the server's database. It returns
+	// before any other log line, so its stdout is only the created email.
 	if len(os.Args) > 1 && os.Args[1] == "seed-admin" {
 		return runSeedAdmin(context.Background(), pool, os.Args[2:])
 	}
 
 	slog.Info("database connection established")
 
-	// conf.Load already refuses NOTIFY_DRIVER values other than "ses" and "log" (and refuses
-	// "log" in production), so the only two cases reachable here are the two switch handles.
+	// conf.Load has already rejected any driver other than "ses" and "log".
 	var notifier notify.Notifier
 	switch cfg.Notify.Driver {
 	case "ses":
@@ -122,18 +101,31 @@ func run() error {
 	}
 
 	services := service.New(pool, notifier, cfg)
-	h := handlers.New(services)
+	h := handlers.New(services, cfg)
+
+	// Warn, not refuse: ignoring the header is the safe direction, but it is probably a mistake.
+	if cfg.Server.ProxyHeader != "" && len(cfg.Server.TrustedProxyList()) == 0 {
+		slog.Warn("PROXY_HEADER is set but TRUSTED_PROXIES is empty, so the header is ignored and "+
+			"every request is attributed to the address it arrived from: behind a proxy that is one "+
+			"shared bucket for the rate limits and one shared key for the login backoff",
+			slog.String("proxy_header", cfg.Server.ProxyHeader))
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName: "landing-api",
-		// BodyLimit is 1 MB, not psyfint's 10 MB: the largest request this service accepts is
-		// a contact form whose message field is capped at 4000 characters. A high limit on a
-		// public unauthenticated endpoint is free memory pressure for an attacker.
+		// The largest request is a contact form capped at 4000 characters.
 		BodyLimit:   1 * 1024 * 1024,
 		ProxyHeader: cfg.Server.ProxyHeader,
+		// Always on. With it off, Fiber trusts ProxyHeader from every caller, so anyone could
+		// pick their own IP and dodge the login limiter. An empty list means trust nobody.
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          cfg.Server.TrustedProxyList(),
+		// Keeps junk from a trusted proxy's header out of the audit log.
+		EnableIPValidation: true,
 	})
 
-	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService)
+	routes.Setup(app, h, cfg.Server.CORSOrigins, services.TokenService, !cfg.IsDevelopment(),
+		cfg.Server.ProxyHeader, cfg.Server.TrustedProxyList())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -141,8 +133,7 @@ func run() error {
 	addr := ":" + cfg.Server.Port
 	slog.Info("server starting", slog.String("addr", addr), slog.String("env", cfg.Server.AppEnv))
 
-	// Buffered size 1 with a single writer, so the goroutine can never block on send even if
-	// main has already stopped waiting.
+	// Buffered so the goroutine never blocks if main has stopped waiting.
 	listenErr := make(chan error, 1)
 	go func() {
 		if err := app.Listen(addr); err != nil {
@@ -150,38 +141,22 @@ func run() error {
 		}
 	}()
 
-	// Waits on BOTH, rather than waiting on ctx and then polling listenErr with a default case.
-	// The polling version had a real race: ctx has two cancellers, this goroutine and the OS
-	// signal handler, so an external SIGTERM arriving alongside a bind failure could wake main
-	// before the send landed, and the default branch then returned nil. A process that never
-	// served a request would report success. Measured at roughly one in four under contention in
-	// an isolated reproduction of that shape.
-	//
-	// Blocking on both removes the race instead of narrowing it, and the goroutine no longer
-	// needs to cancel ctx at all. psyfint_v2_back waits only on ctx and hangs forever when the
-	// port is already bound.
+	// Wait on both. Waiting on ctx alone hangs forever when the port is already bound.
 	var failure error
 	select {
 	case <-ctx.Done():
 		slog.Info("shutting down gracefully...")
-		// A bind failure and a signal can become ready in the same instant, and Go's select
-		// tie-break between two ready cases is pseudo-random. Measured at close to an even
-		// split, so without this check a coin flip decided whether a process that never served
-		// a request reported the failure it actually had. Checked, not left to chance.
+		// select picks randomly between ready cases, so check for a bind failure that arrived too.
 		select {
 		case failure = <-listenErr:
 		default:
 		}
 	case failure = <-listenErr:
-		// Nothing to cancel: main simply stops waiting.
 	}
 
-	// Runs on both paths. On a bind failure it returns nil immediately, because fasthttp checks
-	// `s.ln == nil` and Serve never ran.
+	// Safe after a bind failure too: it returns nil because Serve never ran.
 	if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
-		// Logged, not returned. A shutdown that timed out after an operator asked for one is
-		// still an intentional stop, and exiting non-zero would report failure for a requested
-		// action and make a supervisor restart what someone deliberately stopped.
+		// Logged, not returned: a non-zero exit would make a supervisor restart a deliberate stop.
 		slog.Error("shutdown error", slog.Any("err", err))
 	}
 
@@ -191,37 +166,33 @@ func run() error {
 	return nil
 }
 
-// minSeedAdminPasswordLen is the floor `./cmd seed-admin` enforces on the password it is given.
-// A different concern from conf.minJWTSecretLen: this is a human-chosen login password, not a
-// generated HMAC key, so the floor is a password-strength minimum rather than a
-// brute-force-resistance one.
 const minSeedAdminPasswordLen = 12
 
-// runSeedAdmin hashes and inserts one admin_users row. It reuses the pool run built from
-// conf.Load, rather than opening its own connection from separately parsed flags, specifically so
-// this can never point at a different database than the server this admin will log into.
-//
-// Prints nothing but the created email: not the password, not its hash, not the row's id. A
-// seeded password must never reach a terminal scrollback or a CI log, so nothing else is written
-// anywhere on the success path.
+// runSeedAdmin hashes and inserts one admin_users row. It prints only the created email.
+// The password comes from stdin, never argv, so it stays out of shell history and `ps`.
 func runSeedAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: seed-admin <email> <password>")
+	if len(args) != 1 {
+		return errors.New("usage: seed-admin <email>, with the password on stdin")
 	}
-	email, password := args[0], args[1]
+	email := args[0]
 
-	if len(password) < minSeedAdminPasswordLen {
-		return fmt.Errorf("password is %d characters, want at least %d", len(password), minSeedAdminPasswordLen)
-	}
-
-	hash, err := utils.HashPassword(password)
+	password, err := readSeedPassword(os.Stdin)
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return err
 	}
 
-	// The unique constraint on admin_users.email, not a pre-check here, is what stops a second
-	// seed of the same email from silently creating a duplicate: CreateAdmin returns this
-	// service's error unchanged, so a repeat seed fails loudly instead of succeeding twice.
+	// Count runes, not bytes: one Cyrillic character is two bytes.
+	if utf8.RuneCountInString(password) < minSeedAdminPasswordLen {
+		return fmt.Errorf("password is %d characters, want at least %d",
+			utf8.RuneCountInString(password), minSeedAdminPasswordLen)
+	}
+
+	hash, hashErr := utils.HashPassword(password)
+	if hashErr != nil {
+		return fmt.Errorf("hash password: %w", hashErr)
+	}
+
+	// The unique constraint on email makes a repeat seed fail.
 	admin, err := sqlc.New(pool).CreateAdmin(ctx, sqlc.CreateAdminParams{
 		ID:           uuid.New(),
 		Email:        email,
@@ -233,4 +204,25 @@ func runSeedAdmin(ctx context.Context, pool *pgxpool.Pool, args []string) error 
 
 	fmt.Fprintln(os.Stdout, admin.Email) //nolint:errcheck // stdout write on a CLI's success path; nothing meaningful to do if it fails
 	return nil
+}
+
+// readSeedPassword reads one line from r without its line ending. EOF with no newline is fine,
+// because the makefile pipes the password with printf '%s'. The prompt goes to stderr, only on a terminal.
+func readSeedPassword(r io.Reader) (string, error) {
+	if f, ok := r.(*os.File); ok {
+		if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+			fmt.Fprint(os.Stderr, "Password: ") //nolint:errcheck // a prompt; the read below is what matters
+		}
+	}
+
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+
+	password := strings.TrimRight(line, "\r\n")
+	if password == "" {
+		return "", errors.New("no password on stdin: pipe one in, or run `make seed-admin email=...`")
+	}
+	return password, nil
 }

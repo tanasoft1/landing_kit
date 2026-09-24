@@ -32,20 +32,10 @@ type Input struct {
 	UserAgent  string
 }
 
-// Create stores the lead, then notifies. In that order, and the notification's error is logged
-// rather than returned: the row is already committed, and failing the request would tell a real
-// visitor their message did not arrive when it did. A mail outage must not look like a broken form.
+// Create stores the lead, then notifies. A notify error is only logged: the lead is saved, and a
+// mail outage must not look like a broken form.
 func (s *Service) Create(ctx context.Context, in Input) error {
-	// *netip.Addr because that is what SQLC generated for the `inet` column: psyfint's overrides
-	// do not cover `inet`, so SQLC picked it, and it is the better type here anyway since a client
-	// address has no mask.
-	//
-	// The nil check is load-bearing, not defensive habit. Postgres rejects an empty string bound
-	// to an inet column with SQLSTATE 22P02, `invalid input syntax for type inet: ""`, verified
-	// against a live server. Fiber's c.IP() returns "" whenever ProxyHeader names a header that
-	// does not arrive (see conf.ServerConfig.ProxyHeader), so passing it straight through turns
-	// every submission behind a misconfigured proxy into a 500 from a SQL error instead of a
-	// stored lead with a blank IP. netip.ParseAddr("") returns an error, so this leaves it NULL.
+	// An unparseable IP is stored as NULL. Postgres rejects "" for an inet column.
 	var ip *netip.Addr
 	if parsed, err := netip.ParseAddr(in.IP); err == nil {
 		ip = &parsed
@@ -82,16 +72,20 @@ func (s *Service) Create(ctx context.Context, in Input) error {
 	return nil
 }
 
-// List returns leads newest-first as models.RsLead. limit and offset are used exactly as given:
-// capping the page size is the caller's job (see the clamp in
-// internal/http/handlers/lead.Handler.List), because only the caller knows whether limit arrived
-// from a trusted source or an admin-supplied query string.
-func (s *Service) List(ctx context.Context, limit, offset int32) ([]models.RsLead, error) {
+// List returns one page of leads, newest first, plus the total row count. The caller caps limit.
+// The two queries use different snapshots, so Total can be slightly off.
+func (s *Service) List(ctx context.Context, limit, offset int32) (*models.RsLeadPage, error) {
 	rows, err := s.q.ListLeads(ctx, sqlc.ListLeadsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("list leads: %w", err)
 	}
 
+	total, err := s.q.CountLeads(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count leads: %w", err)
+	}
+
+	// Never nil: a nil slice marshals to null and breaks the client on an empty inbox.
 	leads := make([]models.RsLead, 0, len(rows))
 	for _, row := range rows {
 		lead := models.RsLead{
@@ -113,5 +107,5 @@ func (s *Service) List(ctx context.Context, limit, offset int32) ([]models.RsLea
 		}
 		leads = append(leads, lead)
 	}
-	return leads, nil
+	return &models.RsLeadPage{Items: leads, Total: total}, nil
 }

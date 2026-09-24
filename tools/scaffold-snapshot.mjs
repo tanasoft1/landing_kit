@@ -1,17 +1,12 @@
 #!/usr/bin/env node
 /**
- * Proves the monorepo restructure changes nothing a scaffolded project sees.
+ * Hashes every file of a real scaffold, per answer set, and compares with the recorded baseline.
+ * It catches a copy transform that quietly stopped firing, which a hand-read diff misses.
  *
- * The kit has no unit tests, and the thing this phase must not break is ~90 generated files
- * across several answer combinations. A hand-read diff will not catch a copy-layer transform
- * that quietly stopped firing: the file is still written, just with the kit's own prose in it.
- *
- * So: hash every file of a real scaffold, per answer set, and compare. `record` writes the
- * baseline; `check` fails on any drift. Not in `package.json`'s `files`: this is maintainer
- * tooling, like the rest of `tools/`.
- *
- * Usage:  node tools/scaffold-snapshot.mjs record [variant]
+ * Usage:  node tools/scaffold-snapshot.mjs record <variant>|--all-profiles
  *         node tools/scaffold-snapshot.mjs check  [variant]
+ *
+ * A bare `record` is refused. Every `record` prints what it changed.
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -32,25 +27,12 @@ const KIT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SNAP_DIR = join(KIT_ROOT, 'tools/__snapshots__')
 
 /**
- * Five answer sets, chosen to reach every branch the copy and generate layers have:
- * `theme` pinned dark and pinned light as well as `both` (the answer picks a boundary file AND
- * edits biome.json and token-gallery, and only `dark` puts a class on <html>),
- * both presets (which filters `src/styles/presets`), a block subset, custom blocks
- * (which runs the add-block templates at scaffold time), and a backend.
+ * Six answer sets, covering theme, preset, block subsets, custom blocks, `--backend=api` and
+ * `--backend=admin`. Only `admin` gets the panel. If an admin-side change moves any of the other
+ * five, that is panel content leaking into projects that declined it, not a snapshot to refresh.
  *
- * `--yes` is on every set, including the ones that pass explicit flags. Not redundant: this runs
- * non-interactively, so a question left unanswered exits with "Input ended before every question
- * was answered", and a block subset leaves each block's LAYOUT question unanswered. An explicit
- * flag still wins over `--yes` (cli/prompts.mjs checks `flags[name]` first), so `--yes` only
- * fills the gaps the flags leave.
- *
- * `hero` requires `contact` and `cta` requires `contact` + `features`, so a subset that leaves
- * a link unresolved is refused by the CLI before it writes anything. The two subsets below are
- * both legal combinations.
- *
- * `backend` is the only variant not covered by `default`, `onepage`, `custom` or `subset`: all
- * four of those take the default `--backend=none`, so this is the one exercising the API tree,
- * `docker-compose.yml` and the Go scripts in `package.json`.
+ * `--yes` is on every set, so questions the flags don't answer take their defaults instead of
+ * failing. Both subsets are legal: `hero` needs `contact`, and `cta` needs `contact` and `features`.
  */
 const VARIANTS = {
   default: ['--yes'],
@@ -58,35 +40,20 @@ const VARIANTS = {
   custom: ['--yes', '--add-blocks=pricing,faq'],
   subset: ['--yes', '--blocks=features,contact', '--theme=light'],
   backend: ['--yes', '--backend=api'],
+  admin: ['--yes', '--backend=admin'],
 }
 
 /**
- * The one file whose bytes cannot be stable here, and the three fields that make it so:
- * `generatedAt` is the wall clock, `answers.dir` is the scaffold target, which is a fresh
- * `mkdtemp` path on every call, and `kitVersion` is whatever `package.json` says today. Hashed
- * raw, every variant reports drift on every run, and on every release, for reasons that have
- * nothing to do with drift.
- *
- * `kitVersion` is the least obvious of the three. It moves on a release schedule that has
- * nothing to do with the copy layer this tool guards, so hashing it makes `npm version` look
- * identical to a real regression. That is not merely untidy: `.github/workflows/release.yml`
- * gates its publish job on `verify`, so a bump without a re-record blocks the release it was
- * meant to cut.
- *
- * Normalised rather than skipped, because blanking a field is not the same as ignoring it. A
- * scaffold that stopped writing any of the three would leave the pattern unmatched and the
- * placeholder missing, so the hash still moves and the check still fails. That regression is
- * the reason this file is read at all, and it stays caught.
+ * `.kit/scaffold.json` holds three fields that change every run: `generatedAt` (the clock),
+ * `answers.dir` (a temp path) and `kitVersion` (bumped per release). They are replaced with fixed
+ * values, not skipped, so a scaffold that stops writing them still fails the check.
  */
 const SCAFFOLD_RECORD = '.kit/scaffold.json'
 
 function normalise(rel, buf) {
   if (rel !== SCAFFOLD_RECORD) return buf
-  // String substitution, not `JSON.parse` plus re-stringify. `generate.mjs` writes this file
-  // with its own fits-or-expands formatter, and a round trip through `JSON.stringify` rewrites
-  // every line of it. That would hide a change to that formatter behind a normalisation meant
-  // only to hide a clock, a temp path, and a version number. A pattern that stops matching leaves the raw value in
-  // place, so this fails loudly rather than passing quietly.
+  // String substitution, not a JSON round trip, which would reformat every line and hide a change
+  // to generate.mjs's formatter. A pattern that stops matching leaves the raw value, so it fails.
   return Buffer.from(
     buf
       .toString('utf8')
@@ -116,11 +83,8 @@ function hashTree(dir) {
 }
 
 /**
- * Scaffolds into a fresh temp directory and returns path -> sha256.
- *
- * The target's PARENT is the temp dir and not the kit, on purpose: `registerInWorkspace` writes
- * a `pnpm-workspace.yaml` beside the target, and pointing that at the kit's own workspace file
- * would have this tool edit the repo it is testing.
+ * Scaffolds into a fresh temp directory and returns path -> sha256. The target's parent is the temp
+ * dir, so `registerInWorkspace` never edits the kit's own workspace file.
  */
 function scaffold(args) {
   const tmp = mkdtempSync(join(tmpdir(), 'lk-snap-'))
@@ -139,22 +103,74 @@ function scaffold(args) {
 }
 
 function diff(expected, actual) {
-  const problems = []
+  const missing = []
+  const changed = []
+  const added = []
   for (const [path, hash] of Object.entries(expected)) {
-    if (!(path in actual)) problems.push(`  missing   ${path}`)
-    else if (actual[path] !== hash) problems.push(`  changed   ${path}`)
+    if (!(path in actual)) missing.push(path)
+    else if (actual[path] !== hash) changed.push(path)
   }
   for (const path of Object.keys(actual)) {
-    if (!(path in expected)) problems.push(`  new       ${path}`)
+    if (!(path in expected)) added.push(path)
   }
-  return problems.sort()
+  const total = missing.length + changed.length + added.length
+  return { missing: missing.sort(), changed: changed.sort(), added: added.sort(), total }
 }
 
-const [, , mode, only] = process.argv
+/** Every path in a diff, one per line, labelled. Capped so a re-record is short enough to read. */
+const SHOWN = 25
+
+function formatDiff(d, indent) {
+  const lines = []
+  for (const [label, paths] of [
+    ['new    ', d.added],
+    ['missing', d.missing],
+    ['changed', d.changed],
+  ]) {
+    for (const p of paths.slice(0, SHOWN)) lines.push(`${indent}${label}  ${p}`)
+  }
+  if (d.total > lines.length) lines.push(`${indent}… and ${d.total - lines.length} more`)
+  return lines
+}
+
+const counts = (d) => `+${d.added.length} -${d.missing.length} ~${d.changed.length}`
+
+// `--all-profiles` is hard to type on purpose: re-recording the non-admin profiles is how a panel
+// leak would become the baseline.
+const ALL = '--all-profiles'
+
+const [, , mode, ...rest] = process.argv
+const USAGE =
+  'Usage: node tools/scaffold-snapshot.mjs record <variant>|--all-profiles\n' +
+  '       node tools/scaffold-snapshot.mjs check  [variant]'
 if (mode !== 'record' && mode !== 'check') {
-  console.error('Usage: node tools/scaffold-snapshot.mjs record|check [variant]')
+  console.error(USAGE)
   process.exit(2)
 }
+
+const only = rest.find((a) => a !== ALL)
+const all = rest.includes(ALL)
+
+// A bare `record` would re-record all six profiles, so it refuses.
+if (mode === 'record' && !only && !all) {
+  console.error(
+    `Refusing a bare 'record'. It would rewrite all ${Object.keys(VARIANTS).length} profiles:\n` +
+      Object.keys(VARIANTS)
+        .map((n) => `  ${n}`)
+        .join('\n') +
+      '\n\nFive of those prove the NEGATIVE — that a project which declined the admin panel ' +
+      'receives\nno trace of it. Re-recording them turns panel content leaking into every ' +
+      'scaffold from a\nfailure into the baseline, and prints nothing that says so.\n\n' +
+      `Name the one profile you meant:   node tools/scaffold-snapshot.mjs record ${Object.keys(VARIANTS)[0]}\n` +
+      `Or, if you really mean all of them:   node tools/scaffold-snapshot.mjs record ${ALL}`,
+  )
+  process.exit(2)
+}
+if (mode === 'check' && all) {
+  console.error(`${ALL} is a 'record' option; 'check' already checks every profile by default.`)
+  process.exit(2)
+}
+
 const names = only ? [only] : Object.keys(VARIANTS)
 for (const name of names) {
   if (!VARIANTS[name])
@@ -163,30 +179,45 @@ for (const name of names) {
 
 mkdirSync(SNAP_DIR, { recursive: true })
 let failed = false
+let recordedAnyChange = false
 for (const name of names) {
   const file = join(SNAP_DIR, `${name}.json`)
   const actual = scaffold(VARIANTS[name])
   if (mode === 'record') {
+    // The diff is computed before the write and printed after, so a re-record says what it blessed.
+    const previous = existsSync(file) ? diff(JSON.parse(readFileSync(file, 'utf8')), actual) : null
     writeFileSync(file, `${JSON.stringify(actual, null, 2)}\n`)
-    console.log(`recorded  ${name}  (${Object.keys(actual).length} files)`)
+    const shape = previous === null ? 'new snapshot' : counts(previous)
+    console.log(`recorded  ${name}  (${Object.keys(actual).length} files, ${shape})`)
+    if (previous && previous.total > 0) {
+      recordedAnyChange = true
+      for (const line of formatDiff(previous, '  ')) console.log(line)
+    }
     continue
   }
   if (!existsSync(file))
     throw new Error(
       `No snapshot for '${name}'. Run: node tools/scaffold-snapshot.mjs record ${name}`,
     )
-  const problems = diff(JSON.parse(readFileSync(file, 'utf8')), actual)
-  if (problems.length === 0) {
+  const d = diff(JSON.parse(readFileSync(file, 'utf8')), actual)
+  if (d.total === 0) {
     console.log(`ok        ${name}  (${Object.keys(actual).length} files)`)
     continue
   }
   failed = true
-  console.error(`DRIFT     ${name}`)
-  for (const p of problems) console.error(p)
+  console.error(`DRIFT     ${name}  (${counts(d)})`)
+  for (const line of formatDiff(d, '  ')) console.error(line)
+}
+if (recordedAnyChange) {
+  console.log(
+    '\nRead the lines above before committing them. A path under src/admin, src/routes/admin,\n' +
+      'or any file appearing in a profile other than `admin`, is panel content reaching a ' +
+      'project\nthat declined the panel — the regression these snapshots exist to catch.',
+  )
 }
 if (failed) {
   console.error(
-    '\nScaffold output changed. If the change is intended, re-record and review the diff.',
+    '\nScaffold output changed. If the change is intended, re-record BY NAME and review the diff.',
   )
   process.exit(1)
 }

@@ -3,21 +3,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path'
 
 /**
- * `add-block` and `add-page`, run INSIDE a generated project rather than against the kit.
- *
- * Everything here edits files the developer owns and may already have changed, so every edit is
- * anchored to structure that must exist for the project to compile at all (an object literal's
- * opening line, an import group), never to exact prose. Each anchor throws by name when it is
- * missing, because the alternative — writing five new files and silently failing to register
- * them — is the exact failure this command exists to remove.
- *
- * No write happens until every edit has been computed. A half-added block (folder on disk,
- * registry untouched) fails `pnpm verify` in a way that reads like the developer's mistake.
+ * `add-block` and `add-page`, run inside a generated project. Every edit is anchored to code the
+ * project needs to compile, and throws by name if the anchor is missing. Nothing is written until
+ * every edit is computed, so a failure never leaves a half-added block.
  */
 
-// Object keys and the manifest's exported const share this name, so it has to be a valid
-// identifier AND a valid folder name with no quoting anywhere. Dashes would need quoting in four
-// object literals and a different casing for the export; refusing them is cheaper than that.
+// Used as an object key, an export name and a folder name, so no dashes or quoting.
 const NAME_RULE = /^[a-z][a-z0-9]*$/
 
 /** The reason `name` is unusable, or null. Shared with the scaffolding prompt, which shows it. */
@@ -36,31 +27,18 @@ function assertName(name, what) {
 }
 
 /**
- * Names a BLOCK cannot have, on top of the character rule.
- *
- * A block id is written into generated code as a binding: `import { faq } from './faq/block'`.
- * Two groups of words break that, and both produce a project that will not compile, from a name
- * the CLI accepted:
- *
- *   - reserved words. `import { default } from './default/block'` is a syntax error.
- *   - the identifiers `registry.ts`, `block-modules.ts` and `variants.all.ts` already declare.
- *     A block named `registry` collides with the exported `registry` const in the same file.
- *
- * Both were reproduced before this list existed. It applies to block names only — variant names
- * become object keys and component-name fragments, where `default` is fine, and the kit's own
- * contact block has a variant called exactly that.
+ * Names a block cannot have. A block id becomes an import binding, so reserved words and the names
+ * `registry.ts`, `block-modules.ts` and `variants.all.ts` already declare would not compile.
+ * Variant names don't have this limit.
  */
 const RESERVED_BLOCK_NAMES = new Set([
-  // Reserved words, plus the strict-mode and module-scope ones. Only lowercase spellings can
-  // reach here: the character rule already refuses a leading capital.
+  // Reserved words, plus the strict-mode and module-scope ones. Lowercase only: the character rule
+  // refuses capitals.
   ...`await break case catch class const continue debugger default delete do else enum export
       extends false finally for function if implements import in instanceof interface let new null
       package private protected public return static super switch this throw true try typeof var
       void while with yield`.split(/\s+/),
-  // Declared by the files that would import the block. `blockModules` and `registerVariants` are
-  // declared there too and are deliberately NOT listed: the character rule refuses a capital
-  // letter, so no name that reaches here can collide with them, and an entry that can never fire
-  // is an entry nobody can trust.
+  // Declared by the files that import the block. Names with capitals can't reach here.
   'all',
   'manifests',
   'registry',
@@ -84,24 +62,9 @@ export function blockNameProblem(name) {
 const pascal = (s) => s[0].toUpperCase() + s.slice(1)
 
 /**
- * The project root the command is being run from, proved by the files it is about to edit.
- *
- * This test is positive (proving a generated project) rather than negative (refusing the kit),
- * and that is not a style choice: a negative test here already failed silently once. It used to
- * check for `cli/kit-manifest.mjs` next to the cwd, which held only while the kit's own template
- * was the repo root, so `cli/` sat beside `src/blocks/`. Once the template moved to `apps/web/`,
- * that file was never in a generated project's ancestry to begin with, and the check kept
- * "passing" (silently stopped guarding) while looking exactly as it did when it worked. Measured,
- * by doing it: the block landed in the kit's own registry, from where every future scaffold would
- * have shipped it. A guard that can go quiet like that is worse than no guard, because it looks
- * present on every future read of this file.
- *
- * `.kit/scaffold.json` is written by `generateFiles` into every generated project unconditionally,
- * and survives `git init` because the generated `.gitignore` un-ignores it specifically
- * (`.kit/*` then `!.kit/scaffold.json`), so its absence proves "not a generated project" however
- * the repo that holds the template is laid out today or gets laid out next. The kit's own
- * `apps/web/.kit/` exists but holds only build artifacts (`build-stamp.json`, `urls.json`), never
- * `scaffold.json`, so standing in the kit's template still refuses here.
+ * The project root, proved by `.kit/scaffold.json`, which every generated project has and the
+ * kit's own template never does. A positive test on purpose: an earlier "not the kit" test went
+ * quiet after a move and let a block land in the kit's own registry.
  */
 function projectRoot() {
   const cwd = process.cwd()
@@ -143,16 +106,8 @@ const specifier = (l) => SINGLE_LINE_IMPORT.exec(l)?.[1] ?? ''
 const importRank = (s) => (s.startsWith('.') ? 2 : s.startsWith('@/') ? 1 : 0)
 
 /**
- * Re-sort the file's leading run of imports the way `organizeImports` would.
- *
- * Sorting the WHOLE run, not just the sibling group being extended: `./testimonials/variants`
- * sorts after `./registry`, so a group-local sort placed it correctly relative to its siblings
- * and wrongly relative to everything else. Measured — `pnpm verify` failed on exactly that line
- * while the new block itself was fine.
- *
- * Skipped entirely if the run holds anything but single-line imports. A multi-line import would
- * be shredded by line-based sorting, and a command that corrupts a file the developer wrote is
- * far worse than one that leaves a lint error `pnpm fix` clears.
+ * Re-sort the file's leading imports the way `organizeImports` would: the whole run, not one group.
+ * Skipped if any import spans lines, because line-based sorting would break it.
  */
 function sortImportBlock(lines) {
   let end = 0
@@ -168,11 +123,8 @@ function sortImportBlock(lines) {
 }
 
 /**
- * Add `line` to the import group whose lines match `pattern`, then re-sort the whole run.
- *
- * `pattern` is not just a place to insert — it is the assertion that this file still has the
- * import group the command knows how to extend. A file restructured past recognition should
- * throw here rather than get an import appended somewhere arbitrary.
+ * Add `line` to the import group matching `pattern`, then re-sort. Throws if the group is gone,
+ * rather than appending somewhere arbitrary.
  */
 function insertSortedImport(lines, pattern, line, rel) {
   const last = lines.reduce((acc, l, i) => (pattern.test(l) ? i : acc), -1)
@@ -187,11 +139,8 @@ function insertSortedImport(lines, pattern, line, rel) {
 }
 
 /**
- * Append `entry` as the last `  name,` line of the object literal opened by `openPattern`.
- *
- * Anchored to the last existing entry rather than to the closing brace: both objects in
- * `registry.ts` carry trailing comments before their `}`, and inserting after those would put the
- * new key below a comment that explains the line above it.
+ * Append `entry` after the last `  name,` line of the object opened by `openPattern`. Not before the
+ * closing brace, because comments sit there.
  */
 function appendObjectEntry(lines, openPattern, entry, rel, label) {
   const open = lines.findIndex((l) => openPattern.test(l))
@@ -215,17 +164,8 @@ function appendObjectEntry(lines, openPattern, entry, rel, label) {
 }
 
 /**
- * Format the touched files with the PROJECT's own Biome, not with rules restated here.
- *
- * Templates cannot predict the formatter: whether `pricing: () => import(…)` fits on one line
- * depends on the block's name length against `lineWidth`, so the same template is correctly
- * formatted for one name and wrong for another. Both were measured — `testimonials` wraps,
- * `pricing` does not, and hand-emulating that in a string template is a second copy of Biome's
- * line-breaking rules that will drift from the real one.
- *
- * Best-effort by design. Before `pnpm install` there is no Biome to run, which is a normal state
- * for a project someone just scaffolded — the caller reports that and points at `pnpm fix`
- * instead of failing work that is already correctly written.
+ * Format the touched files with the project's own Biome, since line breaks depend on name length.
+ * Best-effort: before `pnpm install` there is no Biome, and the caller points at `pnpm fix`.
  */
 function formatFiles(root, files) {
   const bin = join(root, 'node_modules/.bin/biome')
@@ -238,19 +178,14 @@ function formatFiles(root, files) {
 
 // --- templates ----------------------------------------------------------------------------------
 
-/**
- * The files a new block folder is made of. Exported because the scaffolder writes these too: a
- * block typed into the "add your own" row at scaffold time and one added later with `add-block`
- * must be the same thing, and two copies of these templates would drift.
- */
+/** The files a new block folder is made of. Exported so the scaffolder writes the same files. */
 export function blockFiles(id, variants) {
   const Copy = `${pascal(id)}Copy`
   const Variant = `${pascal(id)}Variant`
   const compName = (v) => `${pascal(id)}${pascal(v)}`
 
   const files = {
-    // Both languages in one file, with the type they share. Declaring the type once and typing
-    // both exports against it is what makes a missing translation a compile error.
+    // One shared type for both languages, so a missing translation is a compile error.
     'copy.ts': `export type ${Copy} = {
   heading: string
   lead: string
@@ -266,9 +201,8 @@ export const en: ${Copy} = {
   lead: 'Write the description here.',
 }
 `,
-    // Named imports are sorted too, ignoring the `type` keyword and the case, so where the copy
-    // type falls depends on the block's name: `{ type CtaCopy, en, mn }` but
-    // `{ en, type FaqCopy, mn }`. Hardcoding one order fails `pnpm lint` for a third of all names.
+    // Named imports are sorted ignoring `type` and case, so the copy type's position depends on the
+    // block's name.
     'block.ts': `import type { BlockManifest } from '@/lib/types'
 import { ${['en', 'mn', Copy]
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
@@ -290,11 +224,8 @@ export const ${id} = {
   // Add \`requires: { blocks: ['contact'] }\` if this block's copy links to another block.
 } satisfies BlockManifest<${Copy}, ${Variant}>
 `,
-    // The relative imports are sorted by specifier, the way `organizeImports` wants them, rather
-    // than written in a fixed order. Hardcoding one order was wrong for every block — `./block`
-    // sorts before `./copy` — and it went unnoticed because `add-block` runs Biome over its own
-    // output straight afterwards. The scaffolder cannot: a project one second old has no Biome
-    // installed yet, so `pnpm verify` was the thing that reported it.
+    // Relative imports sorted by specifier, as `organizeImports` wants. A fresh scaffold has no
+    // Biome yet to fix the order.
     'variants.ts': `import type { ComponentType } from 'react'
 import type { BlockProps } from '@/lib/types'
 ${[
@@ -315,10 +246,8 @@ ${variants.map((v) => `  ${v}: ${compName(v)},`).join('\n')}
   }
 
   for (const v of variants) {
-    // Biome keeps the destructured props on one line while they fit in 100 columns and breaks them
-    // one-per-line when they do not, and which side a block lands on depends only on the length of
-    // its name — `PricingSimple` fits, `TestimonialsSimple` does not. Same rule as
-    // `blockModuleEntry` in generate.mjs, and the same reason: a scaffold has no Biome yet.
+    // Biome puts the props one per line past 100 columns, which depends on the name length. A fresh
+    // scaffold has no Biome yet, so this matches it by hand.
     const signature = `export function ${compName(v)}({ copy, surface, anchorId, headingLevel }: BlockProps<${Copy}>) {`
     files[`${id}-${v}.tsx`] = `import { Container } from '@/components/layout/container'
 import { Section } from '@/components/layout/section'
@@ -374,10 +303,8 @@ export function addBlock(id, variants) {
     throw new Error(`'${id}' is already registered in src/blocks/registry.ts.`)
   }
 
-  // Projects scaffolded before block folders were reshaped import `./<id>/manifest`, so every
-  // anchor below misses. Named here rather than left to the generic "no import matching …" throw,
-  // which reads as though the developer had broken their own file. Detected on the registry, not
-  // on a version in `.kit/scaffold.json`: the file being edited is the thing that has to match.
+  // Projects from before the block folder reshape import `./<id>/manifest`. Say so plainly instead
+  // of a generic anchor error.
   if (/from '\.\/[\w-]+\/manifest'/.test(registrySrc)) {
     throw new Error(
       `this project was created by an older version of the kit, where a block's metadata lived ` +
@@ -389,8 +316,7 @@ export function addBlock(id, variants) {
     )
   }
 
-  // Every edit computed before the first write: a folder created next to an unregistered
-  // registry is the half-finished state this command exists to prevent.
+  // Every edit computed before the first write.
   const edits = []
 
   {
@@ -484,10 +410,7 @@ export function addPage(id, opts) {
   }
 
   const available = existingBlocks(root)
-  // A page needs at least one block: with none it renders an empty document and `pnpm verify`
-  // fails it for having no <h1>. Any block already in the project is a safe default — the
-  // scaffold proved every block's copy links resolve somewhere in `pages.config.ts`, and a block
-  // id resolves against the whole config, not just the page it sits on.
+  // A page needs at least one block, or it has no <h1>. Any existing block is a safe default.
   const fallbackBlock = available.includes('features') ? 'features' : available[0]
   const blocks = opts.blocks?.length ? opts.blocks : [fallbackBlock]
   for (const b of blocks) {
@@ -496,10 +419,8 @@ export function addPage(id, opts) {
     }
   }
 
-  // The two locales must DIFFER, for the title and the description alike: `verify-build.mjs`
-  // fails a build where two locales share either, because that is the duplicate-content defect it
-  // exists to catch. So the defaults are per-locale placeholders rather than one shared string —
-  // defaulting both to the page id was measured handing back a project that failed its own gate.
+  // The two languages must differ in title and description, or verify-build fails the page as
+  // duplicate content. So the placeholders differ per language.
   const titleMn = opts.titleMn ?? `${pascal(id)} (mn)`
   const titleEn = opts.titleEn ?? `${pascal(id)} (en)`
   if (titleMn === titleEn) {
@@ -517,9 +438,7 @@ export function addPage(id, opts) {
     )
   }
 
-  // Escaped, because these strings are being written INTO TypeScript source as single-quoted
-  // literals. An apostrophe is ordinary in English copy ("Mongolia's story") and would otherwise
-  // close the literal early and leave `pages.config.ts` unparseable.
+  // Escaped: these go into single-quoted TypeScript strings, and copy often has apostrophes.
   const q = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   const entry = `  {
     id: '${id}',
@@ -536,8 +455,7 @@ export function addPage(id, opts) {
   if (close === -1) throw new Error(`${rel}: cannot find the end of the \`pages\` array.`)
   writeFileSync(join(root, rel), text.slice(0, close) + entry + text.slice(close))
 
-  // `placeholders` drives the next-steps output: text nobody chose is text nobody should ship, so
-  // the caller leads with "replace this" only when it actually wrote a placeholder.
+  // `placeholders` tells the caller to say "replace this" in the next steps.
   const placeholders = !opts.titleMn || !opts.titleEn || !opts.descMn || !opts.descEn
   return { rel, path, blocks, placeholders, formatted: formatFiles(root, [rel]) }
 }
