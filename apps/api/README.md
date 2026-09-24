@@ -211,24 +211,35 @@ there — and a panel that keeps its access token in memory refreshes once per t
 reload, which a five-request budget turned into a trip back to the login form after an ordinary
 morning's work.
 
-Login also backs off per email, which per-client limiting alone cannot do: from the fifth failure
-that address is refused for a minute, doubling with each further failure up to fifteen. An attacker
-who spreads guesses across many client addresses walks past the per-client limit untouched, because
-every address is a fresh bucket to it; what holds them back is that lock on the account they are
-guessing at, which counts failures however many addresses they arrived from. It is a bound rather
-than a wall: guesses already in flight when the lock lands still get an answer, so a burst of
-twenty costs twenty guesses before the address goes quiet for the window. Both limits answer with
-the same 429. `POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it
-would leave someone stuck in a session they are trying to end.
+Login also backs off per email, which the per-client limit alone cannot do: that limit counts
+requests and does not care what they are for, so from the fifth failed login the email is refused
+for a minute, doubling with each further failure up to fifteen. It is a bound rather than a wall:
+guesses already in flight when the lock lands still get an answer, so a burst of twenty costs twenty
+guesses before it goes quiet for the window. Both limits answer with the same 429.
+`POST /api/auth/logout` is not limited: it is nothing to guess at, and throttling it would leave
+someone stuck in a session they are trying to end.
 
-A successful login clears that account's counter, so the doubling starts from nothing next time. So
-does half an hour of quiet: a failure older than 30 minutes no longer counts towards the curve, and
-the next one starts the count again at one. Both halves matter. Without the decay the count only
-ever grew, so an address past nine failures sat at the fifteen-minute cap forever and one request
-every quarter hour was enough to keep a known admin email locked out permanently — an availability
-problem handed to anyone who knows the address. An admin who mistyped their password five times
-should wait out the window and log in again rather than go editing `login_attempts` by hand. The row
-clears itself the moment they get in.
+That counter belongs to an email and a client address together, not to the email on its own. A lock
+covering the whole account would be a denial of service against anyone whose address is known:
+telling the real admin from a stranger means checking the password, and refusing to check it is what
+the lock is, so one failed login every quarter hour would keep the admin off the panel indefinitely.
+Keyed per source, a stranger hammering your address locks out their own machine and you sign in
+normally from anywhere else. What that gives up is a backoff spanning many source addresses. An
+attacker spread across a thousand of them pays it a thousand times over rather than once, and that
+is the same property as the denial of service, so it could not be kept. The per-client limit still
+covers each of those addresses.
+
+One case remains: someone sharing a source address with you, on office NAT or a shared VPN, or
+behind a proxy where `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, which makes every request
+look like it came from the proxy. They can still lock that address out.
+
+A successful login clears the counter for the address it came from, so the doubling starts from
+nothing next time. So does ten minutes of quiet: a failure older than that no longer counts towards
+the curve, and the next one starts the count again at one. Ten is shorter than the fifteen-minute
+cap on purpose, which is what lets a source that served a full-length lock climb back down instead
+of re-locking forever. An admin who mistyped their password five times should wait out the window
+and log in again rather than go editing `login_attempts` by hand. The row clears itself the moment
+they get in.
 
 **Set `TRUSTED_PROXIES` if you deploy behind a load balancer**, together with `PROXY_HEADER`. Every
 limit above is keyed on the client address, and `PROXY_HEADER` alone used to mean the service
