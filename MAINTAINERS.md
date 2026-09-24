@@ -482,35 +482,63 @@ this endpoint the way there is at login. (Calling `loginLimiter()` twice would n
 bucket either — each call builds its own `limiter.New` with its own storage — but two names say what
 one name used twice did not.)
 
-Per client is not the whole of it: spread across a thousand addresses, that allowance is five
-thousand guesses at one account. `login_attempts` adds backoff per email on top, in
-`internal/service/auth`. `Login` reads the row before `GetAdminByEmail`, `noteFailure` writes one on
-both credential-failure branches, and from the fifth failure the email is refused for a minute,
-doubling with each further failure to a fifteen-minute cap (`lockDuration`). A refused email gets
-the same `rate limited` 429 the limiter returns, so a client needs one case rather than two.
+Per client is not the whole of it. The limiter counts requests; it does not care what they are for,
+so five per window is five guesses at the admin password as readily as five contact submissions.
+`login_attempts` adds a backoff on top, in `internal/service/auth`, that counts failures against one
+email from one source. `Login` reads the row before `GetAdminByEmail`, `noteFailure` writes one on
+both credential-failure branches, and from the fifth failure that pair is refused for a minute,
+doubling with each further failure to a fifteen-minute cap (`lockDuration`). A refused attempt gets
+the same `rate limited` 429 the limiter returns, so a client needs one case rather than two. An
+attacker spread across a thousand source addresses is charged the backoff a thousand times over
+rather than once, which is a real weakening compared with a lock that spanned the account, and the
+reason it is not optional is below.
 
 Four things about that shape are load bearing. The read happens before the account lookup and does
 not depend on the account existing, and the write happens on **both** failure branches, so a row
 exists for an unregistered email too — otherwise the presence of a lockout would prove an account
 exists, which is exactly the leak `dummyPasswordHash` closes on the timing side. Both branches also
 still cost one bcrypt each, for the same reason. The early return for a refused email is fast, and
-that is fine rather than an oracle: it is keyed on an email the caller themselves just failed
-against five times, so it tells them only about their own attempts, and adding a bcrypt call to
-"match timing" there would be cargo cult. And the curve caps instead of latching, because a
-permanent lock hands anyone who knows the admin's email an indefinite denial of service — an
-authentication problem traded for an availability one.
+that is fine rather than an oracle: it is keyed on an email this caller, from this address, just
+failed against five times, so it tells them only about their own attempts, and adding a bcrypt call
+to "match timing" there would be cargo cult. And the curve caps instead of latching, because a lock
+that never lapses is a denial of service against whoever it names — an authentication problem traded
+for an availability one.
 
-The cap alone did not deliver that last property, and the fourth load-bearing piece is what does.
-`failed_count` only ever grew, so an email past nine failures sat at the fifteen-minute cap
-permanently and every later failure re-locked it for the full window: one request every fifteen
-minutes held a known admin address shut forever, which is a hard lock reached by accumulation
-rather than by design. `RecordLoginFailure` now resets the count to one when the previous failure is
-older than `loginFailureDecay`, thirty minutes, instead of incrementing it. Thirty is deliberately
-longer than the longest lock the curve can set, so nobody waits out a lock and resumes at the same
-count, and holding a lock now costs a sustained rate that the per-IP limiter bounds rather than four
-requests an hour. The window is a timestamp computed in Go and passed as `decay_before`, not an
-interval literal in the SQL, for the same reason the curve is in Go: it is policy, and storage only
-compares.
+The cap alone did not deliver that last property, and no cap could. A lock is a refusal to evaluate
+the password, and evaluating the password is the only way to tell the admin from a stranger, so a
+lock that covers the whole account refuses both. Anyone who knew the address could send one failed
+login each time the lock lapsed, four requests an hour, and keep the admin off the panel for as
+long as they cared to. Decaying the count does not close that either: it raises the rate the
+attacker has to sustain and leaves the address shut most of the time.
+
+So the fourth load-bearing piece is the key. `login_attempts` is keyed on `(email, ip)`, not on
+`email`, and the lock belongs to the source that earned it. A stranger hammering the admin's
+address locks out their own source; the admin signing in from anywhere else never meets a lock. The
+deliberate cost is that the backoff no longer spans source addresses. An attacker spread across
+many of them pays it once per address rather than once in total, and that is the same property as
+the denial of service, so it could not be kept. `loginLimiter` still allows each of those addresses
+only five attempts per fifteen minutes.
+
+The residual is worth naming, because it is not nobody. An attacker who shares a source address
+with the admin can still lock that address out: office NAT, a shared VPN egress, or a deployment
+behind a proxy where `PROXY_HEADER` is set and `TRUSTED_PROXIES` is not, which collapses every
+caller onto the proxy's own address. That case is real and much narrower than an address anyone on
+the internet can shut down.
+
+`ip` is `text` and not `inet` because the key needs a value for "no resolvable client address", and
+`inet` has none. `Login` never writes that value. With no address it skips the lockout entirely, reading
+nothing, recording nothing and locking nothing, for the reason `clientKeyGenerator` gives an
+unresolvable caller a key of their own: one shared bucket for everyone without an address is the
+account-wide lock under another name. The audit rows are written either way.
+
+The decay sits on top of that. `RecordLoginFailure` resets the count to one when the previous
+failure for that pair is older than `loginFailureDecay`, ten minutes, instead of incrementing it.
+Ten is deliberately **shorter** than the fifteen-minute cap, which is the direction that matters: a
+source that served a full-length lock comes back with its count reset and has to climb the curve
+again, rather than re-locking on its next failure forever. A constant assertion beside the two
+values fails the build if the decay is ever raised to or past the cap. The window is a timestamp
+computed in Go and passed as `decay_before`, not an interval literal in the SQL, for the same reason
+the curve is in Go: it is policy, and storage only compares.
 
 The count the window is computed from comes from the row `RecordLoginFailure` returns, not from the
 row `Login` read on the way in, and that is the difference between a working backoff and a

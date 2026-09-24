@@ -435,7 +435,7 @@ sequenceDiagram
 
 | Endpoint | Auth | Limits |
 |---|---|---|
-| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email: from the 5th failure, one minute doubling to a 15-minute cap, decaying after 30 minutes without a failure |
+| `POST /api/auth/login` | none | 5 per 15 minutes per client, and per email and client address together: from the 5th failure, one minute doubling to a 15-minute cap, decaying after 10 minutes without a failure |
 | `POST /api/auth/refresh` | the refresh cookie, plus any `X-Requested-With` | 30 per 15 minutes per client |
 | `POST /api/auth/logout` | the refresh cookie, plus any `X-Requested-With` | none; it reveals nothing and grants nothing |
 | `GET /api/admin/leads` | `Authorization: Bearer <access token>` | `limit` defaults to 50, clamped to 200; `offset` clamped to `MaxInt32` before the int32 conversion |
@@ -454,11 +454,24 @@ Eleven properties of this path are deliberate and easy to undo by accident:
   fifteen-minute cap, answered with the same 429 the limiter returns so a client needs one case
   rather than two. A row is written for every email tried, registered or not: if only real accounts
   were recorded, a lockout would prove an account exists, which is the leak the dummy hash above
-  closes on the timing side. And the curve caps rather than latching, because a permanent lock lets
-  anyone who knows the admin's email deny them access for good. The cap alone did not deliver that:
-  a count that only grew sat at the fifteen-minute maximum forever, so one request every quarter
-  hour was a permanent lockout by accumulation. A failure older than 30 minutes no longer counts,
-  which makes holding the lock cost a sustained rate the per-client limiter already bounds.
+  closes on the timing side.
+- **That backoff is keyed on the email and the client address together, not on the email alone.** A
+  lock covering the whole account is a denial of service against anyone whose address is known, and
+  it cannot be anything else: deciding whether the admin or a stranger is knocking means checking
+  the password, and refusing to check it is what the lock is. One failed login each time the lock
+  lapsed, four an hour, held the address shut and refused the real admin along with the guesses.
+  Per source, a stranger locks out their own source and nobody else. The cost is that the backoff
+  no longer spans source addresses, which is the same property, so it could not be kept; each of
+  those addresses still gets only five attempts per fifteen minutes from the limiter. What remains
+  is an attacker who shares an address with the admin, on office NAT, a shared VPN, or a deployment
+  with `PROXY_HEADER` set and `TRUSTED_PROXIES` empty. They can still lock that address out. A caller with no resolvable
+  address is not counted at all, for the reason the limiter gives such a caller a key of their own:
+  one shared bucket for everyone without an address is the account-wide lock again.
+- **The count decays faster than the lock lasts.** A failure older than `loginFailureDecay`, ten
+  minutes, resets the count to one instead of adding to it. Shorter than the fifteen-minute cap on
+  purpose, so a source that serves a full-length lock comes back at the bottom of the curve instead
+  of re-locking on its next failure indefinitely; a constant assertion fails the build if that
+  relationship is ever inverted.
 - **Access and refresh tokens are not interchangeable.** `token_type` is read back out of the claims
   on every validation, because a refresh token accepted where an access token belongs silently
   extends the session from fifteen minutes to seven days.
@@ -578,6 +591,7 @@ erDiagram
     }
     login_attempts {
         text email PK "as submitted, registered or not"
+        text ip PK "the client address the attempt came from, '' when there is none"
         int failed_count "default 0"
         timestamptz last_failure_at "default now, what the decay and the prune both read"
         timestamptz locked_until "nullable"
@@ -601,16 +615,17 @@ The two auth tables that do point at `admin_users` point at it differently on pu
 admin drops that admin's refresh tokens, because a token for an account that no longer exists is only
 a way to fail. The same delete keeps the audit rows and blanks their `admin_id`, because the record
 of what happened outlives the account it happened to. `login_attempts` joins nothing: it is keyed by
-the email as submitted, so a lockout exists for addresses that were never registered, and the
-presence of one cannot be used to ask whether an account exists.
+the email as submitted and the address the attempt came from, so a lockout exists for emails that
+were never registered, and the presence of one cannot be used to ask whether an account exists.
 
 `refresh_tokens` is the ledger behind token rotation: login and refresh both write it, and refresh
 reads it to decide whether a presented token is still live. `admin_audit_log` is written by those
 two paths and by logout, through `internal/service/audit`, for four events: login success, login
 failure, logout and detected token reuse. `login_attempts` is read and written by `Login` alone:
 it reads the row before it looks the email up, records a failure on both credential-failure
-branches, deletes the row on a successful sign-in, and drops rows whose lock lapsed more than a
-day ago.
+branches, deletes the row for the pair that just signed in, and drops rows whose lock lapsed more
+than a day ago. Every one of those reads and writes names a client address as well as an email, and
+is skipped when there is no address to name.
 
 `leads_created_at_idx` exists because the admin list is newest-first and is the only read path;
 without it that list is a sequential scan plus a sort, invisible at 10 rows and not at 100,000. The
