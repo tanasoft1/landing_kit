@@ -41,21 +41,22 @@ const (
 	// starts. Five matches loginLimiter's per-IP allowance, so neither wall is reached first by
 	// accident.
 	lockAfterFailures = 5
-	// maxLockDuration caps the curve. Backoff, never a permanent lockout: a hard lock means
-	// anyone who knows the admin's email can deny them access indefinitely, which trades an
-	// authentication problem for an availability one.
+	// maxLockDuration caps the curve. Backoff, never a permanent lockout, because a lock is a
+	// refusal to evaluate the password and so refuses the real admin exactly as firmly as it
+	// refuses a guess.
 	maxLockDuration = 15 * time.Minute
-	// loginFailureDecay is how long a failure counts towards the curve. It is what keeps the
-	// sentence above true, and the code did not have it: failed_count only ever grew, so an email
-	// that had failed nine times sat at maxLockDuration permanently and every later failure
-	// re-locked it for the full fifteen minutes. One request every fifteen minutes was enough to
-	// hold a known admin address shut forever -- a hard lock by accumulation, reachable by anyone
-	// who knows the email.
+	// loginFailureDecay is how long a failure counts towards the curve. A failure older than this
+	// resets the count to one instead of adding to it, which is what lets a source climb back down
+	// the curve on its own; without it the count only grew, and anything past nine failures sat at
+	// maxLockDuration for good.
 	//
-	// Thirty minutes is longer than the longest lock the curve can set, so an attacker cannot
-	// simply wait out a lock and resume at the same count. It also means holding the lock costs a
-	// sustained rate rather than four requests an hour, and the per-IP limiter bounds that rate.
-	loginFailureDecay = 30 * time.Minute
+	// It is deliberately SHORTER than maxLockDuration, and the guard below keeps it that way.
+	// Serving a full-length lock has to be enough to decay the count, otherwise whoever earned the
+	// lock can hold it at its cap forever by sending one failure each time it lapses and never
+	// waiting longer than the lock itself. Ten minutes against a fifteen-minute cap leaves five
+	// minutes of margin. The person this recovers is the admin who fumbled their password nine
+	// times from their own laptop.
+	loginFailureDecay = 10 * time.Minute
 	// loginAttemptStale is how old the last failure must be before PruneLoginAttempts deletes the
 	// row. Well past loginFailureDecay, so the prune can never remove a row a live decision would
 	// still have read.
@@ -65,6 +66,16 @@ const (
 	rotationGrace = 30 * time.Second
 )
 
+// This is an assertion, not a value: it fails the build if loginFailureDecay is ever raised to or
+// past maxLockDuration. The subtraction is a compile-time constant, and a negative one does not
+// convert to uint, so the inversion cannot land quietly. It is written as a constant rather than
+// as a test because the property is about two constants and nothing else, and a build that cannot
+// produce the inversion is stronger than a test run that catches it.
+//
+// The extra nanosecond makes equal windows fail too: a decay exactly as long as the longest lock
+// still leaves the count one nanosecond short of resetting, which is the same trap one minute
+// wider would be.
+const _ = uint(maxLockDuration - loginFailureDecay - time.Nanosecond)
 
 // lockDuration is the backoff curve: nothing for the first four failures, then doubling from one
 // minute, capped. failures is the count AFTER the failure being recorded.
