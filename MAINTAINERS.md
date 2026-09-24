@@ -557,6 +557,9 @@ Measured against a server configured with `PROXY_HEADER=X-Forwarded-For` and
 | `203.0.113.9, [2001:db8::50]:443` | `2001:db8::50` |
 | `203.0.113.9, ::ffff:198.51.100.50` | `198.51.100.50` |
 | `203.0.113.9, 2001:db8::7%eth0` | `2001:db8::7` |
+| `203.0.113.9, [2001:db8::50]` | `2001:db8::50` |
+| `203.0.113.9, [fe80::9%25eth0]:8080` | `fe80::9` |
+| `203.0.113.9, 198.51.100.50:abc` | `198.51.100.50` |
 | header absent | the socket peer |
 | `127.0.0.1, 127.0.0.1` (all trusted) | the socket peer |
 

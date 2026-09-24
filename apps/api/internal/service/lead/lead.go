@@ -39,12 +39,13 @@ func (s *Service) Create(ctx context.Context, in Input) error {
 	// *netip.Addr because that is what SQLC generates for the `inet` column with no type override
 	// configured, and it is the better type here anyway since a client address has no mask.
 	//
-	// The nil check is load-bearing, not defensive habit. Postgres rejects an empty string bound
-	// to an inet column with SQLSTATE 22P02, `invalid input syntax for type inet: ""`, verified
-	// against a live server. Fiber's c.IP() returns "" whenever ProxyHeader names a header that
-	// does not arrive (see conf.ServerConfig.ProxyHeader), so passing it straight through turns
-	// every submission behind a misconfigured proxy into a 500 from a SQL error instead of a
-	// stored lead with a blank IP. netip.ParseAddr("") returns an error, so this leaves it NULL.
+	// The nil check is cheap insurance rather than a live guard. Postgres rejects an empty string
+	// bound to an inet column with SQLSTATE 22P02, `invalid input syntax for type inet: ""`,
+	// verified against a live server, so an empty address here would be a 500 from a SQL error
+	// instead of a stored lead. The handler cannot currently produce one: c.IP() falls back to the
+	// socket address when it cannot read one out of ProxyHeader, because EnableIPValidation is on
+	// in cmd/main.go. That is one field in another package away from being false again, and the
+	// cost of surviving it is this branch. netip.ParseAddr("") errors, so this leaves it NULL.
 	var ip *netip.Addr
 	if parsed, err := netip.ParseAddr(in.IP); err == nil {
 		ip = &parsed
